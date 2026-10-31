@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 #include "coro.h"
-#include "snes.h"
+#include "fatal.h"
 
 static Coro *s_current;
 
@@ -32,7 +32,7 @@ static void WINAPI fiber_main(void *p)
 {
     Coro *c = (Coro *)p;
     c->fn(c->arg);
-    snes_fatal("a coroutine returned");
+    nk_fatal("a coroutine returned");
 }
 
 Coro *coro_new(void (*fn)(void *), void *arg, size_t stack)
@@ -43,7 +43,7 @@ Coro *coro_new(void (*fn)(void *), void *arg, size_t stack)
     c->arg = arg;
     c->fiber = CreateFiber(stack, fiber_main, c);
     if (!c->fiber)
-        snes_fatal("no fiber");
+        nk_fatal("no fiber");
     return c;
 }
 
@@ -78,7 +78,7 @@ Coro *coro_self(void) { return &s_self; }
 void coro_entry(Coro *c)
 {
     c->fn(c->arg);
-    snes_fatal("a coroutine returned");
+    nk_fatal("a coroutine returned");
 }
 
 Coro *coro_new(void (*fn)(void *), void *arg, size_t stack)
@@ -90,7 +90,7 @@ Coro *coro_new(void (*fn)(void *), void *arg, size_t stack)
     c->arg = arg;
     c->stack = malloc(stack);
     if (!c->stack)
-        snes_fatal("no coroutine stack");
+        nk_fatal("no coroutine stack");
     top = ((uintptr_t)c->stack + stack) & ~(uintptr_t)15;
     sp = (void **)top;
 #if defined(__aarch64__)

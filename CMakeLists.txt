@@ -8,4 +8,31 @@
 # consoles/snes/CMakeLists.txt describes them.
 cmake_minimum_required(VERSION 3.16)
 project(nativekit VERSION 0.1.0 LANGUAGES C)
+
+if(APPLE)
+  enable_language(OBJC)
+endif()
+if(NOT MSVC)
+  enable_language(ASM)
+endif()
+
+set(NSHVC_HOST "null" CACHE STRING "the host: null, macos, windows, ios, none")
+if(APPLE AND NOT NSHVC_HOST STREQUAL "null")
+  set(_render_default metal)
+elseif(WIN32)
+  set(_render_default gl)
+else()
+  set(_render_default soft)
+endif()
+set(NSHVC_RENDER "${_render_default}" CACHE STRING "the renderer: soft, metal, gl, vulkan")
+option(NSHVC_TESTS "build the tests" OFF)
+option(NSHVC_EXAMPLES "build the examples" OFF)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_EXTENSIONS ON)
+
+# the kit reads the options as NK_HOST and NK_TESTS; they keep nativeshvc's names for its games
+set(NK_HOST ${NSHVC_HOST})
+set(NK_TESTS ${NSHVC_TESTS})
+add_subdirectory(kit)
 add_subdirectory(consoles/snes)

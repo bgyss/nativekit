@@ -44,8 +44,13 @@ depends = ["build:null", "build:macos", "build:null-metal", "build:null-gl", "bu
 [tasks."test:rom"]
 run = "python3 consoles/snes/tests/rom/run.py"
 
+[tasks."test:consumer"]
+description = "A game as games use it: its own project, the repo root added as a subdirectory"
+run = "cmake -S consoles/snes/tests/consumer -B build/consumer -DNATIVESHVC=$PWD && cmake --build build/consumer -j8 && build/consumer/consumer --headless --frames 5"
+
 [tasks.test]
-description = "The full check set"
+description = "The full check set, and the consumer"
+depends = ["test:consumer"]
 run = "sh tools/check.sh"
 
 [tasks."golden:record"]

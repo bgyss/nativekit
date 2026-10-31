@@ -17,7 +17,7 @@ set_target_properties(replay PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_
 
 add_executable(input unit/input.c)
 target_link_libraries(input PRIVATE nshvc)
-target_include_directories(input PRIVATE ${NSHVC_DIR}/src/front ${NSHVC_DIR}/src/host)
+target_include_directories(input PRIVATE ${NSHVC_DIR}/src/front ${NK_INCLUDE})
 set_target_properties(input PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 add_executable(ipl unit/ipl.c)
 target_link_libraries(ipl PRIVATE nshvc)
@@ -34,7 +34,7 @@ set_target_properties(waits PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_D
 
 
 add_executable(overlay_check unit/overlay_check.c)
-target_include_directories(overlay_check PRIVATE ${NSHVC_DIR}/src/render ${NSHVC_DIR}/src/host)
+target_include_directories(overlay_check PRIVATE ${NSHVC_DIR}/src/render ${NK_INCLUDE})
 target_link_libraries(overlay_check PRIVATE nshvc)
 set_target_properties(overlay_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
@@ -61,8 +61,8 @@ add_executable(key_events dsp/key_events.c ${NSHVC_DIR}/src/dsp/mixer.c ${NSHVC_
 target_include_directories(key_events PRIVATE ${NSHVC_DIR}/src/dsp)
 set_target_properties(key_events PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
-add_executable(resample_check dsp/resample_check.c ${NSHVC_DIR}/src/dsp/resample.c)
-target_include_directories(resample_check PRIVATE ${NSHVC_DIR}/src/dsp)
+add_executable(resample_check dsp/resample_check.c $<TARGET_OBJECTS:nk_resample>)
+target_include_directories(resample_check PRIVATE ${NK_INCLUDE})
 target_link_libraries(resample_check PRIVATE $<$<NOT:$<PLATFORM_ID:Windows>>:m>)
 set_target_properties(resample_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 

@@ -17,90 +17,44 @@ endif()
 project(nativeshvc VERSION 2.1.0 LANGUAGES C)
 set(NSHVC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-if(APPLE)
-  enable_language(OBJC)
-endif()
-if(NOT MSVC)
-  enable_language(ASM)
-endif()
-
-set(NSHVC_HOST "null" CACHE STRING "the host: null, macos, windows, ios, none")
-if(APPLE AND NOT NSHVC_HOST STREQUAL "null")
-  set(_render_default metal)
-elseif(WIN32)
-  set(_render_default gl)
-else()
-  set(_render_default soft)
-endif()
-set(NSHVC_RENDER "${_render_default}" CACHE STRING "the renderer: soft, metal, gl, vulkan")
-option(NSHVC_TESTS "build the tests" OFF)
-option(NSHVC_EXAMPLES "build the examples" OFF)
-
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_EXTENSIONS ON)
-
 add_library(nshvc STATIC
   src/console/bus.c
   src/console/dma.c
   src/console/ports.c
   src/console/apu.c
-  src/console/coro.c
   src/console/dispatch.c
   src/ppu/ppu.c
   src/dsp/mixer.c
   src/dsp/mixer_regs.c
-  src/dsp/resample.c
   src/front/console.c
   src/front/input.c
   src/front/script.c)
 
 target_include_directories(nshvc
   PUBLIC include
-  PRIVATE include/nshvc src/console src/ppu src/dsp src/front src/host src/render)
+  PRIVATE include/nshvc src/console src/ppu src/dsp src/front src/render ${NK_INCLUDE})
 if(NOT MSVC)
   target_compile_options(nshvc PRIVATE -Wall -fno-strict-aliasing -ffp-contract=off)
 endif()
 
-# the coroutines' switch (on Apple's platforms the architecture the build
-# targets, CMAKE_OSX_ARCHITECTURES, when one is named)
-if(NOT WIN32)
-  set(_arch "${CMAKE_SYSTEM_PROCESSOR}")
-  if(CMAKE_OSX_ARCHITECTURES)
-    set(_arch "${CMAKE_OSX_ARCHITECTURES}")
-  endif()
-  if(_arch MATCHES "arm64|aarch64|ARM64")
-    target_sources(nshvc PRIVATE src/console/coro_arm64.S)
-  elseif(_arch MATCHES "x86_64|AMD64|amd64")
-    target_sources(nshvc PRIVATE src/console/coro_x86_64.S)
-  else()
-    message(FATAL_ERROR "nativeshvc: no coroutine switch for ${_arch} (one architecture a build)")
-  endif()
-endif()
-
-# time and files
+# the kit's coroutines, resampler, time, files and host (kit/CMakeLists.txt)
+target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_host>)
 if(WIN32)
-  target_sources(nshvc PRIVATE src/host/win32/host_win32.c)
   target_link_libraries(nshvc PUBLIC winmm)
-elseif(NOT NSHVC_HOST STREQUAL "none")
-  target_sources(nshvc PRIVATE src/host/posix/host_posix.c)
 endif()
 
 # the host
 if(NSHVC_HOST STREQUAL "null")
-  target_sources(nshvc PRIVATE src/host/null/host_null.c)
+  # nothing to link
 elseif(NSHVC_HOST STREQUAL "macos")
-  target_sources(nshvc PRIVATE src/host/macos/host_macos.m)
-  set_source_files_properties(src/host/macos/host_macos.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_link_libraries(nshvc PUBLIC "-framework Cocoa" "-framework QuartzCore" "-framework AudioToolbox"
     "-framework CoreAudio" "-framework GameController")
 elseif(NSHVC_HOST STREQUAL "ios")
-  target_sources(nshvc PRIVATE src/host/ios/host_ios.m)
+  target_sources(nshvc PRIVATE src/front/ios_main.c)
   target_compile_definitions(nshvc PUBLIC NSHVC_HOST_IOS=1)
-  set_source_files_properties(src/host/ios/host_ios.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_link_libraries(nshvc PUBLIC "-framework UIKit" "-framework CoreGraphics" "-framework QuartzCore"
     "-framework AudioToolbox" "-framework AVFoundation" "-framework GameController")
 elseif(NSHVC_HOST STREQUAL "windows")
-  target_sources(nshvc PRIVATE src/host/windows/host_windows.c)
   target_link_libraries(nshvc PUBLIC ole32 uuid xinput9_1_0 shell32 gdi32 user32)
 elseif(NOT NSHVC_HOST STREQUAL "none")
   message(FATAL_ERROR "nativeshvc: no host ${NSHVC_HOST}")

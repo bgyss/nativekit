@@ -27,6 +27,7 @@
 #include "snes_internal.h"
 #include "nshvc/cart.h"
 #include "coro.h"
+#include "fatal.h"
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
@@ -151,6 +152,18 @@ static unsigned interrupts_taken;            /* every one taken: a wait's look a
 static uint32_t dbg_last_read;                /* for NSHVC_DEBUG */
 
 void snes_fatal(const char *fmt, ...)
+{
+    va_list ap;
+    fprintf(stderr, "nativeshvc: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n");
+    exit(70);
+}
+
+/* the kit's fatal errors (kit/include/nk/fatal.h): the console's own */
+void nk_fatal(const char *fmt, ...)
 {
     va_list ap;
     fprintf(stderr, "nativeshvc: ");

@@ -3,8 +3,8 @@
  * The counterpart of host/macos/host_macos.m; host/posix under it supplies
  * time and files.
  *
- * UIKit keeps the main thread, so the game's main (nshvc_game_main: the
- * game writes NSHVC_MAIN) runs its own loop on a thread of its own, started
+ * UIKit keeps the main thread, so the game's main (nk_game_main: the
+ * console's main macro) runs its own loop on a thread of its own, started
  * when the scene first becomes active. What UIKit reports reaches that
  * thread through a locked event queue that host_poll_event drains. When the
  * app leaves the foreground, the game thread is held inside
@@ -39,9 +39,9 @@
 
 #include "host.h"
 
-/* the game's main (nshvc.h NSHVC_MAIN: on iOS the host keeps main and runs
-   the game's on a thread of its own) */
-int nshvc_game_main(int argc, char **argv);
+/* the game's main (the console's main macro: on iOS the host keeps the process's main
+   and runs the game's, nk_game_main, on a thread of its own) */
+int nk_game_main(int argc, char **argv);
 static void host_audio_resume(void);
 
 static char s_save[1024];
@@ -174,7 +174,7 @@ static void kb_event(long u, int down)
 }
 
 /* ---- touch: every touch to the game (HOST_EV_TOUCH), in points ------------------- */
-/* What a touch means is the game's (nshvc_hooks.touch): the host only says
+/* What a touch means is the game's (the console's touch hook): the host only says
    where each finger is, as it lands, moves and lifts. A touch's id is
    small and stays its own while it lasts. */
 static _Atomic float s_safe[4];             /* the view's safe area: left, top, right, bottom */
@@ -382,7 +382,7 @@ static void *game_thread(void *p)
     static char name[] = "game";
     char *argv[] = { name, NULL };
     (void)p;
-    exit(nshvc_game_main(1, argv));
+    exit(nk_game_main(1, argv));
 }
 
 static void app_active(void)

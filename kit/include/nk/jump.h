@@ -3,8 +3,8 @@
  * program's), with no unwinding and no signal mask: GCC's builtin pair on
  * x86-64 (Windows's longjmp unwinds), else _setjmp/_longjmp. Not clang's
  * builtin pair: its __builtin_setjmp keeps the frame pointer in a stack
- * slot the function's own spills may reuse (seen in spc_main on x86-64
- * macOS), and the jump back then restores another value.
+ * slot the function's own spills may reuse (seen in a coroutine's main loop on
+ * x86-64 macOS), and the jump back then restores another value.
  */
 #ifndef PORT_JUMP_H
 #define PORT_JUMP_H

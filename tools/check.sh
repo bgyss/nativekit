@@ -25,6 +25,8 @@ r python3 consoles/snes/tests/rom/ext_check.py
 r python3 consoles/snes/tests/dsp/fuzz.py 1 2 3 4
 r python3 consoles/snes/tests/dsp/keys.py
 r build/null/tests/resample_check
+r build/null/kit/tests/kit_coro_check
+x build/null/kit/tests/kit_fatal_check
 r python3 consoles/snes/tests/tools/profile_check.py
 r build/null/tests/input
 r python3 consoles/snes/tests/unit/states.py
