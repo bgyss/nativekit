@@ -28,6 +28,7 @@ r build/null/tests/resample_check
 r build/null/kit/tests/kit_coro_check
 r build/null/kit/tests/kit_routines_check
 x build/null/kit/tests/kit_fatal_check
+r python3 kit/tests/profile_lib_check.py
 r python3 consoles/snes/tests/tools/profile_check.py
 r build/null/tests/input
 r python3 consoles/snes/tests/unit/states.py
