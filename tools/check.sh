@@ -11,6 +11,13 @@ unset LIBRARY_PATH
 export NSHVC_ASAR NSHVC_ORACLE_CORE
 fails=0
 mkdir -p build
+# A check whose binary is not built is a failure, unless NSHVC_SKIP_MISSING=1,
+# which skips it with a loud line.
+need() {
+    [ -x "$1" ] && return 0
+    if [ "${NSHVC_SKIP_MISSING:-}" = 1 ]; then echo "##### SKIPPED (not built): $1"; else echo "##### FAIL: $1 is not built (set NSHVC_SKIP_MISSING=1 to skip)"; fails=$((fails+1)); fi
+    return 1
+}
 log=build/check.last
 r() { echo "### $*"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 0 ] || fails=$((fails+1)); }
 x() { echo "### $* (expect exit 70)"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 70 ] || fails=$((fails+1)); }
@@ -21,18 +28,7 @@ r build/null/tests/resample_check
 r python3 tests/tools/profile_check.py
 r build/null/tests/input
 r python3 tests/unit/states.py
-# pointer_macos moves a real window's pointer and fails now and then (about 1 run in 4,
-# with or without nix) when the window manager's timing slips: retried up to 3 times.
-if [ -x build/macos/tests/pointer_macos ]; then
-  n=0
-  while :; do
-    n=$((n+1)); f=$fails
-    r build/macos/tests/pointer_macos
-    [ "$fails" -eq "$f" ] && break
-    [ $n -ge 3 ] && break
-    fails=$f
-  done
-fi
+if [ "$(uname -s)" = Darwin ]; then need build/macos/tests/pointer_macos && r build/macos/tests/pointer_macos; fi
 r build/null/tests/vram_direct
 x build/null/tests/vram_direct --copy0
 x build/null/tests/vram_direct --direct0
@@ -51,7 +47,7 @@ r build/null/tests/canvas_check
 r build/null/tests/screen_check
 r build/null/tests/present_check
 for g in metal gl vulkan; do
-  if [ -x build/null-$g/tests/overlay_check ]; then RR_SIZE=1100x800 r build/null-$g/tests/overlay_check; else echo "### overlay_check $g: not built"; fi
+  need build/null-$g/tests/overlay_check && RR_SIZE=1100x800 r build/null-$g/tests/overlay_check
 done
 echo "$fails check(s) failed"
 [ "$fails" -eq 0 ]

@@ -49,7 +49,8 @@ static const struct { double u, v; int on; } places[] = {
     { 0.25, 0.75, 1 }, { 0.5, -0.05, 0 },
 };
 #define PLACES (int)(sizeof places / sizeof places[0])
-static int frame, place, fails, settle;
+static int frame, place, fails, settle, still;
+static NSSize posted, last;
 
 static void post_move(NSWindow *w, double x, double y)
 {
@@ -68,8 +69,24 @@ static void on_frame(void)
     frame++;
     if (!w || frame < 30)
         return;
+    /* the window is still being laid out (sized, moved to its screen) for a
+       while after it opens: begin once its size has held for 30 frames, and
+       aim again if it changes between aiming and reading */
+    {
+        NSSize cur = [[w contentView] bounds].size;
+        still = cur.width == last.width && cur.height == last.height ? still + 1 : 0;
+        last = cur;
+        if (still < 30 && settle == 0)
+            return;
+        if (settle && (cur.width != posted.width || cur.height != posted.height)) {
+            settle = 0;
+            still = 0;
+            return;
+        }
+    }
     if (settle == 0) {
         NSSize s = [[w contentView] bounds].size;
+        posted = s;
         double pw = s.width, ph = s.height, x, y;
         if (pw / ph > 4.0 / 3.0)
             pw = ph * 4.0 / 3.0;
