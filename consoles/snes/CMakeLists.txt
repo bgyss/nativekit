@@ -38,7 +38,7 @@ if(NOT MSVC)
 endif()
 
 # the kit's coroutines, resampler, time, files and host (kit/CMakeLists.txt)
-target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_host>)
+target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> $<TARGET_OBJECTS:nk_host>)
 if(WIN32)
   target_link_libraries(nshvc PUBLIC winmm)
 endif()

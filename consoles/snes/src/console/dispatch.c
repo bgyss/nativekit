@@ -31,8 +31,11 @@
 #include "nshvc/spc.h"
 #include "snes_internal.h"
 #include "nshvc/cart.h"
+#include <stddef.h>
+
 #include "coro.h"
 #include "jump.h"
+#include "routines.h"
 
 Regs65816 cpu;
 
@@ -42,20 +45,13 @@ static Coro *cpu_co, *host_co;
 static int powered;
 static void (*user_frame_hook)(void);
 
+/* the table's first member is its address (kit/include/nk/routines.h) */
+_Static_assert(offsetof(nshvc_routine, addr) == 0, "nshvc_routine's address first");
+
 static const nshvc_routine *find(uint32_t addr)
 {
-    int lo = 0, hi = snes_cart.routine_count - 1;
-    addr &= 0xFFFFFF;
-    while (lo <= hi) {
-        int mid = (lo + hi) / 2;
-        if (snes_cart.routines[mid].addr == addr)
-            return &snes_cart.routines[mid];
-        if (snes_cart.routines[mid].addr < addr)
-            lo = mid + 1;
-        else
-            hi = mid - 1;
-    }
-    return NULL;
+    return (const nshvc_routine *)nk_routine_find(snes_cart.routines, snes_cart.routine_count,
+                                                  sizeof *snes_cart.routines, addr & 0xFFFFFF);
 }
 
 /* the connector's (cart.h): a chip's way to the cartridge's routines */

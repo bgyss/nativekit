@@ -31,6 +31,9 @@ endif()
 
 add_library(nk_resample OBJECT ${NK_DIR}/src/dsp/resample.c)
 
+# the routine table's lookup
+add_library(nk_dispatch OBJECT ${NK_DIR}/src/dispatch/routines.c)
+
 # time, files and the host
 add_library(nk_host OBJECT)
 if(WIN32)
@@ -52,7 +55,7 @@ elseif(NOT NK_HOST STREQUAL "none")
   message(FATAL_ERROR "nativekit: no host ${NK_HOST}")
 endif()
 
-foreach(t nk_coro nk_resample nk_host)
+foreach(t nk_coro nk_resample nk_dispatch nk_host)
   target_include_directories(${t} PRIVATE ${NK_INCLUDE})
   if(NK_C_FLAGS)
     target_compile_options(${t} PRIVATE ${NK_C_FLAGS})
