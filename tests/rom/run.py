@@ -53,14 +53,9 @@ def compare(a, b):
     return bad, first
 
 
-def run_one(t):
-    d = os.path.join(OUT, t.name)
-    os.makedirs(d, exist_ok=True)
-    rom = t.build(d)
-    od, nd = os.path.join(d, "oracle"), os.path.join(d, "native")
-    os.makedirs(od, exist_ok=True)
-    os.makedirs(nd, exist_ok=True)
-    script = os.path.join(d, "script.txt")
+def write_script(t, script):
+    """the controllers' steps, shots and the final dump, the same script on
+       the reference and on nativeshvc"""
     with open(script, "w") as f:
         if t.inputs:
             # the controllers' steps before each frame, the same script on both
@@ -80,6 +75,17 @@ def run_one(t):
             if t.frames > at:
                 f.write("wait %d\n" % (t.frames - at))
         f.write("dump end\n")
+
+
+def run_one(t):
+    d = os.path.join(OUT, t.name)
+    os.makedirs(d, exist_ok=True)
+    rom = t.build(d)
+    od, nd = os.path.join(d, "oracle"), os.path.join(d, "native")
+    os.makedirs(od, exist_ok=True)
+    os.makedirs(nd, exist_ok=True)
+    script = os.path.join(d, "script.txt")
+    write_script(t, script)
     log = os.path.join(od, "cpu.log")
     if t.inputs:
         cmd = [ORACLE, "--core", CORE, "--rom", rom, "--script", script, "--out", od, "--cpulog", log]
