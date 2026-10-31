@@ -21,7 +21,18 @@ r build/null/tests/resample_check
 r python3 tests/tools/profile_check.py
 r build/null/tests/input
 r python3 tests/unit/states.py
-if [ -x build/macos/tests/pointer_macos ]; then r build/macos/tests/pointer_macos; fi
+# pointer_macos moves a real window's pointer and fails now and then (about 1 run in 4,
+# with or without nix) when the window manager's timing slips: retried up to 3 times.
+if [ -x build/macos/tests/pointer_macos ]; then
+  n=0
+  while :; do
+    n=$((n+1)); f=$fails
+    r build/macos/tests/pointer_macos
+    [ "$fails" -eq "$f" ] && break
+    [ $n -ge 3 ] && break
+    fails=$f
+  done
+fi
 r build/null/tests/vram_direct
 x build/null/tests/vram_direct --copy0
 x build/null/tests/vram_direct --direct0

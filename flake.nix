@@ -5,7 +5,7 @@
 
   outputs = { self, nixpkgs }:
     let
-      systems = [ "aarch64-darwin" "x86_64-darwin" "x86_64-linux" "aarch64-linux" ];
+      systems = [ "aarch64-darwin" "x86_64-linux" "aarch64-linux" ];
       forAll = f: nixpkgs.lib.genAttrs systems (s: f s nixpkgs.legacyPackages.${s});
     in {
       devShells = forAll (system: pkgs:
@@ -13,7 +13,7 @@
           inherit (pkgs) lib stdenv;
           darwin = stdenv.hostPlatform.isDarwin;
           linuxLibs = with pkgs; [
-            xorg.libX11 xorg.libXext xorg.libXrandr xorg.libXi xorg.libXcursor
+            libx11 libxext libxrandr libxi libxcursor
             libGL libGLU vulkan-loader alsa-lib
           ];
         in {
@@ -30,7 +30,10 @@
             shellHook =
               if darwin then ''
                 export CC=/usr/bin/cc CXX=/usr/bin/c++
-                unset LIBRARY_PATH
+                unset LIBRARY_PATH MACOSX_DEPLOYMENT_TARGET
+                # the MinGW wrappers' setup hooks export their binutils as LD, AR, AS, ...;
+                # the native builds must not see them (mise build:win names them explicitly)
+                unset LD AR AS NM RANLIB STRIP OBJCOPY OBJDUMP READELF SIZE STRINGS RC WINDRES
                 export CMAKE_PREFIX_PATH="${pkgs.vulkan-headers}:${pkgs.vulkan-loader}:${pkgs.moltenvk}''${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
                 export VK_ICD_FILENAMES="${pkgs.moltenvk}/share/vulkan/icd.d/MoltenVK_icd.json"
                 export VK_DRIVER_FILES="$VK_ICD_FILENAMES"
