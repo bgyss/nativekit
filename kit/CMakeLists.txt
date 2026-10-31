@@ -37,6 +37,9 @@ add_library(nk_dispatch OBJECT ${NK_DIR}/src/dispatch/routines.c)
 # the front: the console's settings, the battery save, the headless script
 add_library(nk_front OBJECT ${NK_DIR}/src/front/env.c ${NK_DIR}/src/front/save.c ${NK_DIR}/src/front/script.c)
 
+# the players' native devices (it reads the host's game controllers)
+add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
+
 # time, files and the host
 add_library(nk_host OBJECT)
 if(WIN32)
@@ -58,7 +61,7 @@ elseif(NOT NK_HOST STREQUAL "none")
   message(FATAL_ERROR "nativekit: no host ${NK_HOST}")
 endif()
 
-foreach(t nk_coro nk_resample nk_dispatch nk_host nk_front)
+foreach(t nk_coro nk_resample nk_dispatch nk_host nk_front nk_input)
   target_include_directories(${t} PRIVATE ${NK_INCLUDE})
   if(NK_C_FLAGS)
     target_compile_options(${t} PRIVATE ${NK_C_FLAGS})

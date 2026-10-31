@@ -499,7 +499,8 @@ device does: the latch, a clock with each read, two data lines back, and the IOB
 (the multitap's pair, port 2's light guns latching the counters where they point). The
 joypads' automatic read steps through its 16 bits on the CPU's own 128-clock counter.
 
-The player's own devices drive them, natively ([`src/front/input.c`](src/front/input.c)).
+The player's own devices drive them, natively ([`src/front/snes_input.c`](src/front/snes_input.c), over the kit's
+[`kit/src/front/input.c`](../../kit/src/front/input.c)).
 The players are the devices in port order, each one player and a multitap four, port 1's
 first. Player 0 has the keyboard and the first game controller, player N the (N+1)th
 controller; a mouse in a port takes the mouse's motion and buttons; a light gun aims where

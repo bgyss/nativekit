@@ -29,6 +29,7 @@ r build/null/kit/tests/kit_coro_check
 r build/null/kit/tests/kit_routines_check
 x build/null/kit/tests/kit_fatal_check
 r build/null/kit/tests/kit_env_check
+r build/null/kit/tests/kit_input_check
 r build/null/kit/tests/kit_save_check
 x build/null/kit/tests/kit_save_check --past
 r python3 kit/tests/states_check.py build/null/kit/tests/kit_stub_console

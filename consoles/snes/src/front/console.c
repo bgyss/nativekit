@@ -9,7 +9,7 @@
  * 0.5% to keep 50 ms buffered.
  *
  * The controls: the keyboard, game controllers, the mouse and touches,
- * onto whatever is plugged into the controller ports (input.c).
+ * onto whatever is plugged into the controller ports (snes_input.c).
  *
  * The save is the cartridge's battery RAM, kept in the host's save folder
  * as SAVE_NAME.srm and written when it changes. A headless run (a test)
@@ -31,7 +31,8 @@
 #include "script.h"
 #include "env.h"
 #include "snes_console.h"
-#include "input.h"
+#include "nk/input.h"
+#include "snes_input.h"
 
 /* ---- the public calls ---- */
 const uint32_t *nshvc_picture(int *width, int *height) { return ppu_picture(width, height); }
@@ -531,7 +532,7 @@ int console_picture_at(float x, float y, int *dot, int *line)
     nshvc_window_size(&ww, &wh);
     if (!shown_tw || ww <= 0)
         return 0;
-    return input_point(shown_at, (float)shown_tw / ww, f->width, f->screen_height, f->left, f->top, x, y, dot, line);
+    return nk_input_point(shown_at, (float)shown_tw / ww, f->width, f->screen_height, f->left, f->top, x, y, dot, line);
 }
 
 /* the frame as large as the window holds, centred, sharp bilinear: the
@@ -806,8 +807,8 @@ static void frame(void)
         more = nk_script_frame(&b0, &b1);
         nshvc_set_joypad(0, (uint16_t)(b0 | game_buttons[0]));
         nshvc_set_joypad(1, (uint16_t)(b1 | game_buttons[1]));
-        input_script();
-        input_report(hooks.input);
+        nk_input_script();
+        snes_input_report(hooks.input);
         if (hooks.frame)
             hooks.frame();
         if ((max_frames >= 0 && frame_no >= max_frames) || (!more && nk_script_steps() && max_frames < 0))
@@ -832,12 +833,14 @@ static void frame(void)
         host_event e;
         while (host_poll_event(&e, 0)) {
             if (e.type == HOST_EV_KEY) {
-                if (!(hooks.key && hooks.key(e.vk, e.down)))
-                    input_key(e.vk, e.down);
+                if (!(hooks.key && hooks.key(e.vk, e.down))) {
+                    snes_input_key(e.vk, e.down);
+                    nk_input_key(e.vk, e.down);
+                }
             } else if (e.type == HOST_EV_MOUSE) {
-                input_mouse(e.x, e.y, e.dx, e.dy, e.buttons);
+                nk_input_mouse(e.x, e.y, e.dx, e.dy, e.buttons);
             } else if (e.type == HOST_EV_TOUCH) {
-                input_touch(e.id, e.phase, e.x, e.y);
+                nk_input_touch(e.id, e.phase, e.x, e.y);
                 if (hooks.touch) {
                     nshvc_touch t;
                     t.id = e.id;
@@ -849,11 +852,11 @@ static void frame(void)
             } else if (e.type == HOST_EV_CLOSE)
                 quit();
             else if (e.type == HOST_EV_FOCUS && !e.down)
-                input_focus_lost();
+                nk_input_focus_lost();
         }
     }
-    input_frame(game_buttons);
-    input_report(hooks.input);
+    snes_input_frame(NULL, NULL, game_buttons);
+    snes_input_report(hooks.input);
     if (frame_no % 120 == 0)
         save_write();
     if (hooks.frame)
