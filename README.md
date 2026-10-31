@@ -164,6 +164,11 @@ CMake, C11, no dependencies for the core:
 cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
 ```
 
+To get the toolchain without Homebrew, `nix develop` (or direnv, with the `.envrc`) gives
+the compilers and tools. `mise run tools` builds asar and the pinned reference core the
+tests compare against; `mise run build` builds every configuration and `mise run test`
+runs the checks.
+
 `NSHVC_HOST` picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
 `NSHVC_RENDER` the renderer (`soft`, `metal`, `gl` or `vulkan`). `NSHVC_TESTS` and
 `NSHVC_EXAMPLES` build the tests and the examples. For iOS, add

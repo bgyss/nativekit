@@ -38,16 +38,18 @@ cmake -S . -B build/null -DNSHVC_TESTS=ON -DNSHVC_EXAMPLES=ON && cmake --build b
 
 `rom/run.py` needs the reference core and the assembler:
 
-- `NSHVC_ORACLE_CORE`: a bsnes libretro core. The reference here is
-  bsnes v115, built from its source with two
-  changes to its libretro front end (none to the console it models): the
-  light guns' inputs passed through (`target-libretro/program.cpp`'s
-  `pollInputDevices` returns nothing for them as shipped), and the libretro
-  target's display gamma set to 1.0, so the core's
-  frames carry the PPU's colours as made (its default gamma of 1.5 cannot be
-  undone at the dark end). Build it into `build/oracle-core` (about 5
-  minutes).
-- `NSHVC_ASAR`: asar.
+- `NSHVC_ORACLE_CORE`: a bsnes libretro core. The reference here is not stock
+  bsnes. It is bsnes at commit 78474e5 (master after v115), plus the sfxbox
+  patch series of stuntracefx at its pinned commit, plus our patch
+  `tools/toolchains/patches/bsnes/0100-nativeshvc-oracle.patch`: the light
+  guns' inputs passed through (`target-libretro/program.cpp`'s
+  `pollInputDevices` returns nothing for them as shipped) and the libretro
+  target's display gamma set to 1.0, so the core's frames carry the PPU's
+  colours as made (its default gamma of 1.5 cannot be undone at the dark
+  end). `tools/toolchains/setup.sh` (or `mise run tools`) fetches the pins
+  and builds it into `build/oracle-core` (about 5 minutes).
+- `NSHVC_ASAR`: asar. The same script builds it, at the pin in
+  `tools/toolchains/pins.env`, to `build/toolchains/asar/asar`.
 
 The core's own options are pinned by `oracle/oracle.c`: accuracy PPU and
 DSP, no overclock, no blur, no randomised power-on state, no hacks.

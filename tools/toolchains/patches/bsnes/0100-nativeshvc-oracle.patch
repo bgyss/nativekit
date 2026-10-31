@@ -1,0 +1,38 @@
+diff --git a/bsnes/target-libretro/program.cpp b/bsnes/target-libretro/program.cpp
+index 9a5b12b..81b4f95 100644
+--- a/bsnes/target-libretro/program.cpp
++++ b/bsnes/target-libretro/program.cpp
+@@ -168,7 +168,7 @@ auto Program::open(uint id, string name, vfs::file::mode mode, bool required) ->
+ auto Program::updateVideoPalette() -> void {
+   double luminance = 100.0 / 100.0;
+   double saturation = 100.0 / 100.0;
+-  double gamma = 150.0 / 100.0;
++  double gamma = 100.0 / 100.0;
+ 
+   uint depth = 24;
+ 
+@@ -402,8 +402,22 @@ auto pollInputDevices(uint port, uint device, uint input) -> int16
+ 			libretro_id = joypad_mapping[input % 12];
+ 			break;
+ 
+-		// TODO: SuperScope/Justifiers.
+-		// Do we care? The v94 port hasn't hooked them up. :)
++		case SuperFamicom::ID::Device::SuperScope:
++			// the light gun's inputs passed through as the core numbers them
++			// (X, Y, Trigger, Cursor, Turbo, Pause)
++			libretro_device = RETRO_DEVICE_LIGHTGUN;
++			libretro_index = 0;
++			libretro_id = input;
++			break;
++
++		case SuperFamicom::ID::Device::Justifier:
++		case SuperFamicom::ID::Device::Justifiers:
++			// (X, Y, Trigger, Start) of the first gun, then of the second;
++			// index 1 for one Justifier, 2 for two chained
++			libretro_device = RETRO_DEVICE_LIGHTGUN;
++			libretro_index = device == SuperFamicom::ID::Device::Justifiers ? 2 : 1;
++			libretro_id = input;
++			break;
+ 
+ 		default:
+ 			return 0;
