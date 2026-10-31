@@ -1,6 +1,6 @@
 /* host.h: what each operating system supplies under a native port.
  *
- * nativeshvc (the console and its front end) is written once, for every
+ * A console (the machine and its front end) is written once, for every
  * OS, against this small interface. Each OS implements only this:
  *
  *   host/posix    time, files (macOS, Linux, iOS)

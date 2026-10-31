@@ -80,6 +80,8 @@ int main(int argc, char **argv)
     if (fread(back, 1, 64, f) != 64 || back[20] != 0x99 || back[2] != 0x55)
         return fprintf(stderr, "save_check: wrong bytes written\n"), 1;
     fclose(f);
+    remove(path);
+    rmdir(dir);
     printf("save_check: ok\n");
     return 0;
 }

@@ -28,7 +28,7 @@ add_library(nshvc STATIC
   src/dsp/mixer_regs.c
   src/front/console.c
   src/front/input.c
-  src/front/script.c)
+  src/front/snes_console.c)
 
 target_include_directories(nshvc
   PUBLIC include
@@ -37,8 +37,10 @@ if(NOT MSVC)
   target_compile_options(nshvc PRIVATE -Wall -fno-strict-aliasing -ffp-contract=off)
 endif()
 
-# the kit's coroutines, resampler, time, files and host (kit/CMakeLists.txt)
-target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> $<TARGET_OBJECTS:nk_host>)
+# the kit's coroutines, resampler, time, files, host, settings, battery save
+# and headless script (kit/CMakeLists.txt)
+target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> $<TARGET_OBJECTS:nk_host>
+  $<TARGET_OBJECTS:nk_front>)
 if(WIN32)
   target_link_libraries(nshvc PUBLIC winmm)
 endif()

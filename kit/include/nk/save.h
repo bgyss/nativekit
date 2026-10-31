@@ -17,7 +17,8 @@ typedef struct {
     uint8_t *ram;          /* the battery-backed RAM as it stands now */
     size_t bytes;          /* its size */
     size_t from, size;     /* the save area within it (size 0: all of it) */
-    const char *name;      /* the save's file name, less ".srm" */
+    const char *name;      /* the save's file name, less ".srm"; never NULL (the
+                              console supplies its fallback) */
 } nk_battery;
 
 /* the save loaded from dir/NAME.srm into the RAM; get() fills b (0: no save) */

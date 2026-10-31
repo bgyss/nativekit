@@ -1,8 +1,8 @@
 /*
  * script.c: a headless run's script (script.h).
  *
- * A machine is never copied or put back: the C under way on the S-CPU's
- * and the SPC700's coroutines is part of it. Where the script needs the
+ * A machine is never copied or put back: the C under way on the console's
+ * processors' coroutines is part of it. Where the script needs the
  * machine as it was (a load), the run forks: the process that holds the machine as
  * it was waits while a child runs on, and goes on itself when the child is
  * done with it.
@@ -11,7 +11,7 @@
  *             that loads a state no process holds comes back here, and a
  *             new child replays the steps that save it to that save: the
  *             script's own up to its `save NAME` when one comes before any
- *             load, else the play in NSHVC_STATES (*.sfx) with `save NAME`
+ *             load, else the play in <prefix>_STATES (*<play_ext>) with `save NAME`
  *   save      the process becomes the holder of NAME: a child goes on with
  *             the script; one that loads NAME ends, and a new child goes on
  *             from the step after that load
@@ -19,7 +19,7 @@
  * A child's end that is not one of these (the script's end, an error) ends
  * every process above it with the same status.
  *
- * Without fork (Windows; NSHVC_SCRIPT_NOFORK=1 elsewhere, to check it), no
+ * Without fork (Windows; <prefix>_SCRIPT_NOFORK=1 elsewhere, to check it), no
  * process holds a machine: where the script needs the machine as it was,
  * the run starts a new copy of the program and ends with its status. The
  * new one rebuilds that machine by replaying, from power-on, the steps that
@@ -47,24 +47,23 @@ extern char **environ;
 #include <windows.h>
 #endif
 
-#include "nshvc/nshvc.h"
-#include "nshvc/cart.h"
-#include "snes_internal.h"
+#include "nk.h"
+#include "env.h"
+#include "fatal.h"
 #include "script.h"
-#include "ppu.h"
 
 enum {
     S_FRAMES,               /* buttons for frames */
     S_SHOT, S_DUMP, S_SAVE, S_LOAD,
-    S_INPUT,                /* plug, pad, mouse, gun: the controller ports from now */
+    S_INPUT,                /* the console's own steps (nk_console.steps) */
 };
 
 typedef struct {
     int kind;
-    uint16_t buttons[2];
+    uint32_t buttons[2];
     long frames;
     char name[128];
-    char *text;             /* the line (plug, pad, mouse, gun) */
+    char *text;             /* the line (the console's own steps) */
     int line;
 } Step;
 
@@ -91,14 +90,18 @@ typedef struct {
 } Shared;
 static Shared *shared;
 
-int script_steps(void) { return main_list.n; }
+static const nk_console *con;
 
-static Step *add_step(List *l, int kind, uint16_t b0, uint16_t b1, long frames, const char *name)
+void nk_script_console(const nk_console *c) { con = c; }
+
+int nk_script_steps(void) { return main_list.n; }
+
+static Step *add_step(List *l, int kind, uint32_t b0, uint32_t b1, long frames, const char *name)
 {
     Step *s;
     l->s = (Step *)realloc(l->s, sizeof *l->s * (size_t)(l->n + 1));
     if (!l->s)
-        nshvc_fatal("no memory for the script");
+        nk_fatal("no memory for the script");
     s = &l->s[l->n++];
     memset(s, 0, sizeof *s);
     s->kind = kind;
@@ -116,23 +119,22 @@ static Step *add_text(List *l, int kind, const char *text, int line)
     s->text = strdup(text);
     s->line = line;
     if (!s->text)
-        nshvc_fatal("no memory for the script");
+        nk_fatal("no memory for the script");
     return s;
 }
 
-static int parse_buttons(const char *t, uint16_t *b0, uint16_t *b1)
+/* the console's buttons (nk_console.buttons) by name, '+' between them;
+   2. before one for player 2 (2.START) */
+static int parse_buttons(const char *t, uint32_t *b0, uint32_t *b1)
 {
-    static const struct { const char *n; uint16_t m; } k[] = {
-        { "B", NSHVC_B }, { "Y", NSHVC_Y }, { "SELECT", NSHVC_SELECT }, { "START", NSHVC_START },
-        { "UP", NSHVC_UP }, { "DOWN", NSHVC_DOWN }, { "LEFT", NSHVC_LEFT }, { "RIGHT", NSHVC_RIGHT },
-        { "A", NSHVC_A }, { "X", NSHVC_X }, { "L", NSHVC_L }, { "R", NSHVC_R },
-    };
+    const nk_button *k = con->buttons;
+    int nk = con->button_count;
     char buf[256], *p, *next;
     *b0 = *b1 = 0;
     snprintf(buf, sizeof buf, "%s", t);
     for (p = buf; p; p = next) {
         int pad = 0;
-        size_t i;
+        int i;
         next = strchr(p, '+');
         if (next)
             *next++ = 0;
@@ -140,17 +142,27 @@ static int parse_buttons(const char *t, uint16_t *b0, uint16_t *b1)
             pad = 1;
             p += 2;
         }
-        for (i = 0; i < sizeof k / sizeof k[0]; i++)
-            if (!strcmp(p, k[i].n))
+        for (i = 0; i < nk; i++)
+            if (!strcmp(p, k[i].name))
                 break;
-        if (i == sizeof k / sizeof k[0])
+        if (i == nk)
             return 0;
         if (pad)
-            *b1 |= k[i].m;
+            *b1 |= k[i].bit;
         else
-            *b0 |= k[i].m;
+            *b0 |= k[i].bit;
     }
     return 1;
+}
+
+/* one of the console's own steps (nk_console.steps) */
+static int own_step(const char *cmd)
+{
+    int i;
+    for (i = 0; i < con->step_count; i++)
+        if (!strcmp(cmd, con->steps[i]))
+            return 1;
+    return 0;
 }
 
 /* the words of a line (at most `max`, each up to 1023 characters) */
@@ -176,7 +188,7 @@ static void script_range(List *l, char **lines, int lo, int hi, const char *path
     int i;
     for (i = lo; i < hi; i++) {
         char cmd[64] = "", a[256] = "", b[64] = "";
-        uint16_t b0, b1;
+        uint32_t b0, b1;
         int n = sscanf(lines[i], "%63s %255s %63s", cmd, a, b);
         if (n < 1)
             continue;
@@ -184,16 +196,16 @@ static void script_range(List *l, char **lines, int lo, int hi, const char *path
             add_step(l, S_FRAMES, 0, 0, atol(a), NULL);
         } else if (!strcmp(cmd, "hold") || !strcmp(cmd, "press")) {
             if (!parse_buttons(a, &b0, &b1))
-                nshvc_fatal("%s:%d: buttons '%s'", path, i + 1, a);
+                nk_fatal("%s:%d: buttons '%s'", path, i + 1, a);
             add_step(l, S_FRAMES, b0, b1, b[0] ? atol(b) : (cmd[0] == 'p' ? 2 : 1), NULL);
             if (cmd[0] == 'p')
                 add_step(l, S_FRAMES, 0, 0, 2, NULL);
         } else if (!strcmp(cmd, "shot") || !strcmp(cmd, "dump") || !strcmp(cmd, "save") || !strcmp(cmd, "load")) {
             if (n < 2)
-                nshvc_fatal("%s:%d: %s NAME", path, i + 1, cmd);
+                nk_fatal("%s:%d: %s NAME", path, i + 1, cmd);
             add_step(l, cmd[0] == 's' ? (cmd[1] == 'h' ? S_SHOT : S_SAVE) : cmd[0] == 'd' ? S_DUMP : S_LOAD, 0, 0, 0,
                      a)->line = i + 1;
-        } else if (!strcmp(cmd, "plug") || !strcmp(cmd, "pad") || !strcmp(cmd, "mouse") || !strcmp(cmd, "gun")) {
+        } else if (own_step(cmd)) {
             add_text(l, S_INPUT, lines[i], i + 1);
         } else if (!strcmp(cmd, "repeat")) {
             int depth = 0, j, k = atoi(a);
@@ -206,14 +218,14 @@ static void script_range(List *l, char **lines, int lo, int hi, const char *path
                     break;
             }
             if (j == hi)
-                nshvc_fatal("%s:%d: repeat without end", path, i + 1);
+                nk_fatal("%s:%d: repeat without end", path, i + 1);
             while (k-- > 0)
                 script_range(l, lines, i + 1, j, path);
             i = j;
         } else if (!strcmp(cmd, "end")) {
-            nshvc_fatal("%s:%d: end without repeat", path, i + 1);
+            nk_fatal("%s:%d: end without repeat", path, i + 1);
         } else {
-            nshvc_fatal("%s:%d: '%s' is not a step nativeshvc's script runner takes", path, i + 1, cmd);
+            nk_fatal("%s:%d: '%s' is not a step %s's script runner takes", path, i + 1, cmd, con->name);
         }
     }
 }
@@ -224,21 +236,21 @@ static void list_load(List *l, const char *path)
     char line[4096], **lines = NULL;
     int n = 0;
     if (!f)
-        nshvc_fatal("cannot read %s", path);
+        nk_fatal("cannot read %s", path);
     while (fgets(line, sizeof line, f)) {
         char *h = strchr(line, '#');
         if (h)
             *h = 0;
         lines = (char **)realloc(lines, sizeof *lines * (size_t)(n + 1));
         if (!lines || !(lines[n++] = strdup(line)))
-            nshvc_fatal("no memory for the script");
+            nk_fatal("no memory for the script");
     }
     fclose(f);
     l->path = strdup(path);
     script_range(l, lines, 0, n, path);
 }
 
-void script_load(const char *path, const char *out_dir)
+void nk_script_load(const char *path, const char *out_dir)
 {
     out = out_dir;
     list_load(&main_list, path);
@@ -251,43 +263,23 @@ static void write_file(const char *name, const char *ext, const void *p, size_t 
     snprintf(path, sizeof path, "%s/%s%s", out, name, ext);
     f = fopen(path, "wb");
     if (!f)
-        nshvc_fatal("cannot write %s", path);
+        nk_fatal("cannot write %s", path);
     if (n)
         fwrite(p, 1, n, f);
     fclose(f);
 }
 
-/* A shot is the picture made the way the reference's are (tests/oracle):
-   an interlaced picture whose two fields' rows are the same is its lines
-   once, a hires one of the console's width whose pixel pairs are all the
-   same 256 wide. A presented one (NSHVC_SCALE) is as
-   presented. */
+/* a shot: the console's picture, every xs-th column of every ys-th row */
 static void shot(const char *name)
 {
-    int w, h, x, y, xs = 1, ys = 1, presented;
-    const uint32_t *px = front_shot_picture(&w, &h, &presented);
-    const PpuFrame *fr = ppu_frame();
+    int w, h, x, y, xs, ys;
+    const uint32_t *px = con->shot(&w, &h, &xs, &ys);
     char path[1024];
     FILE *f;
-    if (!presented && fr->interlace && h == 2 * fr->screen_height) {
-        ys = 2;
-        for (y = 0; y + 1 < h && ys == 2; y += 2)
-            if (memcmp(px + (size_t)y * (size_t)w, px + (size_t)(y + 1) * (size_t)w, (size_t)w * sizeof *px))
-                ys = 1;
-    }
-    if (!presented && fr->width == PPU_WIDTH && w == PPU_HIRES_WIDTH) {
-        xs = 2;
-        for (y = 0; y < h && xs == 2; y++)
-            for (x = 0; x < w; x += 2)
-                if (px[y * w + x] != px[y * w + x + 1]) {
-                    xs = 1;
-                    break;
-                }
-    }
     snprintf(path, sizeof path, "%s/%s.ppm", out, name);
     f = fopen(path, "wb");
     if (!f)
-        nshvc_fatal("cannot write %s", path);
+        nk_fatal("cannot write %s", path);
     fprintf(f, "P6\n%d %d\n255\n", w / xs, h / ys);
     for (y = 0; y < h / ys; y++)
         for (x = 0; x < w / xs; x++) {
@@ -298,55 +290,26 @@ static void shot(const char *name)
     fclose(f);
 }
 
-/* the cartridge's chip's own RAM (nshvc_chip.ram), or NULL */
-static uint8_t *chip_ram(uint32_t *n)
-{
-    *n = 0;
-    if (!snes_cart.chip || !snes_cart.chip->ram)
-        return NULL;
-    return snes_cart.chip->ram(n);
-}
-
+/* the console's memories (nk_console.regions), each as DIR/NAME<ext> */
 static void dump(const char *name)
 {
-    uint32_t n = snes_sram_size(), g;
-    uint8_t *gr = chip_ram(&g);
-    write_file(name, ".wram", snes_wram(), 0x20000);
-    write_file(name, ".sram", nshvc_sram(), nshvc_sram() ? n : 0);
-    if (gr)
-        write_file(name, ".chipram", gr, g);
-    write_file(name, ".vram", nshvc_vram(), 0x10000 * PPU_VRAM_PAGES);
-    write_file(name, ".cgram", nshvc_cgram(), 0x200);
-    write_file(name, ".oam", nshvc_oam(), 544);
+    int i;
+    for (i = 0; i < con->region_count; i++) {
+        size_t n = 0;
+        const void *p = con->regions[i].data(&n);
+        if (!p && con->regions[i].optional)
+            continue;
+        write_file(name, con->regions[i].ext, p, p ? n : 0);
+    }
 }
 
-/* plug PORT DEVICE (joypad, none, mouse, multitap, superscope, justifier,
-   justifiers); pad N BITS (joypad N's buttons from now, hex; 0 and 1 are
-   hold's); mouse PORT DX DY BUTTONS (motion for its next report); gun G X
-   Y BUTTONS (from now) */
+/* one of the console's own steps: its line's words to the console */
 static void input_step(const Step *s)
 {
-    static const char *const dev[] = { "joypad", "none", "mouse", "multitap", "superscope", "justifier",
-                                       "justifiers" };
     char w[8][1024];
-    int n = words(s->text, w, 8), i;
-    if (!strcmp(w[0], "plug") && n == 3) {
-        for (i = 0; i < 7; i++)
-            if (!strcmp(w[2], dev[i])) {
-                nshvc_plug(atoi(w[1]), i);
-                return;
-            }
-    } else if (!strcmp(w[0], "pad") && n == 3) {
-        nshvc_set_joypad(atoi(w[1]), (uint16_t)strtoul(w[2], NULL, 16));
-        return;
-    } else if (!strcmp(w[0], "mouse") && n == 5) {
-        nshvc_set_mouse(atoi(w[1]), atoi(w[2]), atoi(w[3]), atoi(w[4]));
-        return;
-    } else if (!strcmp(w[0], "gun") && n == 5) {
-        nshvc_set_gun(atoi(w[1]), atoi(w[2]), atoi(w[3]), (unsigned)atoi(w[4]));
-        return;
-    }
-    nshvc_fatal("%s:%d: '%s'", cur->path, s->line, s->text);
+    int n = words(s->text, w, 8);
+    if (!con->script_step || !con->script_step(n, w))
+        nk_fatal("%s:%d: '%s'", cur->path, s->line, s->text);
 }
 
 /* ---- the processes ---- */
@@ -357,7 +320,7 @@ static pid_t fork_run(void)
     fflush(NULL);
     p = fork();
     if (p < 0)
-        nshvc_fatal("fork: %s", strerror(errno));
+        nk_fatal("fork: %s", strerror(errno));
     return p;
 }
 
@@ -366,7 +329,7 @@ static int child_status(pid_t p)
     int st;
     while (waitpid(p, &st, 0) < 0)
         if (errno != EINTR)
-            nshvc_fatal("waitpid: %s", strerror(errno));
+            nk_fatal("waitpid: %s", strerror(errno));
     if (WIFEXITED(st))
         return WEXITSTATUS(st);
     return 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
@@ -384,24 +347,25 @@ static void begin_main(int at)
 static char replay_name[128];
 static int replay_resume;
 
-/* the play in NSHVC_STATES (*.sfx) with `save NAME`: its path in found */
+/* the play in <prefix>_STATES (*<play_ext>) with `save NAME`: its path in found */
 static void find_play(const char *name, char *found, size_t size)
 {
-    const char *dir = getenv("NSHVC_STATES");
+    const char *dir = nk_getenv("STATES");
+    size_t ext = strlen(con->play_ext);
     char path[2048], line[512];
     found[0] = 0;
     if (!dir)
-        nshvc_fatal("load %s: set NSHVC_STATES to the folder of the plays that save states", name);
+        nk_fatal("load %s: set %s_STATES to the folder of the plays that save states", name, con->env);
 #ifndef _WIN32
     {
         DIR *d;
         struct dirent *e;
         if (!(d = opendir(dir)))
-            nshvc_fatal("NSHVC_STATES: cannot read %s", dir);
+            nk_fatal("%s_STATES: cannot read %s", con->env, dir);
         while ((e = readdir(d)) && !found[0]) {
             size_t k = strlen(e->d_name);
             FILE *f;
-            if (k < 4 || strcmp(e->d_name + k - 4, ".sfx"))
+            if (k < ext || strcmp(e->d_name + k - ext, con->play_ext))
                 continue;
             snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
             if (!(f = fopen(path, "r")))
@@ -421,7 +385,8 @@ static void find_play(const char *name, char *found, size_t size)
     {
         struct _finddata_t fd;
         intptr_t h;
-        snprintf(path, sizeof path, "%s/*.sfx", dir);
+        (void)ext;
+        snprintf(path, sizeof path, "%s/*%s", dir, con->play_ext);
         if ((h = _findfirst(path, &fd)) != -1) {
             do {
                 FILE *f;
@@ -442,7 +407,7 @@ static void find_play(const char *name, char *found, size_t size)
     }
 #endif
     if (!found[0])
-        nshvc_fatal("load %s: no play in %s saves it", name, dir);
+        nk_fatal("load %s: no play in %s saves it", name, dir);
 }
 
 /* the steps that save state `name`: the script's own up to its save, when
@@ -464,8 +429,8 @@ static int play_for(const char *name, List *l)
 }
 
 #ifndef _WIN32
-/* the play that saves state `name` (a .sfx in NSHVC_STATES with `save
-   NAME`), from power-on to that save, then the main script from `resume`
+/* the play that saves state `name` (a <play_ext> in <prefix>_STATES with
+   `save NAME`), from power-on to that save, then the main script from `resume`
    (with fork) */
 static void begin_replay(const char *name, int resume)
 {
@@ -494,26 +459,26 @@ static int no_fork(void)
 #ifdef _WIN32
         nofork = 1;
 #else
-        nofork = getenv("NSHVC_SCRIPT_NOFORK") != NULL;
+        nofork = nk_getenv("SCRIPT_NOFORK") != NULL;
 #endif
     }
     return nofork;
 }
 
-void script_args(int argc, char **argv)
+void nk_script_args(int argc, char **argv)
 {
     self_argc = argc;
     self_argv = argv;
 }
 
-int script_replaying(void) { return cur == &replay_list; }
+int nk_script_replaying(void) { return cur == &replay_list; }
 
 static char *str_cat(const char *a, const char *b)
 {
     size_t n = strlen(a) + strlen(b) + 1;
     char *r = (char *)malloc(n);
     if (!r)
-        nshvc_fatal("no memory for the script");
+        nk_fatal("no memory for the script");
     snprintf(r, n, "%s%s", a, b);
     return r;
 }
@@ -535,10 +500,10 @@ static void plan_add(List *dst, const List *src, int a, int b)
         if (t->kind == S_SHOT || t->kind == S_DUMP || t->kind == S_SAVE)
             continue;
         if (t->kind == S_LOAD)
-            nshvc_fatal("%s:%d: a load in steps replayed for a state", src->path, t->line);
+            nk_fatal("%s:%d: a load in steps replayed for a state", src->path, t->line);
         dst->s = (Step *)realloc(dst->s, sizeof *dst->s * (size_t)(dst->n + 1));
         if (!dst->s)
-            nshvc_fatal("no memory for the script");
+            nk_fatal("no memory for the script");
         dst->s[dst->n++] = *t;
     }
 }
@@ -561,14 +526,14 @@ static void plan_begin(const char *plan, int resume)
                 if (l.s[i].kind == S_SAVE && !strcmp(l.s[i].name, seg + 2))
                     break;
             if (i == l.n)
-                nshvc_fatal("%s: the play ends before it saves %s", l.path, seg + 2);
+                nk_fatal("%s: the play ends before it saves %s", l.path, seg + 2);
             plan_add(&replay_list, &l, 0, i);
         } else if (!strncmp(seg, "M:", 2)) {
             int a = 0, b = 0;
             sscanf(seg + 2, "%d-%d", &a, &b);
             plan_add(&replay_list, &main_list, a, b);
         } else {
-            nshvc_fatal("NSHVC_SCRIPT_PLAN: '%s'", seg);
+            nk_fatal("%s_SCRIPT_PLAN: '%s'", con->env, seg);
         }
     }
     free(copy);
@@ -588,16 +553,6 @@ static void plan_end(void)
     begin_main(plan_resume);
 }
 
-static void env_set(const char *k, const char *v)
-{
-#ifdef _WIN32
-    if (_putenv_s(k, v))
-#else
-    if (setenv(k, v, 1))
-#endif
-        nshvc_fatal("cannot set %s", k);
-}
-
 /* a new copy of the program, rebuilding the machine `plan` made and going
    on from step `resume`; this process ends with its status */
 static void go_on_in_new_copy(const char *plan, int resume)
@@ -605,20 +560,20 @@ static void go_on_in_new_copy(const char *plan, int resume)
     char n[32];
     int st;
     if (!self_argv)
-        nshvc_fatal("save and load need the program's arguments (script_args)");
-    env_set("NSHVC_SCRIPT_PLAN", plan[0] ? plan : "M:0-0");
+        nk_fatal("save and load need the program's arguments (nk_script_args)");
+    nk_setenv("SCRIPT_PLAN", plan[0] ? plan : "M:0-0");
     snprintf(n, sizeof n, "%d", resume);
-    env_set("NSHVC_SCRIPT_RESUME", n);
-    env_set("NSHVC_SCRIPT_SAVED", saved ? saved : "");
+    nk_setenv("SCRIPT_RESUME", n);
+    nk_setenv("SCRIPT_SAVED", saved ? saved : "");
     snprintf(n, sizeof n, "%u", (unsigned)shared->frames);
-    env_set("NSHVC_SCRIPT_FRAMES", n);
+    nk_setenv("SCRIPT_FRAMES", n);
     fflush(NULL);
 #ifndef _WIN32
     {
         pid_t p;
         int err = posix_spawnp(&p, self_argv[0], NULL, NULL, self_argv, environ);
         if (err)
-            nshvc_fatal("cannot start %s: %s", self_argv[0], strerror(err));
+            nk_fatal("cannot start %s: %s", self_argv[0], strerror(err));
         st = child_status(p);
     }
 #else
@@ -631,7 +586,7 @@ static void go_on_in_new_copy(const char *plan, int resume)
         si.cb = sizeof si;
         if (!GetModuleFileNameA(NULL, exe, sizeof exe) ||
             !CreateProcessA(exe, GetCommandLineA(), NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi))
-            nshvc_fatal("cannot start a new copy of the program (%lu)", (unsigned long)GetLastError());
+            nk_fatal("cannot start a new copy of the program (%lu)", (unsigned long)GetLastError());
         WaitForSingleObject(pi.hProcess, INFINITE);
         GetExitCodeProcess(pi.hProcess, &code);
         CloseHandle(pi.hThread);
@@ -667,7 +622,7 @@ static void plan_load(const char *name)
         if (len > k && !strncmp(p, name, k) && p[k] == '=') {
             char *plan = (char *)malloc(len - k);
             if (!plan)
-                nshvc_fatal("no memory for the script");
+                nk_fatal("no memory for the script");
             memcpy(plan, p + k + 1, len - k - 1);
             plan[len - k - 1] = 0;
             go_on_in_new_copy(plan, step_at + 1);
@@ -715,7 +670,7 @@ static void hold(const char *have, int at)
 #else
     (void)have;
     (void)at;
-    nshvc_fatal("save and load need fork, which this system has not");
+    nk_fatal("save and load need fork, which this system has not");
 #endif
 }
 
@@ -728,8 +683,8 @@ static void start(void)
         return;
     started = 1;
     if (no_fork()) {
-        const char *plan = getenv("NSHVC_SCRIPT_PLAN"), *f = getenv("NSHVC_SCRIPT_FRAMES"),
-                   *sv = getenv("NSHVC_SCRIPT_SAVED"), *r = getenv("NSHVC_SCRIPT_RESUME");
+        const char *plan = nk_getenv("SCRIPT_PLAN"), *f = nk_getenv("SCRIPT_FRAMES"),
+                   *sv = nk_getenv("SCRIPT_SAVED"), *r = nk_getenv("SCRIPT_RESUME");
         shared = &own_shared;
         shared->frames = f ? (uint32_t)strtoul(f, NULL, 10) : 0;
         saved = str_cat(sv ? sv : "", "");
@@ -743,7 +698,7 @@ static void start(void)
         int i, need = 0;
         shared = (Shared *)mmap(NULL, sizeof *shared, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANON, -1, 0);
         if (shared == MAP_FAILED)
-            nshvc_fatal("mmap: %s", strerror(errno));
+            nk_fatal("mmap: %s", strerror(errno));
         for (i = 0; i < main_list.n; i++)
             need |= main_list.s[i].kind == S_SAVE || main_list.s[i].kind == S_LOAD;
         if (need)
@@ -785,7 +740,7 @@ static void takes(void)
                 continue;
             }
             if (s->kind == S_LOAD)
-                nshvc_fatal("%s:%d: a load in a play replayed for a state", cur->path, s->line);
+                nk_fatal("%s:%d: a load in a play replayed for a state", cur->path, s->line);
             if (s->kind == S_SHOT || s->kind == S_DUMP || s->kind == S_SAVE) {
                 step_at++;
                 continue;
@@ -808,7 +763,7 @@ static void takes(void)
     }
 }
 
-void script_takes(void) { takes(); }
+void nk_script_takes(void) { takes(); }
 
 /* the next frame's buttons, from the main script: counted when it has run */
 static int frame_out(void)
@@ -817,7 +772,7 @@ static int frame_out(void)
     return 1;
 }
 
-int script_frame(uint16_t *b0, uint16_t *b1)
+int nk_script_frame(uint32_t *b0, uint32_t *b1)
 {
     start();
     if (counting && shared) {
@@ -833,7 +788,7 @@ int script_frame(uint16_t *b0, uint16_t *b1)
         }
         if (step_at >= cur->n) {
             if (cur == &replay_list)
-                nshvc_fatal("%s: the play ends before it saves %s", cur->path, replay_name);
+                nk_fatal("%s: the play ends before it saves %s", cur->path, replay_name);
             return 0;
         }
         s = &cur->s[step_at];

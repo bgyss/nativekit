@@ -29,6 +29,8 @@
 #include "rr_mode7.h"
 #include "resample.h"
 #include "script.h"
+#include "env.h"
+#include "snes_console.h"
 #include "input.h"
 
 /* ---- the public calls ---- */
@@ -318,7 +320,7 @@ static void sound_drain(void)
     int16_t b[2048 * 2];
     int n;
     while ((n = snes_audio_take(b, 2048)) > 0)
-        if (!script_replaying())
+        if (!nk_script_replaying())
             fwrite(b, 4, (size_t)n, sound_f);
 }
 
@@ -788,7 +790,7 @@ static void quit(void)
    else the window, input, save and the pace. */
 static void frame(void)
 {
-    uint16_t b0 = 0, b1 = 0;
+    uint32_t b0 = 0, b1 = 0;
     frame_no++;
     if (headless) {
         static int rc = -1;
@@ -801,14 +803,14 @@ static void frame(void)
             rr_check();
         if (sound_f)
             sound_drain();
-        more = script_frame(&b0, &b1);
+        more = nk_script_frame(&b0, &b1);
         nshvc_set_joypad(0, (uint16_t)(b0 | game_buttons[0]));
         nshvc_set_joypad(1, (uint16_t)(b1 | game_buttons[1]));
         input_script();
         input_report(hooks.input);
         if (hooks.frame)
             hooks.frame();
-        if ((max_frames >= 0 && frame_no >= max_frames) || (!more && script_steps() && max_frames < 0))
+        if ((max_frames >= 0 && frame_no >= max_frames) || (!more && nk_script_steps() && max_frames < 0))
             exit(0);
         return;
     }
@@ -918,9 +920,11 @@ int nshvc_main(const nshvc_cart *cart, int argc, char **argv)
     }
     host_set_app_name(cart->save_name ? cart->save_name : cart->title, cart->title ? cart->title : "nativeshvc");
     host_init(argc, argv);
-    script_args(argc, argv);
+    nk_env_prefix(snes_console.env);
+    nk_script_console(&snes_console);
+    nk_script_args(argc, argv);
     if (script)
-        script_load(script, out_dir);
+        nk_script_load(script, out_dir);
     nshvc_power(cart);
     if (headless) {
         /* shots as a window NSHVC_SCALE pixels a console pixel shows them:
@@ -940,9 +944,9 @@ int nshvc_main(const nshvc_cart *cart, int argc, char **argv)
            at the end of the frame before. The first frame has none before
            it: it is taken now (its buttons reach no joypad read), with the
            shots and dumps before it. */
-        uint16_t b0, b1;
-        script_takes();
-        script_frame(&b0, &b1);
+        uint32_t b0, b1;
+        nk_script_takes();
+        nk_script_frame(&b0, &b1);
     }
     if (!headless) {
         host_thread_interactive();

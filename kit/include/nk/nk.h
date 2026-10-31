@@ -31,9 +31,9 @@ typedef struct {
 } nk_button;
 
 typedef struct nk_console {
-    const char *name;                   /* "nativeshvc": the window's title fallback, messages */
+    const char *name;                   /* the console's name: the window title's fallback, messages */
     const char *env;                    /* its settings' prefix (env.h) */
-    const char *play_ext;               /* ".sfx": the plays in <env>_STATES that save states */
+    const char *play_ext;               /* ".abc": the plays in <env>_STATES that save states */
 
     /* the machine */
     void     (*power)(const void *cart);
