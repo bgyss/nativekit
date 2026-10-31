@@ -21,14 +21,14 @@ events in the same order (each key-on with the same sample, from the BRR
 block it plays), each on the same beat as the reference's (within the
 driver's work in a beat: MAX_SHIFT samples, a beat being 320).
 
-  python3 tests/dsp/keys.py        (about 30 seconds)
+  python3 consoles/snes/tests/dsp/keys.py        (about 30 seconds)
 
 Needs NSHVC_ORACLE_CORE and NSHVC_ASAR, as tests/rom/run.py.
 """
 import os, subprocess, sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(ROOT, "tests", "rom"))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.insert(0, os.path.join(ROOT, "consoles", "snes", "tests", "rom"))
 import snestest  # noqa: E402
 
 OUT = os.path.join(ROOT, "build", "tests", "keys")

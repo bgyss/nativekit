@@ -42,14 +42,14 @@ description = "All darwin builds"
 depends = ["build:null", "build:macos", "build:null-metal", "build:null-gl", "build:null-vulkan", "build:x86", "build:ios", "build:win"]
 
 [tasks."test:rom"]
-run = "python3 tests/rom/run.py"
+run = "python3 consoles/snes/tests/rom/run.py"
 
 [tasks.test]
 description = "The full check set"
 run = "sh tools/check.sh"
 
 [tasks."golden:record"]
-run = "python3 tests/golden.py record build/golden"
+run = "python3 consoles/snes/tests/golden.py record build/golden"
 
 [tasks."golden:compare"]
-run = "python3 tests/golden.py compare build/golden"
+run = "python3 consoles/snes/tests/golden.py compare build/golden"

@@ -24,14 +24,14 @@ register read and every read of the APU RAM. (The program's own time, its
 pauses, is the SPC700's instruction time, which the C does not keep: the
 DSP is held to the reference with the reference's own writes.)
 
-  python3 tests/dsp/fuzz.py [SEED...]       (default seeds 1-4; about 2 minutes)
+  python3 consoles/snes/tests/dsp/fuzz.py [SEED...]       (default seeds 1-4; about 2 minutes)
 
 Needs NSHVC_ORACLE_CORE and NSHVC_ASAR, as tests/rom/run.py.
 """
 import concurrent.futures, os, subprocess, sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(ROOT, "tests", "rom"))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
+sys.path.insert(0, os.path.join(ROOT, "consoles", "snes", "tests", "rom"))
 import snestest  # noqa: E402
 
 BUILD = os.path.join(ROOT, "build", "tests", "dsp")

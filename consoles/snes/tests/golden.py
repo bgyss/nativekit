@@ -25,7 +25,7 @@ NSHVC_GOLDEN_PLANT=1 flips one byte of the first hashed file (the self-test).
 import concurrent.futures, hashlib, json, os, resource, shutil, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 sys.path.insert(0, os.path.join(HERE, "rom"))
 sys.path.insert(0, os.path.join(HERE, "dsp"))
 import cases  # noqa: E402

@@ -4,7 +4,7 @@ chip's jobs are made from known weights; the fit must give those weights back,
 a kind with too few accesses must come out 0, and the C table the tool writes
 must build against nshvc.h and carry the weights.
 
-  python3 tests/tools/profile_check.py
+  python3 consoles/snes/tests/tools/profile_check.py
 """
 import importlib.machinery, importlib.util, os, random, subprocess, sys, tempfile
 

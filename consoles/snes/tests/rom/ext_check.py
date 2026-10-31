@@ -14,7 +14,7 @@ cartridge (tests/rom/run.py builds them):
              (the cartridges that scroll BG1 alone, no windows, sprites,
              offset-per-tile or mosaic: scroll_*).
 
-  python3 tests/rom/ext_check.py
+  python3 consoles/snes/tests/rom/ext_check.py
 """
 import os, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))

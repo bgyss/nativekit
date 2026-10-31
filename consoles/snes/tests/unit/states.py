@@ -3,7 +3,7 @@
 (NSHVC_SCRIPT_NOFORK=1, as on Windows), on tests/unit/states.c: every dump
 the same both ways, byte for byte, and each the machine it should be.
 
-    python3 tests/unit/states.py [BUILD]     (BUILD: build/null)
+    python3 consoles/snes/tests/unit/states.py [BUILD]     (BUILD: build/null)
 """
 import os
 import subprocess

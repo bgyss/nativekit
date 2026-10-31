@@ -21,13 +21,13 @@ need() {
 log=build/check.last
 r() { echo "### $*"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 0 ] || fails=$((fails+1)); }
 x() { echo "### $* (expect exit 70)"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 70 ] || fails=$((fails+1)); }
-r python3 tests/rom/ext_check.py
-r python3 tests/dsp/fuzz.py 1 2 3 4
-r python3 tests/dsp/keys.py
+r python3 consoles/snes/tests/rom/ext_check.py
+r python3 consoles/snes/tests/dsp/fuzz.py 1 2 3 4
+r python3 consoles/snes/tests/dsp/keys.py
 r build/null/tests/resample_check
-r python3 tests/tools/profile_check.py
+r python3 consoles/snes/tests/tools/profile_check.py
 r build/null/tests/input
-r python3 tests/unit/states.py
+r python3 consoles/snes/tests/unit/states.py
 if [ "$(uname -s)" = Darwin ]; then need build/macos/tests/pointer_macos && r build/macos/tests/pointer_macos; fi
 r build/null/tests/vram_direct
 x build/null/tests/vram_direct --copy0

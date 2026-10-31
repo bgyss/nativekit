@@ -1,13 +1,13 @@
 #!/bin/sh
-# pointer_ios.sh: tests/unit/pointer_ios.c as an app for the iOS simulator,
+# pointer_ios.sh: consoles/snes/tests/unit/pointer_ios.c as an app for the iOS simulator,
 # and the check of what it wrote.
-#   sh tests/unit/pointer_ios.sh build      the app, at build/ios-iphonesimulator/
+#   sh consoles/snes/tests/unit/pointer_ios.sh build      the app, at build/ios-iphonesimulator/
 #                                           pointer.app (signed ad hoc)
-#   sh tests/unit/pointer_ios.sh check FILE each touch in its pointer.txt
+#   sh consoles/snes/tests/unit/pointer_ios.sh check FILE each touch in its pointer.txt
 #                                           against the dot and line its place
 #                                           on the picture is
 set -e
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../.."
 B=build/ios-iphonesimulator
 case "$1" in
 build)
@@ -16,7 +16,7 @@ build)
   rm -rf "$APP"
   mkdir -p "$APP"
   xcrun -sdk iphonesimulator clang -target arm64-apple-ios15.0-simulator -O2 -std=gnu11 -Wall -DNSHVC_HOST_IOS=1 \
-    -Iinclude tests/unit/pointer_ios.c "$B/libnshvc.a" -o "$APP/pointer" \
+    -Iconsoles/snes/include consoles/snes/tests/unit/pointer_ios.c "$B/libnshvc.a" -o "$APP/pointer" \
     -framework UIKit -framework CoreGraphics -framework QuartzCore -framework AudioToolbox \
     -framework AVFoundation -framework GameController -framework Metal -framework Foundation -lm
   cat > "$APP/Info.plist" <<EOP

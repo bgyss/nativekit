@@ -2,7 +2,7 @@
 
 The standard by which a decompiled game measures what its processors' work costs on
 nativeshvc. nativeshvc provides it: this procedure, the tool that carries it out
-(`tools/nshvc-profile`), the file it writes, and the field a cartridge declares it in. A game
+(`consoles/snes/tools/nshvc-profile`), the file it writes, and the field a cartridge declares it in. A game
 runs it on its own ROM and declares the result. nativeshvc runs nobody's measurement, and no
 person sets a number: anyone can give the tool a ROM and get the same numbers back.
 
@@ -119,7 +119,7 @@ The tool writes the profile as a versioned text file, and the C table a cartridg
 `nshvc-profile check PROFILE --source DIR` warns (exit 1) when the decomp's source no longer
 has the hash the profile was checked against: the profile is stale. A game's build runs it.
 
-## 2. The procedure: `tools/nshvc-profile measure`
+## 2. The procedure: `consoles/snes/tools/nshvc-profile measure`
 
     nshvc-profile measure ROM [ROM...] --out DIR [--frames N] [--span PLAY]...
                           [--chip-jobs FILE] [--decomp "BUILD ARGS"] [--source DIR] [--name NAME]

@@ -201,7 +201,7 @@ The SPC700 takes no interrupts. The DSP, timers, ports and boot ROM are the cons
   give it, and the weight of its kind from the cartridge's cost profile: `nshvc_cart`'s
   `cost_profile` field (a zeroed description has none: the bus's time alone),
   `nshvc_cost_profile`, `nshvc_chip_program`, `NSHVC_KIND_*` and `nshvc_access_kind`
-  (`nshvc.h`, docs/cost-profile.md, measured by `tools/nshvc-profile`). A loop that waits
+  (`nshvc.h`, docs/cost-profile.md, measured by `consoles/snes/tools/nshvc-profile`). A loop that waits
   for the hardware with no wait sees the clock move, and is no longer fatal (but with
   interrupts held). `nshvc_set_read_hook`: each S-CPU read as it is made, with its value.
   A word's or a long's bytes go out in consecutive bus cycles, their weights spent before

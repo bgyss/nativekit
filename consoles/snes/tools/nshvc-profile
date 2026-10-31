@@ -43,7 +43,7 @@ NSHVC_ORACLE the oracle (default build/null/tests/oracle).
 """
 import argparse, concurrent.futures, hashlib, itertools, os, shlex, subprocess, sys, tempfile
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 TOOL_VERSION = "1.0"
 FORMAT_VERSION = 1
 FRAME = 357368                  # master clocks an NTSC frame

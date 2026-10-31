@@ -5,7 +5,7 @@ nativeshvc at the same clocks (replay.c); compare what the two show, pixel
 for pixel, and every read. nativeshvc's own CPU is untimed (README.md,
 Time): this holds its hardware to the reference's to the clock.
 
-  python3 tests/rom/run.py [--only NAME,NAME] [--keep]
+  python3 consoles/snes/tests/rom/run.py [--only NAME,NAME] [--keep]
 
 Needs NSHVC_ORACLE_CORE (a bsnes libretro core) and NSHVC_ASAR (asar);
 the oracle runner and the test cartridge are built under build/tests by
@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(os.path.dirname(HERE))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(HERE))))
 sys.path.insert(0, HERE)
 import snestest  # noqa: E402
 import cases  # noqa: E402
