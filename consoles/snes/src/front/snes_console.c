@@ -152,7 +152,7 @@ const nk_console snes_console = {
     .picture = nshvc_picture, .headless_scale = headless_scale,
     .audio_hz = NSHVC_DSP_RATE, .audio_take = nshvc_audio_take, .audio_queued = nshvc_audio_queued,
     .buttons = buttons, .button_count = sizeof buttons / sizeof buttons[0],
-    .steps = steps, .step_count = 4, .script_step = script_step,
+    .steps = steps, .step_count = sizeof steps / sizeof steps[0], .script_step = script_step,
     .key = snes_key, .touch = snes_touch, .input = snes_input, .frame = snes_game_frame,
     .regions = regions, .region_count = sizeof regions / sizeof regions[0],
     .battery = battery, .counts_hooks = counts_hooks, .access_kind = nshvc_access_kind,

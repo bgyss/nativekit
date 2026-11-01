@@ -53,7 +53,7 @@ typedef struct nk_console {
        presented, and drawn scaled on the CPU) */
     int      (*rrcheck)(const int d[4], uint32_t *want, int tw, int th);
     void     (*rrcheck_why)(int x, int y);                 /* optional: more about a pixel that differs */
-    const char *rrcheck_own;            /* the report's words for frames rrcheck drew ("with ...") */
+    const char *rrcheck_own;            /* optional: the report's words for frames rrcheck drew ("with ...") */
     const uint32_t *(*picture)(int *w, int *h);            /* the console's picture as it stands */
     void     (*headless_scale)(double sx, double sy);      /* optional: <env>_SCALE in a headless run */
 
@@ -67,7 +67,7 @@ typedef struct nk_console {
     int      button_count;
     const char *const *steps;           /* the script steps the console takes itself */
     int      step_count;
-    int      (*script_step)(int argc, char w[][1024]);     /* one of them: 1 when taken */
+    int      (*script_step)(int argc, char w[][1024]);     /* optional: one of them, 1 when taken */
     int      (*key)(int vk, int down);                     /* optional: 1 when the game took the key */
     void     (*touch)(int id, int phase, float x, float y);/* optional: the game's touch hook */
     /* the players' controllers from the frame's input: headless, the
@@ -79,6 +79,8 @@ typedef struct nk_console {
     const nk_region *regions;
     int      region_count;
     int      (*battery)(nk_battery *b); /* optional: 0 no save */
+    /* needed only for --counts: the hooks on every access, an access's
+       kind (0 to kind_count - 1) and the number of kinds (16 at most) */
     void     (*counts_hooks)(void (*rd)(uint32_t addr, uint8_t v), void (*wr)(uint32_t addr, uint8_t v));
     int      (*access_kind)(uint32_t addr);
     int      kind_count;

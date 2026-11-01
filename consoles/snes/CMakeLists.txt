@@ -11,8 +11,10 @@
 #                 (windows) | vulkan
 #   NSHVC_TESTS   build the tests (tests/)
 #   NSHVC_EXAMPLES build the examples (examples/)
-if(NOT PROJECT_NAME)
-  cmake_minimum_required(VERSION 3.16)
+# It builds on the kit (kit/), which the repository root's CMakeLists.txt
+# adds first.
+if(NOT TARGET nk_app)
+  message(FATAL_ERROR "nativeshvc: configure from the repository root")
 endif()
 project(nativeshvc VERSION 2.1.0 LANGUAGES C)
 set(NSHVC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
@@ -40,8 +42,8 @@ endif()
 
 # the kit's coroutines, resampler, time, files, host, settings, battery save
 # and headless script, the players' devices and the application
-# (kit/CMakeLists.txt)
-target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> $<TARGET_OBJECTS:nk_host>
+# (kit/CMakeLists.txt; no host objects with NSHVC_HOST none on POSIX)
+target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> ${NK_HOST_OBJECTS}
   $<TARGET_OBJECTS:nk_front> $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_app>)
 if(WIN32)
   target_link_libraries(nshvc PUBLIC winmm)

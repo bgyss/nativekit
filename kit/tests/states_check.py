@@ -76,7 +76,6 @@ script = "wait 5\nsave a\nhold A 3\ndump x\nload a.state\nhold B 3\ndump y\nload
 f1, _ = run(script)
 f2, _ = run(script, {"STUB_SCRIPT_NOFORK": "1"})
 same(f1, f2, ["x.state", "y.state", "z.state", "x.frames", "y.frames", "z.frames"])
-same(f1, f1, ["z.state"])
 zs = open(os.path.join(f1, "z.state"), "rb").read()
 d0, _ = run("wait 5\ndump w\n")
 if open(os.path.join(d0, "w.state"), "rb").read() != zs:

@@ -1,5 +1,8 @@
 # nativeshvc: a native Super Famicom / Super Nintendo implementation
 
+*Paths here are from this folder, consoles/snes/, except those under `kit/`, from the
+repository root ([../../README.md](../../README.md)).*
+
 **nativeshvc is not an emulator.**
 
 It is a behaviour-exact native implementation of the Super Famicom / Super Nintendo itself:
@@ -25,8 +28,9 @@ reset vector's code and plays as it did on the console: the same picture and the
 sound, with the console's own frame rate, and no emulated processor and no ROM image of the
 code.
 
-**Maintainer:** Jeffrey Wilbur, Strut B, LLC\
-**Contact:** [retro@strutb.com](mailto:retro@strutb.com)
+**Author:** Jeffrey Wilbur, Strut B, LLC\
+**Contact (nativeshvc):** [retro@strutb.com](mailto:retro@strutb.com)\
+**This fork, nativekit:** maintained by Brian Gyss ([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit))
 
 nativeshvc was created by Jeffrey Wilbur, so that every Super Nintendo decompilation can
 share one console instead of building its own.
@@ -166,9 +170,11 @@ cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --bui
 ```
 
 To get the toolchain without Homebrew, `nix develop` (or direnv, with the `.envrc`) gives
-the compilers and tools. `mise run tools` builds asar and the pinned reference core the
-tests compare against; `mise run build` builds every configuration and `mise run test`
-runs the checks.
+the compilers and tools, cmake and python3 among them (mise pins no tools of its own;
+outside the nix shell, install cmake and python3 yourself). Run `mise trust` once in a
+fresh clone. `mise run tools` builds asar and the pinned reference core the tests compare
+against; `mise run build` builds every macOS configuration (iOS needs Xcode with the iOS
+SDK; Linux is untested) and `mise run test` runs the checks.
 
 `NSHVC_HOST` picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
 `NSHVC_RENDER` the renderer (`soft`, `metal`, `gl` or `vulkan`). `NSHVC_TESTS` and

@@ -25,7 +25,9 @@ and nativekit is extracted from it: this repository
 nativeshvc, its code moved under `consoles/snes/` and its console-independent parts into
 `kit/`, nativeshvc's behaviour, contract (2.10) and tests unchanged. The kit is a work
 based on nativeshvc and keeps its copyright and licence, the GNU Affero General Public
-License, version 3 ([LICENSE](LICENSE), [NOTICE](NOTICE)).
+License, version 3 ([LICENSE](LICENSE), [NOTICE](NOTICE)). The fork is maintained by
+Brian Gyss ([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit)); Jeffrey Wilbur
+is nativeshvc's author.
 
 Built from this folder, with CMake and C11:
 
@@ -34,15 +36,44 @@ cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --bui
 ```
 
 makes nativeshvc's library `nshvc`, the kit folded in; a game adds this folder with
-`add_subdirectory` and links `nshvc`. `nix develop` (or direnv, with the `.envrc`) gives
-the compilers and tools; `mise run tools` builds asar and the pinned reference core,
-`mise run build` builds every configuration, `mise run test` runs the checks
-([`consoles/snes/tests/README.md`](consoles/snes/tests/README.md)) and `mise run test:kit`
-the kit's own.
+`add_subdirectory` and links `nshvc`.
+
+From a fresh clone:
+
+```bash
+nix develop        # or direnv, with the .envrc: the compilers and tools
+mise trust         # once, so mise reads mise.toml
+mise run tools     # asar and the pinned reference core, into build/
+mise run build     # every macOS configuration
+mise run test      # the checks, and a game built as games build it
+mise run test:kit  # the kit's own checks
+```
+
+Inside `nix develop` the nix shell's cmake and python3 are the ones used: mise.toml pins
+no tools, and only sets the paths to asar and the reference core. Outside the nix shell,
+install cmake (3.16 or later), python3 and the compilers yourself. `mise run build` is the
+macOS set (the headless, macOS, Metal, GL, Vulkan, x86_64, iOS, Windows cross and no-host
+builds); `build:ios` needs Xcode with the iOS SDK, and Linux is untested. The checks are
+in [`consoles/snes/tests/README.md`](consoles/snes/tests/README.md).
+
+### For ports from nativeshvc
+
+A game that adds this repository's root with `add_subdirectory` and links `nshvc` builds
+as before. Files that moved:
+
+| was | is |
+|---|---|
+| `include/` (`nshvc/nshvc.h` and the contract) | `consoles/snes/include/` |
+| `tools/nshvc-profile` (named so in `nshvc.h`) | `consoles/snes/tools/nshvc-profile` |
+| `src/host/windows/game_rc.sh` | `kit/src/host/windows/game_rc.sh` |
+| `src/`, `tests/`, `examples/`, `docs/` | under `consoles/snes/` |
 
 ---
 
 # nativeshvc: a native Super Famicom / Super Nintendo implementation
+
+*This section is kept in step with [consoles/snes/README.md](consoles/snes/README.md); its
+paths are from the repository root.*
 
 **nativeshvc is not an emulator.**
 
@@ -69,8 +100,9 @@ reset vector's code and plays as it did on the console: the same picture and the
 sound, with the console's own frame rate, and no emulated processor and no ROM image of the
 code.
 
-**Maintainer:** Jeffrey Wilbur, Strut B, LLC\
-**Contact:** [retro@strutb.com](mailto:retro@strutb.com)
+**Author:** Jeffrey Wilbur, Strut B, LLC\
+**Contact (nativeshvc):** [retro@strutb.com](mailto:retro@strutb.com)\
+**This fork, nativekit:** maintained by Brian Gyss ([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit))
 
 nativeshvc was created by Jeffrey Wilbur, so that every Super Nintendo decompilation can
 share one console instead of building its own.
@@ -210,9 +242,11 @@ cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --bui
 ```
 
 To get the toolchain without Homebrew, `nix develop` (or direnv, with the `.envrc`) gives
-the compilers and tools. `mise run tools` builds asar and the pinned reference core the
-tests compare against; `mise run build` builds every configuration and `mise run test`
-runs the checks.
+the compilers and tools, cmake and python3 among them (mise pins no tools of its own;
+outside the nix shell, install cmake and python3 yourself). Run `mise trust` once in a
+fresh clone. `mise run tools` builds asar and the pinned reference core the tests compare
+against; `mise run build` builds every macOS configuration (iOS needs Xcode with the iOS
+SDK; Linux is untested) and `mise run test` runs the checks.
 
 `NSHVC_HOST` picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
 `NSHVC_RENDER` the renderer (`soft`, `metal`, `gl` or `vulkan`). `NSHVC_TESTS` and
@@ -293,7 +327,7 @@ the game itself doesn't.
 
 Every step is listed in the kit's [`script.h`](kit/include/nk/script.h), and the
 console's own (`plug`, `pad`, `mouse`, `gun`) in
-[`src/front/snes_console.c`](consoles/snes/src/front/snes_console.c).
+[`consoles/snes/src/front/snes_console.c`](consoles/snes/src/front/snes_console.c).
 
 ### 4. Or bring your own loop
 
@@ -355,7 +389,7 @@ each one, is in [tests/README.md](consoles/snes/tests/README.md).
   when read (see Time). 14 differ by one read of the latched H counter or one pixel,
   after an access the replay started 2 clocks late because the work RAM's refresh before
   it ended 2 clocks later than the reference's; why the reference's refresh starts there
-  is not yet known. Each is listed in `tests/rom/KNOWN`.
+  is not yet known. Each is listed in `consoles/snes/tests/rom/KNOWN`.
 - **Cartridges:** LoROM, HiROM, ExLoROM and ExHiROM mappings, including mirroring for ROM
   sizes that are not a power of two, and cartridge RAM; a board its own chip decodes,
   through the cartridge connector; NTSC and PAL frame lengths.
@@ -404,7 +438,7 @@ each one, is in [tests/README.md](consoles/snes/tests/README.md).
   draw overlays as the CPU reference does: 1,164 cartridges each at two window sizes (70 of
   them presenting Mode 7), none differing; and a layer's canvas at eight window sizes, none
   differing. The anti-aliasing is held to its definition written again in
-  its check, and to the plane's ground truth (`tests/unit/present_check.c`): its error is
+  its check, and to the plane's ground truth (`consoles/snes/tests/unit/present_check.c`): its error is
   5.5 to 35 times smaller than point sampling's where the plane is magnified, 4.5 to 6
   times where it is minified. On an M4 Pro, a 2560x2240 window's Mode 7 frame takes 3 to 5 ms of the GPU,
   a plain frame 0.2 to 0.4.
@@ -412,7 +446,7 @@ each one, is in [tests/README.md](consoles/snes/tests/README.md).
   a GPU thread a pixel, from a description of the frame the CPU makes (each row's states,
   the VRAM, and each row's sprites with the console's line limits decided), and the
   records a Mode 7 or canvas frame is presented from. One source
-  (`src/render/compose_body.h`) is the C reference and every backend's shader; the C is
+  (`consoles/snes/src/render/compose_body.h`) is the C reference and every backend's shader; the C is
   held to the PPU's own drawing on every frame of the test cartridges (on larger and placed
   screens too), and each backend to the CPU reference through the presentation, none
   differing. On an M4 Pro a 2048x2048 screen takes about 1 ms of description and 2 of
@@ -420,22 +454,22 @@ each one, is in [tests/README.md](consoles/snes/tests/README.md).
   frame is woven there too, from its description and the frame before's.
 - **Enhancement support:** a larger screen's centre, or where the game puts the picture,
   is exactly the console's picture, up to 8192 x 8192, and VRAM pages the same as page 0
-  (`tests/rom/ext_check.py`); on the largest screens, sprites at every corner and edge
+  (`consoles/snes/tests/rom/ext_check.py`); on the largest screens, sprites at every corner and edge
   and either side of the picture land exactly where their pages put them, through every
   renderer, Y page 0's sprites kept from repeating above the picture with the wrap off, a
   layer kept to the console's picture stops exactly at its edges, and a layer's map
   outside the picture (64 and 128 tiles wide) is read at the layer's own column and row,
   in the PPU's drawing, the compositor's records and a canvas frame's records alike
-  (`tests/unit/screen_check.c`); with the S-CPU's costs off,
+  (`consoles/snes/tests/unit/screen_check.c`); with the S-CPU's costs off,
   its accesses (bytes, words, longs, read-modify-writes) take no time while a wait and a
-  DMA take theirs, and a poll with no wait stops the run (`tests/unit/waits.c`); a VRAM
+  DMA take theirs, and a poll with no wait stops the run (`consoles/snes/tests/unit/waits.c`); a VRAM
   page copied or written directly lands as it must, unseen until shown, and page 0 refused
-  (`tests/unit/vram_direct.c`); a layer's canvas, on 10 scenes at one to one, scaled up
+  (`consoles/snes/tests/unit/vram_direct.c`); a layer's canvas, on 10 scenes at one to one, scaled up
   and down, of another shape and 6x, each window pixel exactly the texel under it placed by
   the layer's rules, among them a layer on page 1 and a layer reading page 1 above and page
   2 below under one canvas, and the scenes checking their own coverage (flips, palettes,
   tiles past the canvas, neighbouring pixels of one record in two colours, both pages'
-  characters) (`tests/unit/canvas_check.c`).
+  characters) (`consoles/snes/tests/unit/canvas_check.c`).
 - **Hosts:** headless, macOS (windowed run confirmed) and iOS (run on the iPhone simulator:
   touch, buttons, the frame hook). On macOS both arm64 and x86-64: the x86-64 build (run
   under Rosetta) plays the 1,164 test cartridges as the arm64 build does. Every build (headless with each renderer, macOS, iOS,
@@ -541,12 +575,12 @@ original had them.
 The controller ports are the console's, with what the cartridge says is plugged in
 (`nshvc_cart.ports`; a joypad in each when it says nothing) or what the game plugs in later
 (`nshvc_plug`): a joypad, a mouse, a multitap, a Super Scope, a Justifier or two, or nothing
-([`src/console/ports.c`](consoles/snes/src/console/ports.c)). Each device answers the ports' lines as the
+([`consoles/snes/src/console/ports.c`](consoles/snes/src/console/ports.c)). Each device answers the ports' lines as the
 device does: the latch, a clock with each read, two data lines back, and the IOBit pin
 (the multitap's pair, port 2's light guns latching the counters where they point). The
 joypads' automatic read steps through its 16 bits on the CPU's own 128-clock counter.
 
-The player's own devices drive them, natively ([`src/front/snes_input.c`](consoles/snes/src/front/snes_input.c), over the kit's
+The player's own devices drive them, natively ([`consoles/snes/src/front/snes_input.c`](consoles/snes/src/front/snes_input.c), over the kit's
 [`kit/src/front/input.c`](kit/src/front/input.c)).
 The players are the devices in port order, each one player and a multitap four, port 1's
 first. Player 0 has the keyboard and the first game controller, player N the (N+1)th
@@ -606,13 +640,13 @@ nativeshvc runs no 65816 or SPC700 machine code at all.
 
 ### Picture
 
-The PPU ([`src/ppu/ppu.c`](consoles/snes/src/ppu/ppu.c)) makes the picture in C, a line at a time as the
+The PPU ([`consoles/snes/src/ppu/ppu.c`](consoles/snes/src/ppu/ppu.c)) makes the picture in C, a line at a time as the
 clock passes each line: every background mode, sprites, windows, colour maths, brightness,
 the read side and open bus, with register writes landing mid-line at their own times.
 
 The renderer backends (Metal, OpenGL, Vulkan and software: the kit's
 [`rr.h`](kit/include/nk/rr.h), and the console's own GPU work in
-[`src/render/`](consoles/snes/src/render/)) draw it at the window's own resolution. The pixel art is
+[`consoles/snes/src/render/`](consoles/snes/src/render/)) draw it at the window's own resolution. The pixel art is
 scaled with sharp bilinear filtering: whole pixels at any size, blended only across the
 one window pixel each pixel edge falls in. The Mode 7 plane, the one thing the console draws in 3D, is not scaled up
 from the console's pixels: at each window pixel it is looked up again through its line's

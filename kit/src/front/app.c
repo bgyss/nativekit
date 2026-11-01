@@ -140,11 +140,20 @@ static uint64_t counts[2][16];
 static uint8_t pending_kind[65];
 static unsigned pending_n;
 
+/* an access's kind, one of the console's kind_count */
+static int count_kind(uint32_t addr)
+{
+    int k = c->access_kind(addr);
+    if (k < 0 || k >= c->kind_count)
+        nk_fatal("an access of kind %d, not one of the console's %d", k, c->kind_count);
+    return k;
+}
+
 static void count_read(uint32_t addr, uint8_t value)
 {
     (void)value;
     if (pending_n < 65)
-        pending_kind[pending_n] = (uint8_t)c->access_kind(addr);
+        pending_kind[pending_n] = (uint8_t)count_kind(addr);
     pending_n++;
 }
 
@@ -156,7 +165,7 @@ static void count_write(uint32_t addr, uint8_t value)
         for (k = 0; k < pending_n; k++)
             counts[0][pending_kind[k]]++;
     pending_n = 0;
-    counts[1][c->access_kind(addr)]++;
+    counts[1][count_kind(addr)]++;
 }
 
 static void counts_frame(long n)

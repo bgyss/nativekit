@@ -51,12 +51,23 @@ patch_bsnes() {
     fi
 }
 
+# logged log cmd...: run cmd with its output in log; on failure, the log's tail
+logged() {
+    log="$1"; shift
+    if ! "$@" >"$log" 2>&1; then
+        echo "failed: $*" >&2
+        echo "the end of $log:" >&2
+        tail -n 30 "$log" >&2
+        exit 1
+    fi
+}
+
 build_asar() {
     fetch asar "$ASAR_URL" "$ASAR_PIN"
-    cmake -S "$tc/src/asar/src" -B "$tc/asar-build" -DCMAKE_BUILD_TYPE=Release \
+    logged "$tc/asar-configure.log" cmake -S "$tc/src/asar/src" -B "$tc/asar-build" -DCMAKE_BUILD_TYPE=Release \
         -DASAR_GEN_LIB=OFF -DASAR_GEN_DLL=OFF \
-        -DASAR_GEN_EXE_TEST=OFF -DASAR_GEN_DLL_TEST=OFF >/dev/null 2>&1
-    cmake --build "$tc/asar-build" -j "$jobs" >"$tc/asar-build.log" 2>&1
+        -DASAR_GEN_EXE_TEST=OFF -DASAR_GEN_DLL_TEST=OFF
+    logged "$tc/asar-build.log" cmake --build "$tc/asar-build" -j "$jobs"
     mkdir -p "$tc/asar"
     cp "$(find "$tc/asar-build" -type f \( -name asar -o -name asar.exe \) -perm -u+x | head -1)" "$tc/asar/asar"
     "$tc/asar/asar" --version | head -1
@@ -65,11 +76,16 @@ build_asar() {
 build_bsnes() {
     fetch bsnes "$BSNES_URL" "$BSNES_PIN"
     patch_bsnes
-    make -C "$tc/src/bsnes/bsnes" target=libretro binary=library -j "$jobs" >"$tc/bsnes-build.log" 2>&1
+    logged "$tc/bsnes-build.log" make -C "$tc/src/bsnes/bsnes" target=libretro binary=library -j "$jobs"
     mkdir -p "$top/build/oracle-core"
     cp "$tc/src/bsnes/bsnes/out/bsnes_libretro.$ext" "$top/build/oracle-core/"
     echo "reference core: $top/build/oracle-core/bsnes_libretro.$ext"
-    echo "sfxbox symbols exported: $(nm -g "$top/build/oracle-core/bsnes_libretro.$ext" | grep sfxbox_ | grep -vc ' U ' || true)"
+    n="$(nm -g "$top/build/oracle-core/bsnes_libretro.$ext" | grep sfxbox_ | grep -vc ' U ' || true)"
+    echo "sfxbox symbols exported: $n"
+    if [ "$n" -eq 0 ]; then
+        echo "the reference core exports no sfxbox_ symbols: the patches did not take" >&2
+        exit 1
+    fi
 }
 
 what="${1:-all}"
