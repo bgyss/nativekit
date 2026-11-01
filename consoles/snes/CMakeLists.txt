@@ -28,7 +28,8 @@ add_library(nshvc STATIC
   src/dsp/mixer_regs.c
   src/front/console.c
   src/front/snes_input.c
-  src/front/snes_console.c)
+  src/front/snes_console.c
+  src/front/snes_present.c)
 
 target_include_directories(nshvc
   PUBLIC include
@@ -38,9 +39,13 @@ if(NOT MSVC)
 endif()
 
 # the kit's coroutines, resampler, time, files, host, settings, battery save
-# and headless script, and the players' devices (kit/CMakeLists.txt)
+# and headless script, the players' devices and the application
+# (kit/CMakeLists.txt)
 target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> $<TARGET_OBJECTS:nk_host>
-  $<TARGET_OBJECTS:nk_front> $<TARGET_OBJECTS:nk_input>)
+  $<TARGET_OBJECTS:nk_front> $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_app>)
+# the kit's application draws with the renderer (rr.h, rr_size.h), set
+# here since kit/ names no console: until kit/include/nk/rr.h (the renderer split)
+target_include_directories(nk_app PRIVATE ${NSHVC_DIR}/src/render)
 if(WIN32)
   target_link_libraries(nshvc PUBLIC winmm)
 endif()

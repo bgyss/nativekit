@@ -95,6 +95,17 @@ const nk_console *nk_console_now(void);
 /* <env>_SCALE (headless): window pixels a console pixel across and down, 0 when not set */
 void nk_shot_scale(double *x, double *y);
 
+/* the game's images over the picture: an image's id, -1 when full; placed
+   by its centre (cx, cy, the window's points), scale, turn and alpha */
+#define NK_OVERLAYS 16
+int  nk_overlay_image(const uint32_t *argb, int w, int h);   /* -1 when full */
+void nk_overlay_place(int id, float cx, float cy, float scale, float angle_rad, float alpha, int visible);
+void nk_window_size(float *w, float *h);   /* points; a headless run's RR_SIZE */
+int  nk_headless(void);
+long nk_frame_no(void);
+/* where the last frame's picture was drawn on the target, and the target's width */
+void nk_shown_at(int d[4], int *tw);
+
 #ifdef __cplusplus
 }
 #endif

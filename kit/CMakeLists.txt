@@ -40,6 +40,9 @@ add_library(nk_front OBJECT ${NK_DIR}/src/front/env.c ${NK_DIR}/src/front/save.c
 # the players' native devices (it reads the host's game controllers)
 add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 
+# the application: main's loop, the window, the pace, the sound out
+add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c)
+
 # time, files and the host
 add_library(nk_host OBJECT)
 if(WIN32)
@@ -61,7 +64,7 @@ elseif(NOT NK_HOST STREQUAL "none")
   message(FATAL_ERROR "nativekit: no host ${NK_HOST}")
 endif()
 
-foreach(t nk_coro nk_resample nk_dispatch nk_host nk_front nk_input)
+foreach(t nk_coro nk_resample nk_dispatch nk_host nk_front nk_input nk_app)
   target_include_directories(${t} PRIVATE ${NK_INCLUDE})
   if(NK_C_FLAGS)
     target_compile_options(${t} PRIVATE ${NK_C_FLAGS})

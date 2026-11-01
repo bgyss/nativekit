@@ -21,7 +21,7 @@ void snes_input_frame(const host_pad *now, const int *on, const uint16_t *game_b
 /* the players whose device changed since the last, each to hook */
 void snes_input_report(void (*hook)(int player, const nshvc_input_source *src));
 
-/* console.c: the console's dot and line shown at (x, y) in the window's
+/* snes_present.c: the console's dot and line shown at (x, y) in the window's
    points; 0 off the picture */
 int console_picture_at(float x, float y, int *dot, int *line);
 

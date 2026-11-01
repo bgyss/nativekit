@@ -1,7 +1,10 @@
 /*
- * snes_console.c: the SNES as nativekit's console: its script steps and
- * buttons, its memories for dumps, its shots.
+ * snes_console.c: the SNES as nativekit's console: the machine, its
+ * picture (snes_present.c), its sound, its controllers (console.c), its
+ * script steps and buttons, its memories for dumps and its battery save,
+ * its shots.
  */
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -99,10 +102,59 @@ static const nk_region regions[] = {
     { ".vram", r_vram, 0 }, { ".cgram", r_cgram, 0 }, { ".oam", r_oam, 0 },
 };
 
+/* ---- the machine ---- */
+static void power(const void *cart) { nshvc_power((const nshvc_cart *)cart); }
+static uint64_t frame_ns(void) { return snes_pal() ? 19997194ull : 16639267ull; }
+/* the save folder: the save name, else the title (NULL when both are);
+   the window's title: the title, else "nativeshvc", which is snes_cart.title
+   as nshvc_power leaves it */
+static void app_name(const void *cart, const char **dir, const char **title)
+{
+    const nshvc_cart *k = (const nshvc_cart *)cart;
+    *dir = k->save_name ? k->save_name : k->title;
+    *title = k->title ? k->title : "nativeshvc";
+}
+static void window_size(int *w, int *h)
+{
+    *w = PPU_WIDTH;
+    *h = 224;
+}
+/* shots as a window NSHVC_SCALE pixels a console pixel shows them: the
+   canvas's scale that window's (nshvc_ext_canvas_scale) */
+static void headless_scale(double sx, double sy) { ppu_set_canvas_scale((int)ceil(sx > sy ? sx : sy)); }
+
+/* ---- the battery save: the cartridge's RAM, as SAVE_NAME.srm ---- */
+static int battery(nk_battery *b)
+{
+    uint32_t n = snes_sram_size();
+    if (!snes_cart.battery || !n || !snes_sram())
+        return 0;
+    b->ram = snes_sram();
+    b->bytes = n;
+    b->from = snes_cart.save_size ? snes_cart.save_from : 0;
+    b->size = snes_cart.save_size;
+    b->name = snes_cart.save_name ? snes_cart.save_name : snes_cart.title;
+    return 1;
+}
+
+static void counts_hooks(void (*rd)(uint32_t, uint8_t), void (*wr)(uint32_t, uint8_t))
+{
+    nshvc_set_read_hook(rd);
+    nshvc_set_write_hook(wr);
+}
+
 const nk_console snes_console = {
     .name = "nativeshvc", .env = "NSHVC", .play_ext = ".sfx",
-    .shot = shot,
+    .power = power, .run_frame = nshvc_run_frame, .frame_ns = frame_ns, .app_name = app_name,
+    .window_size = window_size, .aspect = snes_aspect, .scaled = snes_scaled, .present = snes_present,
+    .shot = shot, .rrcheck = snes_rrcheck, .rrcheck_why = snes_rrcheck_why,
+    .rrcheck_own = "with Mode 7 or a canvas presented",
+    .picture = nshvc_picture, .headless_scale = headless_scale,
+    .audio_hz = NSHVC_DSP_RATE, .audio_take = nshvc_audio_take, .audio_queued = nshvc_audio_queued,
     .buttons = buttons, .button_count = sizeof buttons / sizeof buttons[0],
     .steps = steps, .step_count = 4, .script_step = script_step,
+    .key = snes_key, .touch = snes_touch, .input = snes_input, .frame = snes_game_frame,
     .regions = regions, .region_count = sizeof regions / sizeof regions[0],
+    .battery = battery, .counts_hooks = counts_hooks, .access_kind = nshvc_access_kind,
+    .kind_count = NSHVC_KINDS, .at_exit = snes_at_exit,
 };
