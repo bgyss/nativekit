@@ -1,29 +1,17 @@
 /*
- * rr_metal.m: the renderer backend on Metal (macOS, iOS): the frame is
- * drawn into an offscreen target the size of the
- * window's drawable, then copied into the window's CAMetalLayer. Pictures
- * go on with the sharp bilinear shader (rr_size.h's weight, in the shader:
- * fwidth gives the texels to one target pixel); a frame with Mode 7 with
- * rr_mode7.h's arithmetic in a fragment shader. The shader source is
- * compiled at start-up, so the build needs no Metal toolchain step.
+ * snes_metal.m: the SNES's picture on the Metal backend (the kit's
+ * rr_metal.m, through rr_metal_ext.h): its compositor (compose_body.h) in
+ * compute kernels, and a frame with Mode 7 with rr_mode7.h's arithmetic in
+ * a fragment shader. The shader source is compiled at start-up, in the
+ * backend's open hook, so the build needs no Metal toolchain step.
  */
 #import <Metal/Metal.h>
-#import <QuartzCore/QuartzCore.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "snes_rr.h"
-#include "rr_size.h"
 #include "rr_mode7.h"
-#include "host.h"
-
-CAMetalLayer *host_metal_layer(void);
-void host_metal_layer_fit(int *w, int *h);
-/* without a window host (HOST=null) there is no layer: frames are drawn
-   offscreen and read back, never shown */
-__attribute__((weak)) CAMetalLayer *host_metal_layer(void) { return nil; }
-__attribute__((weak)) void host_metal_layer_fit(int *w, int *h) { *w = *h = 0; }
+#include "rr_metal_ext.h"
 
 #include "rr_compose_src.h"
 
@@ -64,37 +52,11 @@ static const char k_compose_post[] =
     "  c.cp_record(g.x, g.y);\n"
     "  rec[i] = uint4(c.cp_r0, c.cp_r1, c.cp_r2, c.cp_r3); }\n";
 
-static NSString *const k_src = @
+/* the Mode 7 library's own source: rr_metal_vertex_src (BO, bvs) goes
+   before it */
+static const char k_m7_src[] =
 "#include <metal_stdlib>\n"
 "using namespace metal;\n"
-"struct BO { float4 pos [[position]]; float2 uv; };\n"
-"vertex BO bvs(uint i [[vertex_id]], const device float4 *v [[buffer(0)]]) { BO o; o.pos = float4(v[i].xy, 0, 1); o.uv = v[i].zw; return o; }\n"
-/* one to one */
-"fragment float4 bfs(BO in [[stage_in]], texture2d<float> t [[texture(0)]]) {\n"
-"  constexpr sampler s(filter::nearest, address::clamp_to_edge);\n"
-"  return float4(t.sample(s, in.uv).rgb, 1); }\n"
-/* sharp bilinear: whole texels at any scale, blended only across the one
-   target pixel a texel edge falls in (rr_size.h rr_ref_image): the sample
-   point from the target pixel's own place and the texels a target pixel
-   (an interpolated coordinate and fwidth fall to either side of a texel's
-   edge), the four texels blended as rr_mix does, across then down, each
-   rounded (the sampler's own blend weighs in fewer bits): 2 off a channel
-   at a hard edge otherwise */
-"struct SU { float d0, d1, dx, dy; };\n"
-"fragment float4 sfs(BO in [[stage_in]], constant SU &U [[buffer(0)]], texture2d<float> t [[texture(0)]]) {\n"
-"  float2 ts = float2(t.get_width(), t.get_height()), dd = max(float2(U.dx, U.dy), float2(1e-5));\n"
-"  float2 px = (in.pos.xy - float2(U.d0, U.d1)) * float2(U.dx, U.dy) - 0.5;\n"
-"  float2 i = floor(px), f = px - i;\n"
-"  f = clamp((f - 0.5) / dd + 0.5, 0.0, 1.0);\n"
-"  int2 hi = int2(ts) - 1, a = clamp(int2(i), int2(0), hi), b = clamp(int2(i) + 1, int2(0), hi);\n"
-"  float3 c00 = round(t.read(uint2(a.x, a.y)).rgb * 255.0), c01 = round(t.read(uint2(b.x, a.y)).rgb * 255.0);\n"
-"  float3 c10 = round(t.read(uint2(a.x, b.y)).rgb * 255.0), c11 = round(t.read(uint2(b.x, b.y)).rgb * 255.0);\n"
-"  float3 top = floor(c00 + (c01 - c00) * f.x + 0.5), bot = floor(c10 + (c11 - c10) * f.x + 0.5);\n"
-"  return float4(floor(top + (bot - top) * f.y + 0.5) / 255.0, 1); }\n"
-/* an overlay: bilinear, its alpha kept for the blend */
-"fragment float4 ofs(BO in [[stage_in]], texture2d<float> t [[texture(0)]]) {\n"
-"  constexpr sampler s(filter::linear, address::clamp_to_edge);\n"
-"  return t.sample(s, in.uv); }\n"
 /* a frame with Mode 7 presented (rr_mode7.h, the same arithmetic) */
 "struct M7U { int pw, ph, d0, d1, step_u, step_v, du[28], dv[28], cpp, left, cvk, cvlen, cvw, cvh; };\n"
 "static uint m7_direct(uint c) { return (c & 7u) << 2 | ((c & 0x38u) >> 1) << 5 | ((c & 0xC0u) >> 3) << 10; }\n"
@@ -340,9 +302,7 @@ static NSString *const k_src = @
 "  }\n"
 "  return float4(float((top >> 16) & 0xFF), float((top >> 8) & 0xFF), float(top & 0xFF), 255.0) / 255.0; }\n";
 
-static id<MTLDevice> s_dev;
-static id<MTLCommandQueue> s_q;
-static id<MTLRenderPipelineState> s_copy, s_sharp, s_m7;
+static id<MTLRenderPipelineState> s_m7;
 static id<MTLComputePipelineState> s_cp, s_cpr; /* the compositor: a picture; a picture and its records */
 static id<MTLBuffer> s_recbuf[3], s_picbuf[3];  /* each frame in flight's records and picture */
 static id<MTLBuffer> s_m7buf[3][8];             /* each frame in flight's Mode 7 tables (m7_draw) */
@@ -352,200 +312,42 @@ static id<MTLBuffer> s_cpbuf[3];              /* each frame in flight's descript
 static id<MTLTexture> s_plane;             /* the Mode 7 planes (rr_mode7.h), as last uploaded */
 static uint32_t s_plane_gen;
 static int s_planes;
-static id<MTLTexture> s_col;            /* the target */
-static id<MTLTexture> s_pic[3];          /* each frame's picture (frames in flight) */
-static int s_pi;
-static id<MTLBuffer> s_vb[3];
-static size_t s_vused;
-static id<MTLCommandBuffer> s_cmd;
-static id<MTLRenderCommandEncoder> s_enc;
-static dispatch_semaphore_t s_inflight;
-static int s_rw, s_rh;
-static uint32_t s_clear;
-static id<MTLRenderPipelineState> s_over;      /* overlays: blended */
-static id<MTLTexture> s_otex[3][RR_OVERLAYS];  /* each frame in flight's overlays' images */
-static int s_on;                                /* overlays this frame */
-#define VB_SIZE (1u << 16)
 
-static id<MTLRenderPipelineState> make_pipe_blend(NSString *fs, id<MTLLibrary> lib, int blend)
+/* the backend's open hook (rr_set_open_hook), at rr_open's end: the Mode 7
+   shader and the compositor compiled; 0 (the backend not open) when they
+   do not */
+static int snes_metal_open(void)
 {
-    MTLRenderPipelineDescriptor *d = [MTLRenderPipelineDescriptor new];
     NSError *err = nil;
-    id<MTLRenderPipelineState> p;
-    d.vertexFunction = [lib newFunctionWithName:@"bvs"];
-    d.fragmentFunction = [lib newFunctionWithName:fs];
-    d.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
-    if (blend) {
-        d.colorAttachments[0].blendingEnabled = YES;
-        d.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
-        d.colorAttachments[0].destinationRGBBlendFactor = MTLBlendFactorOneMinusSourceAlpha;
-        d.colorAttachments[0].sourceAlphaBlendFactor = MTLBlendFactorZero;
-        d.colorAttachments[0].destinationAlphaBlendFactor = MTLBlendFactorOne;
+    id<MTLLibrary> lib;
+    lib = [rr_metal_device() newLibraryWithSource:[NSString stringWithFormat:@"%@%s", rr_metal_vertex_src, k_m7_src]
+                                          options:nil error:&err];
+    if (!lib) {
+        fprintf(stderr, "rr: metal shader: %s\n", [[err description] UTF8String]);
+        return 0;
     }
-    p = [s_dev newRenderPipelineStateWithDescriptor:d error:&err];
-    if (!p)
-        fprintf(stderr, "rr: metal pipeline %s: %s\n", [fs UTF8String], [[err description] UTF8String]);
-    return p;
-}
-
-static id<MTLRenderPipelineState> make_pipe(NSString *fs, id<MTLLibrary> lib) { return make_pipe_blend(fs, lib, 0); }
-
-static void targets(int w, int h)
-{
-    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                                                                   width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
-    td.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
-    td.storageMode = MTLStorageModeShared;
-    s_col = [s_dev newTextureWithDescriptor:td];
-    s_rw = w;
-    s_rh = h;
-}
-
-int rr_open(void)
-{
-    @autoreleasepool {
-        NSError *err = nil;
-        id<MTLLibrary> lib;
-        CAMetalLayer *ml;
-        int i, w, h;
-        s_dev = MTLCreateSystemDefaultDevice();
-        if (!s_dev)
-            return 0;
-        s_q = [s_dev newCommandQueue];
-        lib = [s_dev newLibraryWithSource:k_src options:nil error:&err];
-        if (!lib) {
-            fprintf(stderr, "rr: metal shader: %s\n", [[err description] UTF8String]);
+    s_m7 = rr_metal_pipe(@"m7fs", lib, 0);
+    if (!s_m7)
+        return 0;
+    {
+        NSString *src = [NSString stringWithFormat:@"%s%s%s", k_compose_pre, k_compose_body, k_compose_post];
+        id<MTLLibrary> cl = [rr_metal_device() newLibraryWithSource:src options:nil error:&err];
+        id<MTLFunction> fn = cl ? [cl newFunctionWithName:@"cpk"] : nil;
+        if (!fn) {
+            fprintf(stderr, "rr: metal compositor: %s\n", [[err description] UTF8String]);
             return 0;
         }
-        s_copy = make_pipe(@"bfs", lib);
-        s_sharp = make_pipe(@"sfs", lib);
-        s_over = make_pipe_blend(@"ofs", lib, 1);
-        s_m7 = make_pipe(@"m7fs", lib);
-        if (!s_copy || !s_sharp || !s_over || !s_m7)
+        s_cp = [rr_metal_device() newComputePipelineStateWithFunction:fn error:&err];
+        fn = [cl newFunctionWithName:@"cprk"];
+        s_cpr = fn ? [rr_metal_device() newComputePipelineStateWithFunction:fn error:&err] : nil;
+        if (!s_cp || !s_cpr)
             return 0;
-        {
-            NSString *src = [NSString stringWithFormat:@"%s%s%s", k_compose_pre, k_compose_body, k_compose_post];
-            id<MTLLibrary> cl = [s_dev newLibraryWithSource:src options:nil error:&err];
-            id<MTLFunction> fn = cl ? [cl newFunctionWithName:@"cpk"] : nil;
-            if (!fn) {
-                fprintf(stderr, "rr: metal compositor: %s\n", [[err description] UTF8String]);
-                return 0;
-            }
-            s_cp = [s_dev newComputePipelineStateWithFunction:fn error:&err];
-            fn = [cl newFunctionWithName:@"cprk"];
-            s_cpr = fn ? [s_dev newComputePipelineStateWithFunction:fn error:&err] : nil;
-            if (!s_cp || !s_cpr)
-                return 0;
-        }
-        for (i = 0; i < 3; i++)
-            s_vb[i] = [s_dev newBufferWithLength:VB_SIZE options:MTLResourceStorageModeShared];
-        s_inflight = dispatch_semaphore_create(3);
-        ml = host_metal_layer();
-        if (ml) {
-            [ml setDevice:s_dev];
-            [ml setMaximumDrawableCount:3];
-            host_metal_layer_fit(&w, &h);
-        }
-        if (!ml || w < 1 || h < 1)
-            rr_headless_size(&w, &h);
-        targets(w, h);
     }
     return 1;
 }
 
-void rr_close(void) {}
-
-const char *rr_name(void) { return "metal"; }
-
-void rr_target(int *w, int *h)
-{
-    CAMetalLayer *ml = host_metal_layer();
-    if (ml && !s_cmd) {                    /* the next frame at the window's size */
-        int fw, fh;
-        host_metal_layer_fit(&fw, &fh);
-        if (fw > 0 && fh > 0 && (fw != s_rw || fh != s_rh))
-            targets(fw, fh);
-    }
-    *w = s_rw;
-    *h = s_rh;
-}
-
-/* a quad over target rectangle d, uv 0..1, into this frame's vertex buffer:
-   its offset, or -1 */
-static long quad(const int d[4])
-{
-    static const int ix[6] = { 0, 1, 2, 2, 1, 3 };
-    float c[4][4] = { { (float)d[0], (float)d[1], 0, 0 }, { (float)d[2], (float)d[1], 1, 0 },
-                      { (float)d[0], (float)d[3], 0, 1 }, { (float)d[2], (float)d[3], 1, 1 } };
-    float *q;
-    size_t o = (s_vused + 15) & ~(size_t)15;
-    int i;
-    if (o + 6 * 16 > VB_SIZE)
-        return -1;
-    s_vused = o + 6 * 16;
-    q = (float *)((char *)[s_vb[s_pi] contents] + o);
-    for (i = 0; i < 6; i++) {
-        q[4 * i + 0] = c[ix[i]][0] / s_rw * 2 - 1;
-        q[4 * i + 1] = 1 - c[ix[i]][1] / s_rh * 2;
-        q[4 * i + 2] = c[ix[i]][2];
-        q[4 * i + 3] = c[ix[i]][3];
-    }
-    return (long)o;
-}
-
-void rr_begin(uint32_t argb)
-{
-    @autoreleasepool {
-        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        int w, h;
-        rr_target(&w, &h);
-        dispatch_semaphore_wait(s_inflight, DISPATCH_TIME_FOREVER);
-        s_cmd = [s_q commandBuffer];
-        {
-            dispatch_semaphore_t sem = s_inflight;
-            [s_cmd addCompletedHandler:^(id<MTLCommandBuffer> b) { (void)b; dispatch_semaphore_signal(sem); }];
-        }
-        s_pi = (s_pi + 1) % 3;
-        s_vused = 0;
-        s_on = 0;
-        s_clear = argb;
-        rp.colorAttachments[0].texture = s_col;
-        rp.colorAttachments[0].loadAction = MTLLoadActionClear;
-        rp.colorAttachments[0].clearColor = MTLClearColorMake(((argb >> 16) & 0xFF) / 255.0, ((argb >> 8) & 0xFF) / 255.0,
-                                                              (argb & 0xFF) / 255.0, 1);
-        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-        s_enc = [s_cmd renderCommandEncoderWithDescriptor:rp];
-    }
-}
-
-/* this frame's picture, w x h */
-static id<MTLTexture> pic_tex(int w, int h)
-{
-    id<MTLTexture> t = s_pic[s_pi];
-    if (!t || (int)t.width != w || (int)t.height != h) {
-        MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                                                                       width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
-        td.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
-        t = s_pic[s_pi] = [s_dev newTextureWithDescriptor:td];
-    }
-    return t;
-}
-
-static void draw_pic(id<MTLTexture> t, int w, int h, const int d[4]);
-
-void rr_image(const uint32_t *argb, int w, int h, const int d[4])
-{
-    @autoreleasepool {
-        id<MTLTexture> t;
-        if (!s_enc || w <= 0 || h <= 0 || d[2] <= d[0] || d[3] <= d[1])
-            return;
-        t = pic_tex(w, h);
-        /* 0xAARRGGBB little-endian is BGRA in memory */
-        [t replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger)w, (NSUInteger)h) mipmapLevel:0
-               withBytes:argb bytesPerRow:(NSUInteger)w * 4];
-        draw_pic(t, w, h, d);
-    }
-}
+/* registered before main: the backend opens with it */
+__attribute__((constructor)) static void snes_metal_init(void) { rr_set_open_hook(snes_metal_open); }
 
 static int compose(const uint32_t *desc, size_t words, int w, int h, const uint32_t wp[4], const int d[4]);
 
@@ -567,50 +369,23 @@ static int compose(const uint32_t *desc, size_t words, int w, int h, const uint3
     @autoreleasepool {
         id<MTLTexture> t;
         id<MTLComputeCommandEncoder> ce;
-        MTLRenderPassDescriptor *rp;
-        if (!s_cp || !s_enc || w <= 0 || h <= 0 || d[2] <= d[0] || d[3] <= d[1])
+        if (!s_cp || !rr_metal_encoding() || w <= 0 || h <= 0 || d[2] <= d[0] || d[3] <= d[1])
             return 0;
-        t = pic_tex(w, h);
-        if (!s_cpbuf[s_pi] || [s_cpbuf[s_pi] length] < words * 4)
-            s_cpbuf[s_pi] = [s_dev newBufferWithLength:words * 4 * 2 options:MTLResourceStorageModeShared];
-        memcpy([s_cpbuf[s_pi] contents], desc, words * 4);
+        t = rr_metal_picture_texture(w, h);
+        if (!s_cpbuf[rr_metal_frame()] || [s_cpbuf[rr_metal_frame()] length] < words * 4)
+            s_cpbuf[rr_metal_frame()] = [rr_metal_device() newBufferWithLength:words * 4 * 2 options:MTLResourceStorageModeShared];
+        memcpy([s_cpbuf[rr_metal_frame()] contents], desc, words * 4);
         /* the picture first, in a pass of its own, then the target's pass
            goes on */
-        [s_enc endEncoding];
-        ce = [s_cmd computeCommandEncoder];
+        ce = rr_metal_compute_begin();
         [ce setComputePipelineState:s_cp];
-        [ce setBuffer:s_cpbuf[s_pi] offset:0 atIndex:0];
+        [ce setBuffer:s_cpbuf[rr_metal_frame()] offset:0 atIndex:0];
         [ce setBytes:wp length:16 atIndex:1];
         [ce setTexture:t atIndex:0];
         [ce dispatchThreads:MTLSizeMake((NSUInteger)w, (NSUInteger)h, 1) threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
-        [ce endEncoding];
-        rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        rp.colorAttachments[0].texture = s_col;
-        rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
-        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-        s_enc = [s_cmd renderCommandEncoderWithDescriptor:rp];
-        draw_pic(t, w, h, d);
+        rr_metal_compute_end(ce);
+        rr_metal_draw_picture(t, w, h, d);
         return 1;
-    }
-}
-
-/* picture t (w x h) over target rectangle d: one to one, or sharp bilinear */
-static void draw_pic(id<MTLTexture> t, int w, int h, const int d[4])
-{
-    {
-        long off;
-        if ((off = quad(d)) < 0)
-            return;
-        [s_enc setRenderPipelineState:d[2] - d[0] == w && d[3] - d[1] == h ? s_copy : s_sharp];
-        [s_enc setVertexBuffer:s_vb[s_pi] offset:(NSUInteger)off atIndex:0];
-        {
-            /* where the target's pixels sample: its rectangle's corner, and
-               texels a target pixel (rr_ref_image's dx, dy) */
-            float su[4] = { (float)d[0], (float)d[1], (float)w / (float)(d[2] - d[0]), (float)h / (float)(d[3] - d[1]) };
-            [s_enc setFragmentBytes:su length:sizeof su atIndex:0];
-        }
-        [s_enc setFragmentTexture:t atIndex:0];
-        [s_enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
     }
 }
 
@@ -625,34 +400,27 @@ int rr_compose_mode7(const uint32_t *desc, size_t words, const struct RrMode7 *m
     @autoreleasepool {
         size_t np = (size_t)m->pw * (size_t)m->ph;
         id<MTLComputeCommandEncoder> ce;
-        MTLRenderPassDescriptor *rp;
-        if (!s_cpr || !s_enc || np == 0 || d[2] <= d[0] || d[3] <= d[1])
+        if (!s_cpr || !rr_metal_encoding() || np == 0 || d[2] <= d[0] || d[3] <= d[1])
             return 0;
-        if (!s_cpbuf[s_pi] || [s_cpbuf[s_pi] length] < words * 4)
-            s_cpbuf[s_pi] = [s_dev newBufferWithLength:words * 4 * 2 options:MTLResourceStorageModeShared];
-        if (!s_recbuf[s_pi] || [s_recbuf[s_pi] length] < np * 16) {
-            s_recbuf[s_pi] = [s_dev newBufferWithLength:np * 16 options:MTLResourceStorageModePrivate];
-            s_picbuf[s_pi] = [s_dev newBufferWithLength:np * 4 options:MTLResourceStorageModePrivate];
+        if (!s_cpbuf[rr_metal_frame()] || [s_cpbuf[rr_metal_frame()] length] < words * 4)
+            s_cpbuf[rr_metal_frame()] = [rr_metal_device() newBufferWithLength:words * 4 * 2 options:MTLResourceStorageModeShared];
+        if (!s_recbuf[rr_metal_frame()] || [s_recbuf[rr_metal_frame()] length] < np * 16) {
+            s_recbuf[rr_metal_frame()] = [rr_metal_device() newBufferWithLength:np * 16 options:MTLResourceStorageModePrivate];
+            s_picbuf[rr_metal_frame()] = [rr_metal_device() newBufferWithLength:np * 4 options:MTLResourceStorageModePrivate];
         }
-        if (!s_cpbuf[s_pi] || !s_recbuf[s_pi] || !s_picbuf[s_pi])
+        if (!s_cpbuf[rr_metal_frame()] || !s_recbuf[rr_metal_frame()] || !s_picbuf[rr_metal_frame()])
             return 0;
-        memcpy([s_cpbuf[s_pi] contents], desc, words * 4);
+        memcpy([s_cpbuf[rr_metal_frame()] contents], desc, words * 4);
         /* the picture and records first, in a pass of their own */
-        [s_enc endEncoding];
-        ce = [s_cmd computeCommandEncoder];
+        ce = rr_metal_compute_begin();
         [ce setComputePipelineState:s_cpr];
-        [ce setBuffer:s_cpbuf[s_pi] offset:0 atIndex:0];
-        [ce setBuffer:s_recbuf[s_pi] offset:0 atIndex:1];
-        [ce setBuffer:s_picbuf[s_pi] offset:0 atIndex:2];
+        [ce setBuffer:s_cpbuf[rr_metal_frame()] offset:0 atIndex:0];
+        [ce setBuffer:s_recbuf[rr_metal_frame()] offset:0 atIndex:1];
+        [ce setBuffer:s_picbuf[rr_metal_frame()] offset:0 atIndex:2];
         [ce dispatchThreads:MTLSizeMake((NSUInteger)m->pw, (NSUInteger)m->ph, 1) threadsPerThreadgroup:MTLSizeMake(32, 8, 1)];
-        [ce endEncoding];
-        rp = [MTLRenderPassDescriptor renderPassDescriptor];
-        rp.colorAttachments[0].texture = s_col;
-        rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
-        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-        s_enc = [s_cmd renderCommandEncoderWithDescriptor:rp];
+        rr_metal_compute_end(ce);
         /* the canvas's texels where the description holds them */
-        m7_draw(m, d, s, s_recbuf[s_pi], s_picbuf[s_pi], s_cpbuf[s_pi], (size_t)desc[CP_CV_WORD] * 4);
+        m7_draw(m, d, s, s_recbuf[rr_metal_frame()], s_picbuf[rr_metal_frame()], s_cpbuf[rr_metal_frame()], (size_t)desc[CP_CV_WORD] * 4);
         return 1;
     }
 }
@@ -661,11 +429,11 @@ int rr_compose_mode7(const uint32_t *desc, size_t words, const struct RrMode7 *m
    (made larger when it must be) */
 static id<MTLBuffer> table_buf(int i, const void *p, size_t n)
 {
-    id<MTLBuffer> b = s_m7buf[s_pi][i];
+    id<MTLBuffer> b = s_m7buf[rr_metal_frame()][i];
     if (n == 0)
         n = 4;
     if (!b || [b length] < n)
-        b = s_m7buf[s_pi][i] = [s_dev newBufferWithLength:n + n / 2 options:MTLResourceStorageModeShared];
+        b = s_m7buf[rr_metal_frame()][i] = [rr_metal_device() newBufferWithLength:n + n / 2 options:MTLResourceStorageModeShared];
     if (b && p)
         memcpy([b contents], p, n);
     return b;
@@ -684,7 +452,7 @@ static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Sa
         id<MTLBuffer> b[8];
         long off;
         int i;
-        if (!s_enc || ow <= 0 || oh <= 0 || np == 0 || (off = quad(d)) < 0)
+        if (!rr_metal_encoding() || ow <= 0 || oh <= 0 || np == 0 || (off = rr_metal_quad(d)) < 0)
             return;
         u.pw = m->pw;
         u.ph = m->ph;
@@ -732,11 +500,9 @@ static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Sa
                 td.arrayLength = (NSUInteger)layers;
                 td.usage = MTLTextureUsageShaderRead;
                 td.storageMode = MTLStorageModeShared;
-                s_plane = [s_dev newTextureWithDescriptor:td];
+                s_plane = [rr_metal_device() newTextureWithDescriptor:td];
             } else {
-                id<MTLCommandBuffer> c = [s_q commandBuffer];
-                [c commit];
-                [c waitUntilCompleted];
+                rr_metal_wait_idle();
             }
             for (k = 0; k < m->vrams; k++)
                 [s_plane replaceRegion:MTLRegionMake2D(0, 0, 1024, 1024) mipmapLevel:0 slice:(NSUInteger)k
@@ -744,86 +510,12 @@ static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Sa
             s_plane_gen = m->plane_gen;
             s_planes = m->vrams;
         }
-        [s_enc setRenderPipelineState:s_m7];
-        [s_enc setFragmentTexture:s_plane atIndex:0];
-        [s_enc setVertexBuffer:s_vb[s_pi] offset:(NSUInteger)off atIndex:0];
-        [s_enc setFragmentBytes:&u length:sizeof u atIndex:0];
+        [rr_metal_encoder() setRenderPipelineState:s_m7];
+        [rr_metal_encoder() setFragmentTexture:s_plane atIndex:0];
+        [rr_metal_encoder() setVertexBuffer:rr_metal_vertices() offset:(NSUInteger)off atIndex:0];
+        [rr_metal_encoder() setFragmentBytes:&u length:sizeof u atIndex:0];
         for (i = 0; i < 8; i++)
-            [s_enc setFragmentBuffer:b[i] offset:i == 7 && cv ? cv_off : 0 atIndex:(NSUInteger)i + 1];
-        [s_enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
-    }
-}
-
-void rr_overlay(const uint32_t *argb, int w, int h, const float q[6])
-{
-    @autoreleasepool {
-        static const int ix[6] = { 0, 1, 2, 2, 1, 3 };
-        float c[4][4] = { { q[0], q[1], 0, 0 }, { q[2], q[3], 1, 0 }, { q[4], q[5], 0, 1 },
-                          { q[2] + q[4] - q[0], q[3] + q[5] - q[1], 1, 1 } };
-        id<MTLTexture> t;
-        size_t o = (s_vused + 15) & ~(size_t)15;
-        float *v;
-        int i;
-        if (!s_enc || w <= 0 || h <= 0 || s_on == RR_OVERLAYS || o + 6 * 16 > VB_SIZE)
-            return;
-        t = s_otex[s_pi][s_on];
-        if (!t || (int)t.width != w || (int)t.height != h) {
-            MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
-                                                                                           width:(NSUInteger)w height:(NSUInteger)h mipmapped:NO];
-            td.usage = MTLTextureUsageShaderRead;
-            t = s_otex[s_pi][s_on] = [s_dev newTextureWithDescriptor:td];
-        }
-        s_on++;
-        [t replaceRegion:MTLRegionMake2D(0, 0, (NSUInteger)w, (NSUInteger)h) mipmapLevel:0
-               withBytes:argb bytesPerRow:(NSUInteger)w * 4];
-        s_vused = o + 6 * 16;
-        v = (float *)((char *)[s_vb[s_pi] contents] + o);
-        for (i = 0; i < 6; i++) {
-            v[4 * i + 0] = c[ix[i]][0] / s_rw * 2 - 1;
-            v[4 * i + 1] = 1 - c[ix[i]][1] / s_rh * 2;
-            v[4 * i + 2] = c[ix[i]][2];
-            v[4 * i + 3] = c[ix[i]][3];
-        }
-        [s_enc setRenderPipelineState:s_over];
-        [s_enc setVertexBuffer:s_vb[s_pi] offset:o atIndex:0];
-        [s_enc setFragmentTexture:t atIndex:0];
-        [s_enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
-    }
-}
-
-void rr_present(void)
-{
-    @autoreleasepool {
-        CAMetalLayer *ml = host_window_visible() ? host_metal_layer() : nil;
-        if (!s_enc)
-            return;
-        [s_enc endEncoding];
-        s_enc = nil;
-        if (ml) {
-            id<CAMetalDrawable> dr = [ml nextDrawable];
-            if (dr && (int)[dr texture].width == s_rw && (int)[dr texture].height == s_rh) {
-                id<MTLBlitCommandEncoder> b = [s_cmd blitCommandEncoder];
-                [b copyFromTexture:s_col sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0, 0, 0)
-                        sourceSize:MTLSizeMake((NSUInteger)s_rw, (NSUInteger)s_rh, 1)
-                         toTexture:[dr texture] destinationSlice:0 destinationLevel:0
-                 destinationOrigin:MTLOriginMake(0, 0, 0)];
-                [b endEncoding];
-                [s_cmd presentDrawable:dr];
-            }
-        }
-        [s_cmd commit];
-        s_cmd = nil;
-    }
-}
-
-int rr_read(uint32_t *argb)
-{
-    @autoreleasepool {
-        id<MTLCommandBuffer> c = [s_q commandBuffer];
-        [c commit];
-        [c waitUntilCompleted];                /* everything before it is done */
-        [s_col getBytes:argb bytesPerRow:(NSUInteger)s_rw * 4
-             fromRegion:MTLRegionMake2D(0, 0, (NSUInteger)s_rw, (NSUInteger)s_rh) mipmapLevel:0];
-        return 1;
+            [rr_metal_encoder() setFragmentBuffer:b[i] offset:i == 7 && cv ? cv_off : 0 atIndex:(NSUInteger)i + 1];
+        [rr_metal_encoder() drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
     }
 }

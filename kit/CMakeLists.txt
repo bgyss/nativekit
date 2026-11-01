@@ -43,11 +43,21 @@ add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 # the application: main's loop, the window, the pace, the sound out
 add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c)
 
-# the presentation backend (NK_RENDER; the GPU ones still live in the
-# console's folder until they move here)
+# the presentation backend (NK_RENDER; the GL and Vulkan ones still live in
+# the console's folder until they move here). On Metal its frameworks are
+# nk_render's link libraries, for the console's library to link.
+if(NOT NK_RENDER MATCHES "^(soft|metal|gl|vulkan)$")
+  message(FATAL_ERROR "nativekit: no renderer ${NK_RENDER}")
+endif()
 if(NK_RENDER STREQUAL "soft")
   add_library(nk_render OBJECT)
   target_sources(nk_render PRIVATE ${NK_DIR}/src/render/soft/rr_soft.c)
+  set(NK_RENDER_TARGETS nk_render)
+elseif(NK_RENDER STREQUAL "metal")
+  add_library(nk_render OBJECT)
+  target_sources(nk_render PRIVATE ${NK_DIR}/src/render/metal/rr_metal.m)
+  set_source_files_properties(${NK_DIR}/src/render/metal/rr_metal.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  target_link_libraries(nk_render PUBLIC "-framework Metal" "-framework QuartzCore" "-framework Foundation")
   set(NK_RENDER_TARGETS nk_render)
 endif()
 
