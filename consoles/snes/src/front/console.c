@@ -15,6 +15,9 @@
 #include "snes_console.h"
 #include "nk/input.h"
 #include "snes_input.h"
+#if defined(NSHVC_RENDER_VULKAN)
+#include "rr_vulkan_ext.h"
+#endif
 #include "snes_rr.h"
 
 /* ---- the public calls ---- */
@@ -146,6 +149,9 @@ int nshvc_main(const nshvc_cart *cart, int argc, char **argv)
     rr_set_open_hook(snes_metal_open);
 #elif defined(NSHVC_RENDER_GL)
     rr_set_open_hook(snes_gl_open);
+#elif defined(NSHVC_RENDER_VULKAN)
+    rr_vk_set_app_name("nativeshvc");
+    rr_set_open_hook(snes_vulkan_open);
 #endif
     return nk_main(&snes_console, cart, argc, argv);
 }

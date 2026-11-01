@@ -40,9 +40,14 @@ int rr_compose_mode7(const uint32_t *desc, size_t words, const struct RrMode7 *m
                      const struct RrM7Samples *s);
 
 /* the GPU backends' open hooks (rr_set_open_hook), set by nshvc_main:
-   the compositor's and Mode 7's programs made when the backend opens */
+   the compositor's and Mode 7's programs made when the backend opens. A
+   program must start through nshvc_main for them to be ready: one that
+   calls rr_open itself opens the kit's backend alone, and rr_compose,
+   rr_compose_woven and rr_compose_mode7 then give 0 (rr_mode7 draws
+   nothing) */
 int snes_metal_open(void);
 int snes_gl_open(void);
+int snes_vulkan_open(void);
 
 #ifdef __cplusplus
 }

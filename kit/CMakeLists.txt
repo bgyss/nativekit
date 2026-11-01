@@ -43,11 +43,11 @@ add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 # the application: main's loop, the window, the pace, the sound out
 add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c)
 
-# the presentation backend (NK_RENDER; the Vulkan one still lives in the
-# console's folder until it moves here). On Metal and GL its frameworks or
+# the presentation backend (NK_RENDER). On Metal and GL its frameworks or
 # libraries are nk_render's link libraries, for the console's library to
 # link; on GL its folder (gl_api.h, for rr_gl_ext.h) is an include directory
-# of nk_render's, for the console's own GL code.
+# of nk_render's, for the console's own GL code. On Vulkan the console finds
+# the loader itself (Vulkan::Vulkan, for its own Vulkan code too).
 if(NOT NK_RENDER MATCHES "^(soft|metal|gl|vulkan)$")
   message(FATAL_ERROR "nativekit: no renderer ${NK_RENDER}")
 endif()
@@ -72,6 +72,12 @@ elseif(NK_RENDER STREQUAL "gl")
   else()
     target_link_libraries(nk_render PUBLIC GL)
   endif()
+  set(NK_RENDER_TARGETS nk_render)
+elseif(NK_RENDER STREQUAL "vulkan")
+  find_package(Vulkan REQUIRED)
+  add_library(nk_render OBJECT)
+  target_sources(nk_render PRIVATE ${NK_DIR}/src/render/vulkan/rr_vulkan.c)
+  target_link_libraries(nk_render PUBLIC Vulkan::Vulkan)
   set(NK_RENDER_TARGETS nk_render)
 endif()
 
