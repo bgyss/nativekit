@@ -26,15 +26,21 @@ Each was shown able to fail (a planted error caught) before it was relied on.
 | `unit/screen_check.c` | the largest screens (8192 x 8192, 256 x 8192, and 16384 x 16384 in hires interlaced), the console's picture at their centre, corners and far ends, and sprites placed by `nshvc_ext_sprite_page` at every corner and edge and at random, either side of the picture, plus the console's own Y page (wrapping above the picture) and `nshvc_ext_sprite_x`/`_y`; BG1 and the sprites kept to the console's picture (`nshvc_ext_layer_clip`) over BG2, and in Mode 7, the sprites cut at each edge, with the Mode 7 presentation at one to one exactly the picture; BG1's map outside the console's picture (`nshvc_ext_layer_outside`) exactly past its edges, and a 128 x 64 one wrapping at 1,024 pixels; Y page 0's wrap above the picture off (`nshvc_ext_sprite_wrap(0)`) on a 256 x 1024 screen: each scene's whole picture held pixel by pixel to the picture made again from the sprites' places alone. With `--headless --frames N` and `NSHVC_RRCHECK=1`, the scenes (and one in Mode 7) through a renderer | `build/null/tests/screen_check` (about 10 seconds, 2 GB); `NSHVC_RRCHECK=1 RR_SIZE=1067x800 build/null-RENDER/tests/screen_check --headless --frames 20` |
 | `unit/present_check.c` | Mode 7 at the window's resolution (`src/render/rr_mode7.h`), on scenes of rotation and scale, the wrap modes, flips, a matrix by line, EXTBG, sprites, colour maths, windows, brightness, mosaic, pseudo-hires, direct colour, a larger screen, one with the console's picture off its centre, a 2048 x 1536 one and a minified plane, at one to one, scales up, down, of another shape and 6x: against the anti-aliasing's definition written again in the check, exactly; a frame without Mode 7, and a plane of one colour under sprites, windows and colour maths, exactly the picture scaled (only the plane is anti-aliased); against the plane's ground truth (16 x 16 point samples a pixel), the mean error at most a quarter of one point sample's, and half where the plane is minified. With `--headless --frames N` and `NSHVC_RRCHECK=1`, the scenes through a renderer | `build/null/tests/present_check` (about 45 seconds); `NSHVC_RRCHECK=1 RR_SIZE=1067x800 build/null-RENDER/tests/present_check --headless --frames 60` |
 | `NSHVC_RRCHECK=1` | every renderer's presented frames against the reference (with `NSHVC_RRCHECK_WHY=1`, the first frame that differs: its first pixels, and the record of the picture pixels under each): one to one and scaled with sharp bilinear, and a frame with Mode 7 or a layer's canvas at the target's resolution (rr_mode7.h rr_ref_mode7: the plane anti-aliased, the canvas's texels), within 1 a channel | `NSHVC_RRCHECK=1 RR_SIZE=1000x750 build/null-RENDER/tests/testcart --rom ROM --headless --frames 4` |
-| `NSHVC_SPCLOG=FILE` | the SPC700's accesses, to pair with the reference's (`oracle --spclog`): each write and each read of $F0-$FF, and the S-CPU's port writes, 8 bytes each (format in `tests/oracle/oracle.c`) | any headless run |
+| `NSHVC_SPCLOG=FILE` | the SPC700's accesses, to pair with the reference's (`oracle --spclog`): each write and each read of $F0-$FF, and the S-CPU's port writes, 8 bytes each (format in `oracle/oracle.c`) | any headless run |
 | `NSHVC_PPUCHECK=1` | each frame drawn from its record against the frame drawn a line at a time | any headless run |
 | `NSHVC_COMPOSECHECK=1` | each frame's picture from its description by the C build of the compositor (`src/render/compose_body.h`, as the GPU backends draw it) against the frame drawn from its record, pixel for pixel | any headless run (`NSHVC_COMPOSE=0`: the renderers show the CPU's picture instead) |
 
 ## Setting up
 
+From the repository's root (the commands above are run from there too):
+
 ```bash
 cmake -S . -B build/null -DNSHVC_TESTS=ON -DNSHVC_EXAMPLES=ON && cmake --build build/null
 ```
+
+The kit's own checks (`kit/tests/`, listed in `kit/docs/kit.md`) run with
+`cmake --build build/null --target kit-check` (`mise run test:kit`); `mise run test`
+(`tools/check.sh`) runs them with the checks here.
 
 `rom/run.py` needs the reference core and the assembler:
 
@@ -72,7 +78,7 @@ polls waits: what `rom/ext_check.py` and the sound check run.
 ## The known differences (`rom/KNOWN`)
 
 The 56 tests that differ. 42 read the multiplier or divider while it works,
-which the contract makes done when read (README.md, Time). 14 differ by one
+which the contract makes done when read (nativeshvc's README, Time). 14 differ by one
 read of the latched H counter or one pixel, after an access the replay
 started 2 clocks late: the work RAM's refresh before it ended 2 clocks
 later than the reference's, though the reference's own formula gives

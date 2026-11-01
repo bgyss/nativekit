@@ -1,3 +1,47 @@
+# nativekit
+
+## This repository
+
+This repository holds **nativekit** ([`kit/`](kit/)) and the native consoles built on it.
+A native console is a behaviour-exact console a decompiled game's C runs on directly, with
+no emulated processor: its bus, picture and sound units, controllers and clock, as native
+code. nativekit is the half of every native console that is not the console: main's loop
+and the frame's pace, the window, the sound out, the players' keyboards, game controllers,
+mice and touches, the battery save, the headless script with its shots, dumps and saved
+states, the presentation on the GPU at any window size, and the hosts under it (macOS, iOS,
+Windows, headless). A console fills one table and calls the kit's main. The kit names no
+console, and the build fails if it does. Its documents are
+[`kit/docs/kit.md`](kit/docs/kit.md) (its parts and how a console uses them) and
+[`kit/docs/contract-discipline.md`](kit/docs/contract-discipline.md) (its versioning, and
+the standards every console here keeps). It is at 0.1.0.
+
+| console | folder | |
+|---|---|---|
+| **nativeshvc**, the Super Famicom / Super Nintendo | [`consoles/snes/`](consoles/snes/) | the first; its README follows |
+
+nativeshvc was created by Jeffrey Wilbur ([github.com/jeff-strutb/nativeshvc](https://github.com/jeff-strutb/nativeshvc)),
+and nativekit is extracted from it: this repository
+([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit)) is a fork of
+nativeshvc, its code moved under `consoles/snes/` and its console-independent parts into
+`kit/`, nativeshvc's behaviour, contract (2.10) and tests unchanged. The kit is a work
+based on nativeshvc and keeps its copyright and licence, the GNU Affero General Public
+License, version 3 ([LICENSE](LICENSE), [NOTICE](NOTICE)).
+
+Built from this folder, with CMake and C11:
+
+```bash
+cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
+```
+
+makes nativeshvc's library `nshvc`, the kit folded in; a game adds this folder with
+`add_subdirectory` and links `nshvc`. `nix develop` (or direnv, with the `.envrc`) gives
+the compilers and tools; `mise run tools` builds asar and the pinned reference core,
+`mise run build` builds every configuration, `mise run test` runs the checks
+([`consoles/snes/tests/README.md`](consoles/snes/tests/README.md)) and `mise run test:kit`
+the kit's own.
+
+---
+
 # nativeshvc: a native Super Famicom / Super Nintendo implementation
 
 **nativeshvc is not an emulator.**
@@ -80,7 +124,7 @@ to it and documents how it does (its Enhanced mode's frame rate, screen, and the
 What nativeshvc gives an Enhanced mode, and how a game paces itself in each mode, is in
 [Enhancement support](#enhancement-support).
 
-![nativeshvc's architecture: the game's decompilation is the cartridge, nativeshvc the console, the host below; numbered steps show how a game plays through it](docs/architecture.svg)
+![nativeshvc's architecture: the game's decompilation is the cartridge, nativeshvc the console, the host below; numbered steps show how a game plays through it](consoles/snes/docs/architecture.svg)
 
 ## Enhancement support
 
@@ -106,7 +150,7 @@ what its Enhanced mode does.
 | a picture at the window's resolution | a canvas: a background's characters drawn from the game's own texels at the window's resolution (its pixels a console pixel), placed by the console's own rules, across VRAM pages for a layer that reads more than one | `nshvc_ext_canvas_chars`, `_canvas_scale` |
 | an app's own work in the game's machine | interrupts held | `nshvc_hold_interrupts` |
 
-They are described in [docs/nativeshvc.md](docs/nativeshvc.md#the-extensions). The front end
+They are described in [docs/nativeshvc.md](consoles/snes/docs/nativeshvc.md#the-extensions). The front end
 adds what an Enhanced mode's controls and display are built from: key, touch and frame
 hooks, overlays, buttons the game holds itself, the safe area and the window's size.
 
@@ -131,8 +175,8 @@ rather than choose one:
    of access (a read or a write of work RAM, ROM, cartridge RAM, I/O), and for a chip, a
    cost for each of its programs, so a frame where more happens costs more time and the
    game slows where the original slowed. The weights are never set by a person: nativeshvc
-   provides the standard and the tool (`tools/nshvc-profile`,
-   [docs/cost-profile.md](docs/cost-profile.md)) that measures them from the game's own ROM
+   provides the standard and the tool (`consoles/snes/tools/nshvc-profile`,
+   [docs/cost-profile.md](consoles/snes/docs/cost-profile.md)) that measures them from the game's own ROM
    on the reference. The C does the original's work with other accesses than the
    original's, so the profile approximates the original's processor time, and the slowdown
    it gives is approximate; its report gives by how much.
@@ -158,7 +202,8 @@ the cost is 0.
 
 ### 1. Build it
 
-CMake, C11, no dependencies for the core:
+CMake, C11, no dependencies for the core. From the repository's root (nativeshvc is
+built with the kit it runs on, [`kit/`](kit/)):
 
 ```bash
 cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
@@ -177,7 +222,7 @@ runs the checks.
 
 ### 2. Write the C against the machine model
 
-The rules are [the game contract](docs/contract.md). Write each routine's C against
+The rules are [the game contract](consoles/snes/docs/contract.md). Write each routine's C against
 `machine.h` and `spc.h`: every bus access through `rd8`/`wr8` (`spc_rd`/`spc_wr`) in the
 original's order, and each loop that waits for the hardware as a wait (`nshvc_wait_until`,
 `spc_wait_until`). State no time and mark no instruction's end: the C is structured, not a
@@ -198,7 +243,7 @@ with C by address, which a decompilation's tags already generate.
 
 A cartridge's expansion chip is the game's, as it is the cartridge's on the console: the game
 implements it, or brings an implementation it owns, as an `nshvc_chip`
-([`cart.h`](include/nshvc/cart.h)), and nativeshvc gives it what the connector gives a chip
+([`cart.h`](consoles/snes/include/nshvc/cart.h)), and nativeshvc gives it what the connector gives a chip
 (the S-CPU's accesses to the addresses it decodes, the master clock, the IRQ line, the ROM,
 the cartridge's RAM if the chip owns it). nativeshvc implements no chip and has no list of
 chips it supports: any chip a game brings plugs in the same way. A Super FX cartridge, for
@@ -220,8 +265,8 @@ device.
 `NSHVC_MAIN` is `main` everywhere but iOS, where the host keeps the process's own main and
 runs the game's on a thread. `nshvc_main` opens the window, renderer, sound and controllers,
 loads the save, powers on, runs the reset vector's C and plays until the window closes.
-[examples/hello/hello.c](examples/hello/hello.c) is a whole cartridge in one file, and
-[docs/nativeshvc.md](docs/nativeshvc.md#plugging-a-game-in) describes every field.
+[examples/hello/hello.c](consoles/snes/examples/hello/hello.c) is a whole cartridge in one file, and
+[docs/nativeshvc.md](consoles/snes/docs/nativeshvc.md#plugging-a-game-in) describes every field.
 
 The same program runs headless, for tests and comparisons:
 
@@ -233,7 +278,7 @@ A script plays the controllers and records what happens: `wait N`, `hold B+B N`,
 `press B`, `shot NAME` (the frame, as `DIR/NAME.ppm`), `dump NAME` (work RAM, the
 cartridge's RAM, the PPU's memories and a chip's RAM) and `repeat N ... end`; `--sound`
 writes the DSP's raw output, and `--counts FILE` each frame's S-CPU accesses by kind (the
-cost profile's step 2, [docs/cost-profile.md](docs/cost-profile.md)).
+cost profile's step 2, [docs/cost-profile.md](consoles/snes/docs/cost-profile.md)).
 
 `save NAME` and `load PATH` keep and return to the machine's state. The running C is part
 of the machine and cannot be copied, so the run forks instead: one process holds the state
@@ -246,7 +291,9 @@ and ends with its status. `NSHVC_SCRIPT_NOFORK=1` takes that path anywhere.
 A script only does what a player and a save state do: it never writes memory or runs code
 the game itself doesn't.
 
-Every step is listed in [`src/front/script.h`](src/front/script.h).
+Every step is listed in the kit's [`script.h`](kit/include/nk/script.h), and the
+console's own (`plug`, `pad`, `mouse`, `gun`) in
+[`src/front/snes_console.c`](consoles/snes/src/front/snes_console.c).
 
 ### 4. Or bring your own loop
 
@@ -255,7 +302,7 @@ then `nshvc_run_frame` each frame, and takes the picture (`nshvc_picture`) and t
 (`nshvc_audio_take`) itself, setting what the players hold with `nshvc_set_joypad`,
 `nshvc_set_mouse` and `nshvc_set_gun`. It can read the
 machine's memory, peek at the bus with no side effects, and hook each frame and each S-CPU
-write. See [docs/nativeshvc.md](docs/nativeshvc.md#running-it-yourself).
+write. See [docs/nativeshvc.md](consoles/snes/docs/nativeshvc.md#running-it-yourself).
 
 ### What the decompilation does not have to do
 
@@ -279,11 +326,11 @@ nativeshvc is not written for it, and it aligns to nativeshvc as any game does.
 ## Status
 
 Version 2.10.0. The game contract, what a game writes against and what the console
-promises it, is in [docs/contract.md](docs/contract.md), at 2.10: behaviour exact, each
+promises it, is in [docs/contract.md](consoles/snes/docs/contract.md), at 2.10: behaviour exact, each
 access costing the bus's time and the game's cost profile's weight, or no time with the
 costs off in a game's Enhanced mode (see [Enhancement support](#enhancement-support)). A game built against it plays on
 every later 2.x unchanged; only a 3.0 may change it. The cost profile's standard is
-[docs/cost-profile.md](docs/cost-profile.md); its acceptance bar is not set (an Original
+[docs/cost-profile.md](consoles/snes/docs/cost-profile.md); its acceptance bar is not set (an Original
 mode's profile is an approximation, and its report gives the error).
 
 **Platform hosts still to come.** These are separate implementations of the host
@@ -298,7 +345,7 @@ interface, outside the standard; a game written against 2.x needs no change for 
 
 **What is done and checked.** Every check below is against bsnes as the reference, with its
 options pinned for accuracy and display gamma off. The full list of checks, and how to run
-each one, is in [tests/README.md](tests/README.md).
+each one, is in [tests/README.md](consoles/snes/tests/README.md).
 
 - **Test cartridges:** the reference runs each of the 1,164 console test cartridges and
   records every read and write its S-CPU makes, with the clock it makes it at; nativeshvc
@@ -397,7 +444,7 @@ each one, is in [tests/README.md](tests/README.md).
 ## How it works
 
 The full reference for the interface, the cartridge description, the hooks and the
-extensions is [docs/nativeshvc.md](docs/nativeshvc.md).
+extensions is [docs/nativeshvc.md](consoles/snes/docs/nativeshvc.md).
 
 ### The split: processors in the game, everything else in the console
 
@@ -415,26 +462,26 @@ The C is written against the machine model in two headers, the same model the
 decompilations' verification harnesses provide. Inside a harness these calls reach an
 emulated machine and are checked against the original; under nativeshvc they reach the
 native console. Together with the cartridge's description, they are the game contract
-([docs/contract.md](docs/contract.md)).
+([docs/contract.md](consoles/snes/docs/contract.md)).
 
-- [`machine.h`](include/nshvc/machine.h), the S-CPU: `rd8`/`wr8` (and `rd16`, `wr16`,
+- [`machine.h`](consoles/snes/include/nshvc/machine.h), the S-CPU: `rd8`/`wr8` (and `rd16`, `wr16`,
   `rd24`) for every access to the 24-bit address space; `rd8_rmw`/`rd16_rmw` for a
   read-modify-write's read and `wr8`/`wr16_rmw` for its write; `nshvc_wait_until` and
   `nshvc_wait_vblank` for its waits for the hardware; the 65816 register file `cpu` for
   routines entered through `abi_` wrappers; `call_routine`, `jump_routine` and
   `jump_routine_pushed` for calls and jumps through computed addresses; `cpu_loop_forever`
   and `cpu_restart` for the code no C returns from; `cpu_wai` for WAI.
-- [`spc.h`](include/nshvc/spc.h), the SPC700: the register file `spc`; `spc_rd`/`spc_wr`
+- [`spc.h`](consoles/snes/include/nshvc/spc.h), the SPC700: the register file `spc`; `spc_rd`/`spc_wr`
   for every APU RAM and I/O access; `spc_wait_until` for its waits; `spc_call` and
   `spc_ret` for its calls; `spc_restart` and `spc_boot_rom` for the code no C returns from.
 
-[`hw.h`](include/nshvc/hw.h) names the hardware registers by their standard names.
+[`hw.h`](consoles/snes/include/nshvc/hw.h) names the hardware registers by their standard names.
 
 ### The cartridge connector
 
 nativeshvc is the console, and implements no expansion chip itself. A cartridge's own
 hardware (the Super FX, the SA-1, a DSP) is the cartridge's, as on the console, and plugs in
-through the connector in [`cart.h`](include/nshvc/cart.h): the chip powers on with the
+through the connector in [`cart.h`](consoles/snes/include/nshvc/cart.h): the chip powers on with the
 console, answers the S-CPU's accesses to the addresses it decodes, is brought up to the
 console's clock before those accesses, once a line and in the S-CPU's waits, drives the
 IRQ line at its own clock (`nshvc_cart_irq_at`: the S-CPU sees a rise from
@@ -494,12 +541,13 @@ original had them.
 The controller ports are the console's, with what the cartridge says is plugged in
 (`nshvc_cart.ports`; a joypad in each when it says nothing) or what the game plugs in later
 (`nshvc_plug`): a joypad, a mouse, a multitap, a Super Scope, a Justifier or two, or nothing
-([`src/console/ports.c`](src/console/ports.c)). Each device answers the ports' lines as the
+([`src/console/ports.c`](consoles/snes/src/console/ports.c)). Each device answers the ports' lines as the
 device does: the latch, a clock with each read, two data lines back, and the IOBit pin
 (the multitap's pair, port 2's light guns latching the counters where they point). The
 joypads' automatic read steps through its 16 bits on the CPU's own 128-clock counter.
 
-The player's own devices drive them, natively ([`src/front/input.c`](src/front/input.c)).
+The player's own devices drive them, natively ([`src/front/snes_input.c`](consoles/snes/src/front/snes_input.c), over the kit's
+[`kit/src/front/input.c`](kit/src/front/input.c)).
 The players are the devices in port order, each one player and a multitap four, port 1's
 first. Player 0 has the keyboard and the first game controller, player N the (N+1)th
 controller; a mouse in a port takes the mouse's motion and buttons; a light gun aims where
@@ -530,7 +578,7 @@ it can show the player the controls they are actually holding.
 ### Processors, one thread
 
 The SPC700's C, and a cartridge chip's that has a processor, run on coroutines of their own
-([`src/console/coro.c`](src/console/coro.c), a few instructions of assembly on arm64 and
+([`kit/src/coro/coro.c`](kit/src/coro/coro.c), a few instructions of assembly on arm64 and
 x86-64, fibers on Windows; a chip's through `cart.h`), each with its own clock. Whenever
 the S-CPU could see what one of them does (its registers, its RAM, the sound ports, a
 chip's IRQ) and once a line, the S-CPU brings it up to its own time, and it hands back when
@@ -539,7 +587,7 @@ IRQ rises.
 One runs at a time, on a deterministic schedule, with no threads: the same input gives the
 same run on every host.
 
-- **Sound unit** ([`apu.c`](src/console/apu.c)). At power on, the boot ROM's work is done
+- **Sound unit** ([`apu.c`](consoles/snes/src/console/apu.c)). At power on, the boot ROM's work is done
   access for access (not from the ROM's bytes), its poll loops waits, so the S-CPU's upload
   sees the same replies. Code the S-CPU uploads and starts is the game's SPC700 C,
   chosen by which program's bytes the APU RAM holds at that address (two drivers may share
@@ -548,7 +596,7 @@ same run on every host.
 
 ### Dispatch
 
-[`dispatch.c`](src/console/dispatch.c) connects addresses to C: the routine with C that
+[`dispatch.c`](consoles/snes/src/console/dispatch.c) connects addresses to C: the routine with C that
 starts at an address a call, a jump or an interrupt vector reaches (and, for a chip, any
 address it asks for: `nshvc_cart_routine`); the
 SPC700 routine whose code the APU RAM holds. A game that reaches an address with no C is a
@@ -558,14 +606,15 @@ nativeshvc runs no 65816 or SPC700 machine code at all.
 
 ### Picture
 
-The PPU ([`src/ppu/ppu.c`](src/ppu/ppu.c)) makes the picture in C, a line at a time as the
+The PPU ([`src/ppu/ppu.c`](consoles/snes/src/ppu/ppu.c)) makes the picture in C, a line at a time as the
 clock passes each line: every background mode, sprites, windows, colour maths, brightness,
 the read side and open bus, with register writes landing mid-line at their own times.
 
-The renderer backends (Metal, OpenGL, Vulkan and software; [`rr.h`](src/render/rr.h))
-draw it at the window's own resolution. The pixel art is scaled with sharp bilinear
-filtering: whole pixels at any size, blended only across the one window pixel each pixel
-edge falls in. The Mode 7 plane, the one thing the console draws in 3D, is not scaled up
+The renderer backends (Metal, OpenGL, Vulkan and software: the kit's
+[`rr.h`](kit/include/nk/rr.h), and the console's own GPU work in
+[`src/render/`](consoles/snes/src/render/)) draw it at the window's own resolution. The pixel art is
+scaled with sharp bilinear filtering: whole pixels at any size, blended only across the
+one window pixel each pixel edge falls in. The Mode 7 plane, the one thing the console draws in 3D, is not scaled up
 from the console's pixels: at each window pixel it is looked up again through its line's
 matrix, and the console pixel under it composed again by the console's rules (its sprites,
 windows, colour maths and brightness), so the plane has the window's detail. It is
@@ -580,26 +629,26 @@ hands the characters it would upload as texels at the window's resolution (the w
 pixels a console pixel, `nshvc_ext_canvas_scale`), drawn by its own code at whatever
 internal resolution it likes, and the console places them by the layer's own rules (map,
 scroll, flips, priority, windows, colour maths), the window pixel in each console pixel
-taking the texel under it. One definition in C ([`rr_mode7.h`](src/render/rr_mode7.h)) is
+taking the texel under it. One definition in C ([`rr_mode7.h`](consoles/snes/src/render/rr_mode7.h)) is
 the software backend's drawing and what the GPU backends' shaders compute, in integers but
 the blends, so every backend takes the same texels; each backend's output is checked
 against it. The backends also draw a port's overlays.
 
 ### Sound
 
-The S-DSP ([`mixer.c`](src/dsp/mixer.c): BRR decoding, Gaussian interpolation, envelopes,
+The S-DSP ([`mixer.c`](consoles/snes/src/dsp/mixer.c): BRR decoding, Gaussian interpolation, envelopes,
 noise, pitch modulation, echo) makes stereo, 16-bit samples at 32,040 a second as the
 SPC700's clock runs. It works as the chip does, a clock at a time: each voice reads its
 registers and the sample data at its own clocks of the sample, and the echo its delay line,
 so a change the driver makes partway through a sample reaches exactly the voices it would.
 
 The samples are resampled to the device's rate by a 32-tap Kaiser-windowed sinc
-([`resample.c`](src/dsp/resample.c)), its ratio trimmed by a fraction of a percent to keep
+([`resample.c`](kit/src/dsp/resample.c)), its ratio trimmed by a fraction of a percent to keep
 a steady buffer, so the sound follows the game's pace without drifting or clicking.
 
 ### The host
 
-Each operating system supplies one small interface ([`src/host/host.h`](src/host/host.h)):
+Each operating system supplies one small interface ([`kit/include/nk/host.h`](kit/include/nk/host.h)):
 time, files and the save folder, a window, input, audio.
 
 | Host | Provides |

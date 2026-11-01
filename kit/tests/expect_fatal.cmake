@@ -1,0 +1,15 @@
+# A check that must end in the console's fatal error: CMD (a list) run, its
+# exit status 70 or the check fails (cmake -DCMD=... -P expect_fatal.cmake).
+execute_process(COMMAND ${CMD} RESULT_VARIABLE _rc OUTPUT_QUIET ERROR_VARIABLE _err)
+list(GET CMD 0 _exe)
+get_filename_component(_name "${_exe}" NAME)
+list(LENGTH CMD _n)
+if(_n GREATER 1)
+  list(SUBLIST CMD 1 -1 _args)
+  string(REPLACE ";" " " _args "${_args}")
+  set(_name "${_name} ${_args}")
+endif()
+if(NOT _rc EQUAL 70)
+  message(FATAL_ERROR "${_name}: exit ${_rc}, wanted 70: ${_err}")
+endif()
+message("${_name}: ok (exit 70)")

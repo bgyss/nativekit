@@ -44,6 +44,10 @@ depends = ["build:null", "build:macos", "build:null-metal", "build:null-gl", "bu
 [tasks."test:rom"]
 run = "python3 consoles/snes/tests/rom/run.py"
 
+[tasks."test:kit"]
+description = "The kit's own checks and its name check (the null build)"
+run = "cmake --build build/null --target kit-check"
+
 [tasks."test:consumer"]
 description = "A game as games use it: its own project, the repo root added as a subdirectory"
 run = "cmake -S consoles/snes/tests/consumer -B build/consumer -DNATIVESHVC=$PWD && cmake --build build/consumer -j8 && build/consumer/consumer --headless --frames 5"

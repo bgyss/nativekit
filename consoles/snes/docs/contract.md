@@ -31,11 +31,12 @@ game written to it plays on every later 2.x without a change.
 
 Not in the contract (they may change in a minor version):
 
-- The headless script's steps (`src/front/script.h`).
+- The headless script's steps (the kit's `kit/include/nk/script.h`, and the console's own in
+  `src/front/snes_console.c`).
 - The environment options (`NSHVC_STATES`, `NSHVC_SCRIPT_NOFORK`, `NSHVC_DEBUG`,
   `NSHVC_SPCLOG`).
-- The host interface for `NSHVC_HOST=none` (`src/host/host.h`).
-- Everything under `src/`.
+- The host interface for `NSHVC_HOST=none` (the kit's `kit/include/nk/host.h`).
+- Everything under `src/`, and the kit (`kit/`).
 
 ## What the game does: the S-CPU
 

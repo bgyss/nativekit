@@ -131,7 +131,7 @@ rather than choose one:
    of access (a read or a write of work RAM, ROM, cartridge RAM, I/O), and for a chip, a
    cost for each of its programs, so a frame where more happens costs more time and the
    game slows where the original slowed. The weights are never set by a person: nativeshvc
-   provides the standard and the tool (`consoles/snes/tools/nshvc-profile`,
+   provides the standard and the tool (`tools/nshvc-profile`,
    [docs/cost-profile.md](docs/cost-profile.md)) that measures them from the game's own ROM
    on the reference. The C does the original's work with other accesses than the
    original's, so the profile approximates the original's processor time, and the slowdown
@@ -158,7 +158,8 @@ the cost is 0.
 
 ### 1. Build it
 
-CMake, C11, no dependencies for the core:
+CMake, C11, no dependencies for the core. From the repository's root (nativeshvc is
+built with the kit it runs on, [`kit/`](../../kit/)):
 
 ```bash
 cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
@@ -246,7 +247,9 @@ and ends with its status. `NSHVC_SCRIPT_NOFORK=1` takes that path anywhere.
 A script only does what a player and a save state do: it never writes memory or runs code
 the game itself doesn't.
 
-Every step is listed in [`src/front/script.h`](src/front/script.h).
+Every step is listed in the kit's [`script.h`](../../kit/include/nk/script.h), and the
+console's own (`plug`, `pad`, `mouse`, `gun`) in
+[`src/front/snes_console.c`](src/front/snes_console.c).
 
 ### 4. Or bring your own loop
 
@@ -531,7 +534,7 @@ it can show the player the controls they are actually holding.
 ### Processors, one thread
 
 The SPC700's C, and a cartridge chip's that has a processor, run on coroutines of their own
-([`src/console/coro.c`](src/console/coro.c), a few instructions of assembly on arm64 and
+([`kit/src/coro/coro.c`](../../kit/src/coro/coro.c), a few instructions of assembly on arm64 and
 x86-64, fibers on Windows; a chip's through `cart.h`), each with its own clock. Whenever
 the S-CPU could see what one of them does (its registers, its RAM, the sound ports, a
 chip's IRQ) and once a line, the S-CPU brings it up to its own time, and it hands back when
@@ -563,10 +566,11 @@ The PPU ([`src/ppu/ppu.c`](src/ppu/ppu.c)) makes the picture in C, a line at a t
 clock passes each line: every background mode, sprites, windows, colour maths, brightness,
 the read side and open bus, with register writes landing mid-line at their own times.
 
-The renderer backends (Metal, OpenGL, Vulkan and software; [`rr.h`](src/render/rr.h))
-draw it at the window's own resolution. The pixel art is scaled with sharp bilinear
-filtering: whole pixels at any size, blended only across the one window pixel each pixel
-edge falls in. The Mode 7 plane, the one thing the console draws in 3D, is not scaled up
+The renderer backends (Metal, OpenGL, Vulkan and software: the kit's
+[`rr.h`](../../kit/include/nk/rr.h), and the console's own GPU work in
+[`src/render/`](src/render/)) draw it at the window's own resolution. The pixel art is
+scaled with sharp bilinear filtering: whole pixels at any size, blended only across the
+one window pixel each pixel edge falls in. The Mode 7 plane, the one thing the console draws in 3D, is not scaled up
 from the console's pixels: at each window pixel it is looked up again through its line's
 matrix, and the console pixel under it composed again by the console's rules (its sprites,
 windows, colour maths and brightness), so the plane has the window's detail. It is
@@ -595,12 +599,12 @@ registers and the sample data at its own clocks of the sample, and the echo its 
 so a change the driver makes partway through a sample reaches exactly the voices it would.
 
 The samples are resampled to the device's rate by a 32-tap Kaiser-windowed sinc
-([`resample.c`](src/dsp/resample.c)), its ratio trimmed by a fraction of a percent to keep
+([`resample.c`](../../kit/src/dsp/resample.c)), its ratio trimmed by a fraction of a percent to keep
 a steady buffer, so the sound follows the game's pace without drifting or clicking.
 
 ### The host
 
-Each operating system supplies one small interface ([`src/host/host.h`](src/host/host.h)):
+Each operating system supplies one small interface ([`kit/include/nk/host.h`](../../kit/include/nk/host.h)):
 time, files and the save folder, a window, input, audio.
 
 | Host | Provides |
@@ -630,9 +634,9 @@ time, files and the save folder, a window, input, audio.
 ## Licence
 
 Copyright (C) 2026 Jeffrey Wilbur. nativeshvc is licensed under the GNU Affero General
-Public License, version 3 ([LICENSE](LICENSE)). Anyone who distributes nativeshvc or a work
+Public License, version 3 ([LICENSE](../../LICENSE)). Anyone who distributes nativeshvc or a work
 based on it, or lets users interact with a modified version over a network, must keep the
-copyright and [NOTICE](NOTICE) and publish the complete source under the same licence.
+copyright and [NOTICE](../../NOTICE) and publish the complete source under the same licence.
 
 nativeshvc contains no game code or data. The games that run on it, their code and their
 assets belong to their rights holders, and a decompilation that links nativeshvc carries
