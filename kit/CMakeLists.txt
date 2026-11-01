@@ -43,9 +43,11 @@ add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 # the application: main's loop, the window, the pace, the sound out
 add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c)
 
-# the presentation backend (NK_RENDER; the GL and Vulkan ones still live in
-# the console's folder until they move here). On Metal its frameworks are
-# nk_render's link libraries, for the console's library to link.
+# the presentation backend (NK_RENDER; the Vulkan one still lives in the
+# console's folder until it moves here). On Metal and GL its frameworks or
+# libraries are nk_render's link libraries, for the console's library to
+# link; on GL its folder (gl_api.h, for rr_gl_ext.h) is an include directory
+# of nk_render's, for the console's own GL code.
 if(NOT NK_RENDER MATCHES "^(soft|metal|gl|vulkan)$")
   message(FATAL_ERROR "nativekit: no renderer ${NK_RENDER}")
 endif()
@@ -58,6 +60,18 @@ elseif(NK_RENDER STREQUAL "metal")
   target_sources(nk_render PRIVATE ${NK_DIR}/src/render/metal/rr_metal.m)
   set_source_files_properties(${NK_DIR}/src/render/metal/rr_metal.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_link_libraries(nk_render PUBLIC "-framework Metal" "-framework QuartzCore" "-framework Foundation")
+  set(NK_RENDER_TARGETS nk_render)
+elseif(NK_RENDER STREQUAL "gl")
+  add_library(nk_render OBJECT)
+  target_sources(nk_render PRIVATE ${NK_DIR}/src/render/gl/rr_gl.c ${NK_DIR}/src/render/gl/gl_ctx.c)
+  target_include_directories(nk_render PUBLIC ${NK_DIR}/src/render/gl)
+  if(WIN32)
+    target_link_libraries(nk_render PUBLIC opengl32 gdi32)
+  elseif(APPLE)
+    target_link_libraries(nk_render PUBLIC "-framework OpenGL")
+  else()
+    target_link_libraries(nk_render PUBLIC GL)
+  endif()
   set(NK_RENDER_TARGETS nk_render)
 endif()
 

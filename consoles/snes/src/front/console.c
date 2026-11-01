@@ -15,6 +15,7 @@
 #include "snes_console.h"
 #include "nk/input.h"
 #include "snes_input.h"
+#include "snes_rr.h"
 
 /* ---- the public calls ---- */
 const uint32_t *nshvc_picture(int *width, int *height) { return ppu_picture(width, height); }
@@ -137,4 +138,14 @@ void snes_game_frame(void)
         hooks.frame();
 }
 
-int nshvc_main(const nshvc_cart *cart, int argc, char **argv) { return nk_main(&snes_console, cart, argc, argv); }
+int nshvc_main(const nshvc_cart *cart, int argc, char **argv)
+{
+    /* the GPU backend's own SNES work, made when it opens (the software
+       backend has none) */
+#if defined(NSHVC_RENDER_METAL)
+    rr_set_open_hook(snes_metal_open);
+#elif defined(NSHVC_RENDER_GL)
+    rr_set_open_hook(snes_gl_open);
+#endif
+    return nk_main(&snes_console, cart, argc, argv);
+}

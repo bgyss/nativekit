@@ -24,7 +24,9 @@ id<MTLTexture> rr_metal_picture_texture(int w, int h);   /* this frame's picture
 void rr_metal_draw_picture(id<MTLTexture> t, int w, int h, const int d[4]);   /* one to one or sharp bilinear */
 /* a pipeline of the shared vertex function (bvs) and fragment function fs from lib */
 id<MTLRenderPipelineState> rr_metal_pipe(NSString *fs, id<MTLLibrary> lib, int blend);
-extern NSString *const rr_metal_vertex_src;     /* BO and bvs, for a console's library */
+/* BO and bvs, for a console's library: formatted ahead of the console's own
+   #include <metal_stdlib>, so it uses only built-in types */
+extern NSString *const rr_metal_vertex_src;
 void rr_metal_wait_idle(void);                    /* every frame in flight done */
 
 #endif

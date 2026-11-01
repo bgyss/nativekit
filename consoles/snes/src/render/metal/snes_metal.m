@@ -316,7 +316,7 @@ static int s_planes;
 /* the backend's open hook (rr_set_open_hook), at rr_open's end: the Mode 7
    shader and the compositor compiled; 0 (the backend not open) when they
    do not */
-static int snes_metal_open(void)
+int snes_metal_open(void)
 {
     NSError *err = nil;
     id<MTLLibrary> lib;
@@ -345,9 +345,6 @@ static int snes_metal_open(void)
     }
     return 1;
 }
-
-/* registered before main: the backend opens with it */
-__attribute__((constructor)) static void snes_metal_init(void) { rr_set_open_hook(snes_metal_open); }
 
 static int compose(const uint32_t *desc, size_t words, int w, int h, const uint32_t wp[4], const int d[4]);
 

@@ -39,6 +39,11 @@ void rr_mode7(const struct RrMode7 *m, const int d[4], const struct RrM7Samples 
 int rr_compose_mode7(const uint32_t *desc, size_t words, const struct RrMode7 *m, const int d[4],
                      const struct RrM7Samples *s);
 
+/* the GPU backends' open hooks (rr_set_open_hook), set by nshvc_main:
+   the compositor's and Mode 7's programs made when the backend opens */
+int snes_metal_open(void);
+int snes_gl_open(void);
+
 #ifdef __cplusplus
 }
 #endif
