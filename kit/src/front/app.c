@@ -100,7 +100,7 @@ static void draw_overlays(int tw, int th)
     sy = ph > 0 ? (float)th / ph : 1;
     for (i = 0; i < noverlays; i++) {
         Overlay *o = &overlays[i];
-        float hw, hh, c, sn, q[6];
+        float hw, hh, co, sn, q[6];
         if (!o->visible || o->alpha <= 0)
             continue;
         if (o->shown_alpha != o->alpha) {
@@ -113,16 +113,16 @@ static void draw_overlays(int tw, int th)
         }
         hw = (float)o->w * o->scale / 2;
         hh = (float)o->h * o->scale / 2;
-        c = cosf(o->angle);
+        co = cosf(o->angle);
         sn = sinf(o->angle);
         /* the corners (top left, top right, bottom left) turned about the
            centre, in points, then in target pixels */
-        q[0] = (o->cx + (-hw * c - -hh * sn)) * sx;
-        q[1] = (o->cy + (-hw * sn + -hh * c)) * sy;
-        q[2] = (o->cx + (hw * c - -hh * sn)) * sx;
-        q[3] = (o->cy + (hw * sn + -hh * c)) * sy;
-        q[4] = (o->cx + (-hw * c - hh * sn)) * sx;
-        q[5] = (o->cy + (-hw * sn + hh * c)) * sy;
+        q[0] = (o->cx + (-hw * co - -hh * sn)) * sx;
+        q[1] = (o->cy + (-hw * sn + -hh * co)) * sy;
+        q[2] = (o->cx + (hw * co - -hh * sn)) * sx;
+        q[3] = (o->cy + (hw * sn + -hh * co)) * sy;
+        q[4] = (o->cx + (-hw * co - hh * sn)) * sx;
+        q[5] = (o->cy + (-hw * sn + hh * co)) * sy;
         rr_overlay(o->shown, o->w, o->h, q);
     }
 }
@@ -581,6 +581,8 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     if (counts_f) {
         if (c->kind_count > 16)
             nk_fatal("a console with more than 16 kinds of access");
+        if (!c->counts_hooks || !c->access_kind)
+            nk_fatal("a console with no access counts to take");
         c->counts_hooks(count_read, count_write);
     }
     if (!headless && c->battery)

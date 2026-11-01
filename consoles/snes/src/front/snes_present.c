@@ -11,7 +11,7 @@
 
 #include "nshvc/nshvc.h"
 #include "snes_internal.h"
-#include "rr.h"
+#include "snes_rr.h"
 #include "rr_size.h"
 #include "rr_mode7.h"
 #include "snes_console.h"

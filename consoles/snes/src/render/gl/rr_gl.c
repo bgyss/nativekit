@@ -16,7 +16,7 @@
 #include <string.h>
 
 #include "gl_api.h"
-#include "rr.h"
+#include "snes_rr.h"
 #include "rr_size.h"
 #include "rr_mode7.h"
 #include "host.h"

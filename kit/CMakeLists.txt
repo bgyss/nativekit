@@ -1,7 +1,7 @@
 # nativekit: the console-independent parts of a native console (kit/docs/kit.md).
 # OBJECT libraries a console folds into its own library, so a game links the
 # console's library alone. NK_HOST (the host: null, macos, windows, ios,
-# none) and NK_TESTS are set by the top-level CMake from the console's own options.
+# none), NK_RENDER (soft, metal, gl, vulkan) and NK_TESTS are set by the top-level CMake from the console's own options.
 set(NK_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 file(READ ${NK_DIR}/VERSION NK_VERSION)
 string(STRIP "${NK_VERSION}" NK_VERSION)
@@ -43,6 +43,14 @@ add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 # the application: main's loop, the window, the pace, the sound out
 add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c)
 
+# the presentation backend (NK_RENDER; the GPU ones still live in the
+# console's folder until they move here)
+if(NK_RENDER STREQUAL "soft")
+  add_library(nk_render OBJECT)
+  target_sources(nk_render PRIVATE ${NK_DIR}/src/render/soft/rr_soft.c)
+  set(NK_RENDER_TARGETS nk_render)
+endif()
+
 # time, files and the host
 add_library(nk_host OBJECT)
 if(WIN32)
@@ -64,7 +72,7 @@ elseif(NOT NK_HOST STREQUAL "none")
   message(FATAL_ERROR "nativekit: no host ${NK_HOST}")
 endif()
 
-foreach(t nk_coro nk_resample nk_dispatch nk_host nk_front nk_input nk_app)
+foreach(t nk_coro nk_resample nk_dispatch nk_host nk_front nk_input nk_app ${NK_RENDER_TARGETS})
   target_include_directories(${t} PRIVATE ${NK_INCLUDE})
   if(NK_C_FLAGS)
     target_compile_options(${t} PRIVATE ${NK_C_FLAGS})

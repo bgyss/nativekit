@@ -34,47 +34,24 @@ void rr_begin(uint32_t argb);
    rectangle d (x0, y0, x1, y1, target pixels, top left origin): sharp
    bilinear, or one to one when d is w x h */
 void rr_image(const uint32_t *argb, int w, int h, const int d[4]);
-/* the console's picture, w x h, drawn by the backend's compositor from the
-   frame's description (ppu.c ppu_compose, render/compose_body.h: words of
-   it), then shown over target rectangle d as rr_image shows a picture;
-   0 when the backend has none (the caller draws the picture and calls
-   rr_image) */
-int rr_compose(const uint32_t *desc, size_t words, int w, int h, const int d[4]);
-/* an interlaced frame's woven picture, ww x wh, by the compositor: desc
-   holds the finished frame's description and the one before's, each row
-   parity's rows from the one at word base0 (even rows) or base1 (odd)
-   (ppu.h ppu_woven) */
-int rr_compose_woven(const uint32_t *desc, size_t words, int ww, int wh, uint32_t base0, uint32_t base1,
-                     const int d[4]);
 /* An image with alpha (0xAARRGGBB, the alpha straight) over the frame,
    blended (src alpha, 1 - src alpha), filtered bilinear, onto the
    parallelogram q: its top left (q[0], q[1]), top right (q[2], q[3]) and
    bottom left (q[4], q[5]) corners in target pixels. For the game's
-   controls on a touch screen (nshvc_overlay_place). At most RR_OVERLAYS a
+   controls on a touch screen (the console's overlays). At most RR_OVERLAYS a
    frame. */
 #define RR_OVERLAYS 16
 void rr_overlay(const uint32_t *argb, int w, int h, const float q[6]);
-
-/* A frame with Mode 7 or a layer's canvas presented over the target's
-   rectangle d (rr_mode7.h):
-   its record m and the samples s rr_m7_tables made at d's size. Exactly
-   rr_ref_mode7's drawing, but that the blends round as the GPU's (within 1
-   a channel, as rr_image's). */
-struct RrMode7;
-struct RrM7Samples;
-void rr_mode7(const struct RrMode7 *m, const int d[4], const struct RrM7Samples *s);
-/* a frame presenting Mode 7 or a canvas: its picture and records drawn by
-   the backend's compositor from its description (ppu.c ppu_compose_m7),
-   then presented as rr_mode7 presents m (m's tables, not its records or
-   picture); 0 when the backend has no compositor */
-int rr_compose_mode7(const uint32_t *desc, size_t words, const struct RrMode7 *m, const int d[4],
-                     const struct RrM7Samples *s);
 
 /* the frame done: shown in the window, when there is one */
 void rr_present(void);
 /* the last presented frame, read back: rr_target's w x h pixels into argb;
    0 when this backend keeps none */
 int  rr_read(uint32_t *argb);
+
+/* a console's own GPU work, made ready when the backend opens (its
+   shaders compiled): 0 when it cannot run, and the backend does not open */
+void rr_set_open_hook(int (*fn)(void));
 
 #ifdef __cplusplus
 }

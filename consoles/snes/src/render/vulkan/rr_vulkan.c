@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "rr.h"
+#include "snes_rr.h"
 #include "rr_size.h"
 #include "rr_mode7.h"
 #include "rr_spv.h"

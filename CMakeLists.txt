@@ -31,8 +31,9 @@ option(NSHVC_EXAMPLES "build the examples" OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 
-# the kit reads the options as NK_HOST and NK_TESTS; they keep nativeshvc's names for its games
+# the kit reads the options as NK_HOST, NK_RENDER and NK_TESTS; they keep nativeshvc's names for its games
 set(NK_HOST ${NSHVC_HOST})
+set(NK_RENDER ${NSHVC_RENDER})
 set(NK_TESTS ${NSHVC_TESTS})
 add_subdirectory(kit)
 add_subdirectory(consoles/snes)

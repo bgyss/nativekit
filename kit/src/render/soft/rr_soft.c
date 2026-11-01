@@ -10,7 +10,7 @@
 
 #include "rr.h"
 #include "rr_size.h"
-#include "rr_mode7.h"
+#include "rr_soft_ext.h"
 #include "host.h"
 
 void host_window_pixels(int *w, int *h);
@@ -18,6 +18,16 @@ __attribute__((weak)) void host_window_pixels(int *w, int *h) { *w = *h = 0; }
 
 static uint32_t *s_px;
 static int s_w, s_h;
+static int (*s_open_hook)(void);
+
+void rr_set_open_hook(int (*fn)(void)) { s_open_hook = fn; }
+
+uint32_t *rr_soft_target(int *w, int *h)
+{
+    *w = s_w;
+    *h = s_h;
+    return s_px;
+}
 
 static void size_to(int w, int h)
 {
@@ -36,7 +46,7 @@ int rr_open(void)
     if (w < 1 || h < 1)
         rr_headless_size(&w, &h);
     size_to(w, h);
-    return s_px != NULL;
+    return s_px != NULL && (!s_open_hook || s_open_hook());
 }
 
 void rr_close(void)
@@ -65,51 +75,9 @@ void rr_begin(uint32_t argb)
         s_px[i] = argb | 0xFF000000u;
 }
 
-
-int rr_compose(const uint32_t *desc, size_t words, int w, int h, const int d[4])
-{
-    (void)desc;
-    (void)words;
-    (void)w;
-    (void)h;
-    (void)d;
-    return 0;   /* no compositor: the caller draws the picture */
-}
-
-
-int rr_compose_woven(const uint32_t *desc, size_t words, int ww, int wh, uint32_t base0, uint32_t base1,
-                     const int d[4])
-{
-    (void)desc;
-    (void)words;
-    (void)ww;
-    (void)wh;
-    (void)base0;
-    (void)base1;
-    (void)d;
-    return 0;   /* no compositor */
-}
-
 void rr_image(const uint32_t *argb, int w, int h, const int d[4])
 {
     rr_ref_image(s_px, s_w, s_h, argb, w, h, d);
-}
-
-
-int rr_compose_mode7(const uint32_t *desc, size_t words, const struct RrMode7 *m, const int d[4],
-                     const struct RrM7Samples *s)
-{
-    (void)desc;
-    (void)words;
-    (void)m;
-    (void)d;
-    (void)s;
-    return 0;   /* no compositor: the caller makes the records and picture */
-}
-
-void rr_mode7(const struct RrMode7 *m, const int d[4], const struct RrM7Samples *s)
-{
-    rr_ref_mode7(s_px, s_w, s_h, m, d, s);
 }
 
 void rr_overlay(const uint32_t *argb, int w, int h, const float q[6])

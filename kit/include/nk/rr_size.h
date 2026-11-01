@@ -81,8 +81,8 @@ static inline void rr_ref_image(uint32_t *dst, int tw, int th, const uint32_t *s
 
 /* The standard sample positions (Direct3D's and Vulkan's
    standardSampleLocations) of 4, 8 and 16 samples a pixel, in 1/16 of a
-   pixel from its centre: what the Mode 7 plane is supersampled at where it
-   is minified (rr_mode7.h). */
+   pixel from its centre: what a rotated or scaled plane is supersampled at
+   where it is minified (a console's own drawing). */
 static inline const int8_t (*rr_samples(int n))[2]
 {
     static const int8_t p4[4][2] = { { -2, -6 }, { 6, -2 }, { -6, 2 }, { 2, 6 } };

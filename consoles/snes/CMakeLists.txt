@@ -43,9 +43,6 @@ endif()
 # (kit/CMakeLists.txt)
 target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> $<TARGET_OBJECTS:nk_host>
   $<TARGET_OBJECTS:nk_front> $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_app>)
-# the kit's application draws with the renderer (rr.h, rr_size.h), set
-# here since kit/ names no console: until kit/include/nk/rr.h (the renderer split)
-target_include_directories(nk_app PRIVATE ${NSHVC_DIR}/src/render)
 if(WIN32)
   target_link_libraries(nshvc PUBLIC winmm)
 endif()
@@ -79,7 +76,7 @@ target_include_directories(nshvc PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gen)
 
 # the renderer
 if(NSHVC_RENDER STREQUAL "soft")
-  target_sources(nshvc PRIVATE src/render/soft/rr_soft.c)
+  target_sources(nshvc PRIVATE src/render/soft/snes_soft.c $<TARGET_OBJECTS:nk_render>)
 elseif(NSHVC_RENDER STREQUAL "metal")
   target_sources(nshvc PRIVATE src/render/metal/rr_metal.m)
   set_source_files_properties(src/render/metal/rr_metal.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
