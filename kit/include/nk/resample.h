@@ -1,6 +1,6 @@
 /*
- * resample.h: stereo sample-rate conversion (resample.c): the mixer's
- * 32,000 frames a second to the host's rate, by a windowed sinc (32 taps,
+ * resample.h: stereo sample-rate conversion (resample.c): a console's
+ * sound at its own rate to the host's, by a windowed sinc (32 taps,
  * Kaiser window, cut off below the lower rate's Nyquist), its ratio
  * adjustable a little at a time so the output can follow the game's pace.
  */

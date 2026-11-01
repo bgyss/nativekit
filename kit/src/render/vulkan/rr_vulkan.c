@@ -95,7 +95,6 @@ static VkImageView s_oimg_view[RR_OVERLAYS];
 static VkDescriptorSet s_oset[RR_OVERLAYS];
 static int s_ow[RR_OVERLAYS], s_oh[RR_OVERLAYS], s_on;
 
-
 static VkBuffer s_ring;                /* staging pictures and quads */
 static VkDeviceMemory s_ring_mem;
 static uint8_t *s_ring_map;
@@ -421,9 +420,9 @@ static VkShaderModule module(const uint32_t *code, size_t size)
 }
 
 /* a pipeline: quads from the ring (quad = 1, pictures onto the target),
-   one triangle with no vertex input (quad = 0, the compose pass), spans
-   as instances (quad = 2, two uint vec4s each: the 3D canvas), or runs as
-   instances (quad = 3, a uint vec4 each: the pack) */
+   no vertex input (quad = 0, a draw over the whole target), or instances
+   from the ring (quad = 2, two uint vec4s each; quad = 3, one each), the
+   last three for a console's own passes */
 static VkPipeline make_pipe(VkShaderModule vs, VkShaderModule fs, int quad, VkPipelineLayout layout, VkRenderPass pass)
 {
     VkPipelineShaderStageCreateInfo st[2];
@@ -534,7 +533,6 @@ static int make_layout(void)
 }
 
 static void pass_begin(void);
-
 
 static void wait_frame(void);
 
@@ -971,9 +969,9 @@ static int swap_make(void)
     return 1;
 }
 
-/* the record copied into its images, the picture composed (one triangle
-   over 256 x 224, row 0 the first line), then drawn over d as rr_image
-   draws */
+/* the frame done: the target copied onto the window's next image and
+   shown (when the window can be seen and is the target's size), and
+   copied out for a read back */
 void rr_present(void)
 {
     VkSubmitInfo si = { VK_STRUCTURE_TYPE_SUBMIT_INFO };

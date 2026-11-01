@@ -1,7 +1,8 @@
 # nativekit: the console-independent parts of a native console (kit/docs/kit.md).
 # OBJECT libraries a console folds into its own library, so a game links the
 # console's library alone. NK_HOST (the host: null, macos, windows, ios,
-# none), NK_RENDER (soft, metal, gl, vulkan) and NK_TESTS are set by the top-level CMake from the console's own options.
+# none), NK_RENDER (soft, metal, gl, vulkan) and NK_TESTS are set by the
+# top-level CMake from the console's own options.
 set(NK_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 file(READ ${NK_DIR}/VERSION NK_VERSION)
 string(STRIP "${NK_VERSION}" NK_VERSION)

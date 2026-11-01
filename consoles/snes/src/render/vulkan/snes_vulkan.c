@@ -85,6 +85,7 @@ static void ring_bind(void)
 /* the compositor's pipeline and sets (its picture made by cp_image) */
 static int cp_make(void)
 {
+    VkDevice s_dev = rr_vk_device();
     VkDescriptorSetLayoutBinding b[2] = { { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL },
                                           { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL } };
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -97,39 +98,39 @@ static int cp_make(void)
     VkComputePipelineCreateInfo ci = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
     li.bindingCount = 2;
     li.pBindings = b;
-    if (!VK_OK(vkCreateDescriptorSetLayout(rr_vk_device(), &li, NULL, &s_clay)))
+    if (!VK_OK(vkCreateDescriptorSetLayout(s_dev, &li, NULL, &s_clay)))
         return 0;
     pi.setLayoutCount = 1;
     pi.pSetLayouts = &s_clay;
     pi.pushConstantRangeCount = 1;
     pi.pPushConstantRanges = &pc;
-    if (!VK_OK(vkCreatePipelineLayout(rr_vk_device(), &pi, NULL, &s_cplayout)))
+    if (!VK_OK(vkCreatePipelineLayout(s_dev, &pi, NULL, &s_cplayout)))
         return 0;
     dpi.maxSets = 3;
     ps[0].descriptorCount = 2;
     dpi.poolSizeCount = 3;
     dpi.pPoolSizes = ps;
-    if (!VK_OK(vkCreateDescriptorPool(rr_vk_device(), &dpi, NULL, &s_cpool)))
+    if (!VK_OK(vkCreateDescriptorPool(s_dev, &dpi, NULL, &s_cpool)))
         return 0;
     da.descriptorPool = s_cpool;
     da.descriptorSetCount = 1;
     da.pSetLayouts = &s_clay;
-    if (!VK_OK(vkAllocateDescriptorSets(rr_vk_device(), &da, &s_cset)))
+    if (!VK_OK(vkAllocateDescriptorSets(s_dev, &da, &s_cset)))
         return 0;
     da.pSetLayouts = rr_vk_set_layout();
-    if (!VK_OK(vkAllocateDescriptorSets(rr_vk_device(), &da, &s_cdraw)))
+    if (!VK_OK(vkAllocateDescriptorSets(s_dev, &da, &s_cdraw)))
         return 0;
     {
         VkPushConstantRange rpc = { VK_SHADER_STAGE_COMPUTE_BIT, 0, 12 };
         li.bindingCount = 1;
-        if (!VK_OK(vkCreateDescriptorSetLayout(rr_vk_device(), &li, NULL, &s_crlay)))
+        if (!VK_OK(vkCreateDescriptorSetLayout(s_dev, &li, NULL, &s_crlay)))
             return 0;
         pi.pSetLayouts = &s_crlay;
         pi.pPushConstantRanges = &rpc;
-        if (!VK_OK(vkCreatePipelineLayout(rr_vk_device(), &pi, NULL, &s_crplayout)))
+        if (!VK_OK(vkCreatePipelineLayout(s_dev, &pi, NULL, &s_crplayout)))
             return 0;
         da.pSetLayouts = &s_crlay;
-        if (!VK_OK(vkAllocateDescriptorSets(rr_vk_device(), &da, &s_crset)))
+        if (!VK_OK(vkAllocateDescriptorSets(s_dev, &da, &s_crset)))
             return 0;
     }
     ring_bind();
@@ -138,11 +139,11 @@ static int cp_make(void)
     ci.stage.module = rr_vk_module(k_compose_comp, sizeof k_compose_comp);
     ci.stage.pName = "main";
     ci.layout = s_cplayout;
-    if (!VK_OK(vkCreateComputePipelines(rr_vk_device(), VK_NULL_HANDLE, 1, &ci, NULL, &s_cp)))
+    if (!VK_OK(vkCreateComputePipelines(s_dev, VK_NULL_HANDLE, 1, &ci, NULL, &s_cp)))
         return 0;
     ci.stage.module = rr_vk_module(k_compose_rec_comp, sizeof k_compose_rec_comp);
     ci.layout = s_crplayout;
-    return VK_OK(vkCreateComputePipelines(rr_vk_device(), VK_NULL_HANDLE, 1, &ci, NULL, &s_cpr));
+    return VK_OK(vkCreateComputePipelines(s_dev, VK_NULL_HANDLE, 1, &ci, NULL, &s_cpr));
 }
 
 /* the compositor's picture, w x h: made again (after what the frame has
@@ -188,6 +189,7 @@ static int cp_image(int w, int h)
 
 static int m7_make(VkShaderModule vs)
 {
+    VkDevice s_dev = rr_vk_device();
     VkDescriptorSetLayoutBinding b[2] = { { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL },
                                           { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL } };
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -199,28 +201,28 @@ static int m7_make(VkShaderModule vs)
     VkSamplerCreateInfo si = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     li.bindingCount = 2;
     li.pBindings = b;
-    if (!VK_OK(vkCreateDescriptorSetLayout(rr_vk_device(), &li, NULL, &s_m7lay)))
+    if (!VK_OK(vkCreateDescriptorSetLayout(s_dev, &li, NULL, &s_m7lay)))
         return 0;
     pi.setLayoutCount = 1;
     pi.pSetLayouts = &s_m7lay;
     pi.pushConstantRangeCount = 1;
     pi.pPushConstantRanges = &pc;
-    if (!VK_OK(vkCreatePipelineLayout(rr_vk_device(), &pi, NULL, &s_m7playout)))
+    if (!VK_OK(vkCreatePipelineLayout(s_dev, &pi, NULL, &s_m7playout)))
         return 0;
     dpi.maxSets = 1;
     dpi.poolSizeCount = 2;
     dpi.pPoolSizes = ps;
-    if (!VK_OK(vkCreateDescriptorPool(rr_vk_device(), &dpi, NULL, &s_m7pool)))
+    if (!VK_OK(vkCreateDescriptorPool(s_dev, &dpi, NULL, &s_m7pool)))
         return 0;
     da.descriptorPool = s_m7pool;
     da.descriptorSetCount = 1;
     da.pSetLayouts = &s_m7lay;
-    if (!VK_OK(vkAllocateDescriptorSets(rr_vk_device(), &da, &s_m7set)))
+    if (!VK_OK(vkAllocateDescriptorSets(s_dev, &da, &s_m7set)))
         return 0;
     si.magFilter = si.minFilter = VK_FILTER_NEAREST;
     si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    if (!VK_OK(vkCreateSampler(rr_vk_device(), &si, NULL, &s_ismp)))
+    if (!VK_OK(vkCreateSampler(s_dev, &si, NULL, &s_ismp)))
         return 0;
     ring_bind();
     s_m7 = rr_vk_make_pipe(vs, rr_vk_module(k_m7_frag, sizeof k_m7_frag), 1, s_m7playout, rr_vk_pass_load());
@@ -230,6 +232,7 @@ static int m7_make(VkShaderModule vs)
 /* the planes' image, layers deep, made again when it must hold more */
 static int m7_plane_image(int layers)
 {
+    VkDevice s_dev = rr_vk_device();
     VkImageCreateInfo ii = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     VkImageViewCreateInfo vi = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     VkDescriptorImageInfo di;
@@ -237,7 +240,7 @@ static int m7_plane_image(int layers)
     if (s_plane && s_plane_layers >= layers)
         return 1;
     if (s_plane) {
-        vkDeviceWaitIdle(rr_vk_device());
+        vkDeviceWaitIdle(s_dev);
         rr_vk_image_destroy(&s_plane, &s_plane_mem, &s_plane_view);
     }
     ii.imageType = VK_IMAGE_TYPE_2D;
@@ -250,7 +253,7 @@ static int m7_plane_image(int layers)
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
     ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (!VK_OK(vkCreateImage(rr_vk_device(), &ii, NULL, &s_plane)) || !rr_vk_alloc_bind_image(s_plane, &s_plane_mem))
+    if (!VK_OK(vkCreateImage(s_dev, &ii, NULL, &s_plane)) || !rr_vk_alloc_bind_image(s_plane, &s_plane_mem))
         return 0;
     vi.image = s_plane;
     vi.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
@@ -258,7 +261,7 @@ static int m7_plane_image(int layers)
     vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     vi.subresourceRange.levelCount = 1;
     vi.subresourceRange.layerCount = (uint32_t)layers;
-    if (!VK_OK(vkCreateImageView(rr_vk_device(), &vi, NULL, &s_plane_view)))
+    if (!VK_OK(vkCreateImageView(s_dev, &vi, NULL, &s_plane_view)))
         return 0;
     di.sampler = s_ismp;
     di.imageView = s_plane_view;
@@ -268,7 +271,7 @@ static int m7_plane_image(int layers)
     wr.descriptorCount = 1;
     wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     wr.pImageInfo = &di;
-    vkUpdateDescriptorSets(rr_vk_device(), 1, &wr, 0, NULL);
+    vkUpdateDescriptorSets(s_dev, 1, &wr, 0, NULL);
     s_plane_layers = layers;
     s_plane_fresh = 1;
     s_planes = 0;

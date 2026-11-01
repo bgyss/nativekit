@@ -59,7 +59,6 @@ def fit_exact(A, b, yy):
     return tied[0][3]
 
 
-
 def fit_weights(frames, measured, defaults, active_clocks):
     """each kind's weight in clocks: non-negative least squares on each frame's
        error in clocks (a frame's time is the sum of its costs, so its slowest
@@ -113,8 +112,6 @@ def fmt_err(e):
             % tuple(100 * x for x in e))
 
 
-
-
 def read_jobs(path, tool, header="nk-chip-jobs"):
     jobs, head = {}, None
     for line in open(path):
@@ -162,7 +159,6 @@ def chip_errors(jobs, fixed, weights):
     long5 = sorted(jobs, key=lambda j: j[0])[-max(1, len(jobs) // 20):]
     le = [abs(rel(j)) for j in long5]
     return (sum(e) / len(e), sum(a) / len(a), a[int(0.95 * (len(a) - 1))], a[-1], sum(le) / len(le))
-
 
 
 def fit_chip(path, tool, min_jobs, header="nk-chip-jobs"):
