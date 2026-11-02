@@ -13,7 +13,7 @@
 
 #include "nshvc/nshvc.h"
 #include "nshvc/machine.h"
-#include "host.h"
+#include "nk/host.h"
 #include "nk/input.h"
 #include "snes_input.h"
 

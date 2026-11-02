@@ -10,8 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "rr.h"
-#include "rr_size.h"
+#include "nk/rr.h"
+#include "nk/rr_size.h"
 
 int main(void)
 {

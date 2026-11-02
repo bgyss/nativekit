@@ -7,7 +7,8 @@ set(NK_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 file(READ ${NK_DIR}/VERSION NK_VERSION)
 string(STRIP "${NK_VERSION}" NK_VERSION)
 include(${NK_DIR}/tests/kit_names.cmake)
-set(NK_INCLUDE ${NK_DIR}/include ${NK_DIR}/include/nk)
+set(NK_INCLUDE ${NK_DIR}/include)
+set(NK_PRIVATE_INCLUDE ${NK_DIR}/include/nk)
 set(NK_INCLUDE ${NK_INCLUDE} PARENT_SCOPE)
 
 if(NOT MSVC)
@@ -46,9 +47,8 @@ add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c)
 
 # the presentation backend (NK_RENDER). On Metal and GL its frameworks or
 # libraries are nk_render's link libraries, for the console's library to
-# link; on GL its folder (gl_api.h, for rr_gl_ext.h) is an include directory
-# of nk_render's, for the console's own GL code. On Vulkan the console finds
-# the loader itself (Vulkan::Vulkan, for its own Vulkan code too).
+# link. On Vulkan the console finds the loader itself (Vulkan::Vulkan, for
+# its own Vulkan code too).
 if(NOT NK_RENDER MATCHES "^(soft|metal|gl|vulkan)$")
   message(FATAL_ERROR "nativekit: no renderer ${NK_RENDER}")
 endif()
@@ -65,7 +65,6 @@ elseif(NK_RENDER STREQUAL "metal")
 elseif(NK_RENDER STREQUAL "gl")
   add_library(nk_render OBJECT)
   target_sources(nk_render PRIVATE ${NK_DIR}/src/render/gl/rr_gl.c ${NK_DIR}/src/render/gl/gl_ctx.c)
-  target_include_directories(nk_render PUBLIC ${NK_DIR}/src/render/gl)
   if(WIN32)
     target_link_libraries(nk_render PUBLIC opengl32 gdi32)
   elseif(APPLE)
@@ -118,7 +117,7 @@ endif()
 set(NK_HOST_OBJECTS ${NK_HOST_OBJECTS} PARENT_SCOPE)
 
 foreach(t nk_coro nk_resample nk_dispatch ${NK_HOST_TARGETS} nk_front nk_input nk_app ${NK_RENDER_TARGETS})
-  target_include_directories(${t} PRIVATE ${NK_INCLUDE})
+  target_include_directories(${t} PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
   if(NK_C_FLAGS)
     target_compile_options(${t} PRIVATE ${NK_C_FLAGS})
   endif()

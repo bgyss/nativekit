@@ -58,7 +58,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "rr_size.h"
+#include "nk/rr_size.h"
 
 /* RrM7Px.w2's low 16 bits */
 #define RR_M7_NOT      0x0001u  /* not on a Mode 7 line: the picture's pixel */

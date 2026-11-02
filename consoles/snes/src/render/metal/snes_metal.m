@@ -11,7 +11,7 @@
 
 #include "snes_rr.h"
 #include "rr_mode7.h"
-#include "rr_metal_ext.h"
+#include "nk/rr_metal_ext.h"
 
 #include "rr_compose_src.h"
 

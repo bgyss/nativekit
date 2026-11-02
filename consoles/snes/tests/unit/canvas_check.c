@@ -41,7 +41,7 @@
 #include "nshvc/nshvc.h"
 #include "nshvc/machine.h"
 #include "ppu.h"
-#include "rr_size.h"
+#include "nk/rr_size.h"
 #include "rr_mode7.h"
 
 #define NSCENES 12

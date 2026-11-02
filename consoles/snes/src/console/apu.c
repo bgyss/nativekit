@@ -30,8 +30,8 @@
 
 #include "snes_internal.h"
 #include "nshvc/spc.h"
-#include "coro.h"
-#include "jump.h"
+#include "nk/coro.h"
+#include "nk/jump.h"
 
 SpcRegs spc;
 

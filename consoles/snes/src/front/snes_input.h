@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #include "nshvc/nshvc.h"
-#include "host.h"
+#include "nk/host.h"
 
 /* a key the console reads itself (T, P: the Super Scope's), before the
    kit's nk_input_key; 0: the key goes on to the kit */

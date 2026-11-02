@@ -35,7 +35,7 @@
 #include <string.h>
 
 #include "nshvc/nshvc.h"
-#include "host.h"
+#include "nk/host.h"
 #include "nk/input.h"
 #include "snes_input.h"
 

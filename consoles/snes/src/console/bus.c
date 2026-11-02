@@ -26,8 +26,8 @@
 
 #include "snes_internal.h"
 #include "nshvc/cart.h"
-#include "coro.h"
-#include "fatal.h"
+#include "nk/coro.h"
+#include "nk/fatal.h"
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif

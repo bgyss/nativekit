@@ -11,7 +11,7 @@
 
 #include "snes_rr.h"
 #include "rr_mode7.h"
-#include "rr_gl_ext.h"
+#include "nk/rr_gl_ext.h"
 
 /* a frame with Mode 7 presented (rr_mode7.h, the same arithmetic): the
    shader the Vulkan backend's is made from (vulkan/shaders/m7_body.glsl) */

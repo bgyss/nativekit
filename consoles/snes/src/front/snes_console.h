@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-#include "nk.h"
+#include "nk/nk.h"
 
 extern const nk_console snes_console;
 

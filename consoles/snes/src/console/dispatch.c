@@ -33,9 +33,9 @@
 #include "nshvc/cart.h"
 #include <stddef.h>
 
-#include "coro.h"
-#include "jump.h"
-#include "routines.h"
+#include "nk/coro.h"
+#include "nk/jump.h"
+#include "nk/routines.h"
 
 Regs65816 cpu;
 

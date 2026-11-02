@@ -11,12 +11,12 @@
 
 #include "nshvc/nshvc.h"
 #include "snes_internal.h"
-#include "host.h"
+#include "nk/host.h"
 #include "snes_console.h"
 #include "nk/input.h"
 #include "snes_input.h"
 #if defined(NSHVC_RENDER_VULKAN)
-#include "rr_vulkan_ext.h"
+#include "nk/rr_vulkan_ext.h"
 #endif
 #include "snes_rr.h"
 

@@ -12,7 +12,7 @@
 #include "nshvc/nshvc.h"
 #include "snes_internal.h"
 #include "snes_rr.h"
-#include "rr_size.h"
+#include "nk/rr_size.h"
 #include "rr_mode7.h"
 #include "snes_console.h"
 #include "nk/input.h"

@@ -13,7 +13,7 @@
 
 #include "snes_rr.h"
 #include "rr_mode7.h"
-#include "rr_vulkan_ext.h"
+#include "nk/rr_vulkan_ext.h"
 #include "rr_spv_snes.h"
 
 #define VK_OK(x) rr_vk_check((x), #x)
