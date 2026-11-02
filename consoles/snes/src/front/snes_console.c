@@ -21,6 +21,8 @@ static const nk_key keys[] = {
     { 'S', 1u << 3, "S" }, { 'Q', 1u << 4, "Q" }, { 'W', 1u << 5, "W" }, { 0x0D, 1u << 7, "Return" },
     { 0x10, 1u << 6, "Right Shift" }, { 0x09, 1u << 6, "Tab" },
 };
+static const char *const kind_names[] = { "wram", "rom", "cart ram", "io" };
+_Static_assert(sizeof kind_names / sizeof kind_names[0] == NSHVC_KINDS, "access kind names");
 static const nk_button buttons[] = {
     { "B", NSHVC_B }, { "Y", NSHVC_Y }, { "SELECT", NSHVC_SELECT }, { "START", NSHVC_START },
     { "UP", NSHVC_UP }, { "DOWN", NSHVC_DOWN }, { "LEFT", NSHVC_LEFT }, { "RIGHT", NSHVC_RIGHT },
@@ -163,5 +165,5 @@ const nk_console snes_console = {
     .key = snes_key, .touch = snes_touch, .input = snes_input, .frame = snes_game_frame,
     .regions = regions, .region_count = sizeof regions / sizeof regions[0],
     .battery = battery, .counts_hooks = counts_hooks, .access_kind = nshvc_access_kind,
-    .kind_count = NSHVC_KINDS, .at_exit = snes_at_exit,
+    .kind_count = NSHVC_KINDS, .kind_names = kind_names, .at_exit = snes_at_exit,
 };

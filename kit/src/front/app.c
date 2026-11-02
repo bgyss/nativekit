@@ -138,7 +138,7 @@ static int headless;
    more than 64 reads with no write (a poll loop, a wait's reads) is left
    out, as the profile's measure of the original leaves it out. */
 static FILE *counts_f;
-static uint64_t counts[2][16];
+static uint64_t counts[2][NK_KINDS_MAX];
 static uint8_t pending_kind[65];
 static unsigned pending_n;
 
@@ -146,8 +146,17 @@ static unsigned pending_n;
 static int count_kind(uint32_t addr)
 {
     int k = c->access_kind(addr);
-    if (k < 0 || k >= c->kind_count)
-        nk_fatal("an access of kind %d, not one of the console's %d", k, c->kind_count);
+    if (k < 0 || k >= c->kind_count) {
+        char names[256] = "";
+        int i;
+        for (i = 0; c->kind_names && i < c->kind_count; i++) {
+            size_t used = strlen(names);
+            snprintf(names + used, sizeof names - used, "%s%s", i ? ", " : " (the console's kinds: ",
+                     c->kind_names[i]);
+        }
+        nk_fatal("an access of kind %d, not one of the console's %d%s%s", k, c->kind_count, names,
+                 names[0] ? ")" : "");
+    }
     return k;
 }
 
@@ -595,8 +604,8 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
             c->headless_scale(sx, sy);
     }
     if (counts_f) {
-        if (c->kind_count > 16)
-            nk_fatal("a console with more than 16 kinds of access");
+        if (c->kind_count > NK_KINDS_MAX)
+            nk_fatal("a console with more than %d kinds of access", NK_KINDS_MAX);
         if (!c->counts_hooks || !c->access_kind)
             nk_fatal("a console with no access counts to take");
         c->counts_hooks(count_read, count_write);

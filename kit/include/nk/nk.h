@@ -34,6 +34,7 @@ typedef struct {
 typedef struct { int vk; uint32_t bit; const char *name; } nk_key;
 
 #define NK_PLAYERS 8
+#define NK_KINDS_MAX 16
 
 typedef struct nk_console {
     const char *name;                   /* the console's name: the window title's fallback, messages */
@@ -92,6 +93,7 @@ typedef struct nk_console {
     void     (*counts_hooks)(void (*rd)(uint32_t addr, uint8_t v), void (*wr)(uint32_t addr, uint8_t v));
     int      (*access_kind)(uint32_t addr);
     int      kind_count;
+    const char *const *kind_names;      /* optional names in access-kind order */
 
     void     (*at_exit)(void);          /* optional: its own checks' reports */
 } nk_console;

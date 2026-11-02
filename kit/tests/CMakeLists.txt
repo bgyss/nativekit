@@ -1,4 +1,18 @@
 # the kit's own checks, each against a stub console where it needs one
+add_executable(kit_kinds_check kinds_check.c $<TARGET_OBJECTS:nk_app> $<TARGET_OBJECTS:nk_front>
+  $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_resample>)
+target_link_libraries(kit_kinds_check PRIVATE ${NK_HOST_TARGETS} ${NK_RENDER_TARGETS})
+if(WIN32)
+  target_link_libraries(kit_kinds_check PRIVATE winmm ole32 uuid xinput9_1_0 shell32 gdi32 user32)
+elseif(NK_HOST STREQUAL "macos")
+  target_link_libraries(kit_kinds_check PRIVATE "-framework Cocoa" "-framework QuartzCore"
+    "-framework AudioToolbox" "-framework CoreAudio" "-framework GameController")
+elseif(NK_HOST STREQUAL "ios")
+  target_link_libraries(kit_kinds_check PRIVATE "-framework UIKit" "-framework CoreGraphics"
+    "-framework QuartzCore" "-framework AudioToolbox" "-framework AVFoundation" "-framework GameController")
+endif()
+target_include_directories(kit_kinds_check PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
+set_target_properties(kit_kinds_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/kit/tests)
 add_executable(kit_render_check render_check.c ${NK_DIR}/src/render/rr_common.c)
 target_include_directories(kit_render_check PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
 set_target_properties(kit_render_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/kit/tests)
@@ -29,6 +43,7 @@ set_target_properties(kit_stub_console PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMA
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_custom_target(kit-check
   COMMAND ${CMAKE_COMMAND} -DNK_DIR=${NK_DIR} -P ${NK_DIR}/tests/kit_names.cmake
+  COMMAND ${Python3_EXECUTABLE} ${NK_DIR}/tests/kinds_check.py $<TARGET_FILE:kit_kinds_check>
   COMMAND ${CMAKE_COMMAND} -E env --unset=RR_SIZE $<TARGET_FILE:kit_render_check>
   COMMAND ${CMAKE_COMMAND} -E env RR_SIZE=1100x800 $<TARGET_FILE:kit_render_check>
   COMMAND ${CMAKE_COMMAND} -E env RR_SIZE=1100x800 $<TARGET_FILE:kit_render_check> --override-only
@@ -43,5 +58,5 @@ add_custom_target(kit-check
   COMMAND ${Python3_EXECUTABLE} ${NK_DIR}/tests/states_check.py $<TARGET_FILE:kit_stub_console>
   COMMAND ${Python3_EXECUTABLE} ${NK_DIR}/tests/profile_lib_check.py
   DEPENDS kit_coro_check kit_fatal_check kit_routines_check kit_env_check kit_save_check kit_input_check
-          kit_stub_console kit_render_check
+          kit_stub_console kit_render_check kit_kinds_check
   VERBATIM)
