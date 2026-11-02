@@ -60,12 +60,8 @@ void nshvc_ext_canvas_screen(int layer, const uint8_t *texels, int w, int h, int
 void nshvc_fatal(const char *fmt, ...)
 {
     va_list ap;
-    fprintf(stderr, "nativeshvc: ");
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fprintf(stderr, "\n");
-    exit(70);
+    snes_vfatal(fmt, ap);
 }
 
 /* ---- the game's hooks ---- */

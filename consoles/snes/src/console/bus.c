@@ -151,27 +151,27 @@ static unsigned dbg_irqs, dbg_nmis;          /* for NSHVC_DEBUG */
 static unsigned interrupts_taken;            /* every one taken: a wait's look again */
 static uint32_t dbg_last_read;                /* for NSHVC_DEBUG */
 
+_Noreturn void snes_vfatal(const char *fmt, va_list ap)
+{
+    fprintf(stderr, "nativeshvc: ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    exit(70);
+}
+
 void snes_fatal(const char *fmt, ...)
 {
     va_list ap;
-    fprintf(stderr, "nativeshvc: ");
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fprintf(stderr, "\n");
-    exit(70);
+    snes_vfatal(fmt, ap);
 }
 
 /* the kit's fatal errors (kit/include/nk/fatal.h): the console's own */
 void nk_fatal(const char *fmt, ...)
 {
     va_list ap;
-    fprintf(stderr, "nativeshvc: ");
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
-    va_end(ap);
-    fprintf(stderr, "\n");
-    exit(70);
+    snes_vfatal(fmt, ap);
 }
 
 uint32_t snes_frame(void) { return frames; }

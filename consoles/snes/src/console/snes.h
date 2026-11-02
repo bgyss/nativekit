@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
 
 #include "nshvc/nshvc.h"
 
@@ -104,6 +105,7 @@ const uint8_t *snes_wram(void);
 uint8_t *snes_wram_rw(void);
 
 /* ---- for the dispatcher ---- */
+_Noreturn void snes_vfatal(const char *fmt, va_list ap);
 void snes_fatal(const char *fmt, ...);
 uint8_t snes_peek(uint32_t addr);
 /* a byte the interrupt sequence pushes */
