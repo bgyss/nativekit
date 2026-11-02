@@ -18,6 +18,10 @@ run = "sh tools/toolchains/setup.sh vasm && sh tools/toolchains/setup.sh blastem
 [tasks."test:md-toolchain"]
 run = "python3 consoles/md/tests/toolchain_check.py"
 
+[tasks."test:md-oracle-smoke"]
+description = "Exercise the exploratory libretro runner with a synthetic cartridge"
+run = "python3 consoles/md/tests/oracle_check.py"
+
 [tasks."build:null"]
 run = "cmake -S . -B build/null -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/null -j8"
 
