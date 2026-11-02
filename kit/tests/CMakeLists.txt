@@ -1,4 +1,15 @@
 # the kit's own checks, each against a stub console where it needs one
+if(NK_HOST STREQUAL "null")
+  add_executable(kit_loop_check loop_check.c $<TARGET_OBJECTS:nk_app> $<TARGET_OBJECTS:nk_front>
+    $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_resample>)
+  target_link_libraries(kit_loop_check PRIVATE ${NK_HOST_TARGETS} ${NK_RENDER_TARGETS})
+  target_include_directories(kit_loop_check PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
+  set_target_properties(kit_loop_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/kit/tests)
+  set(_loop_commands COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/kit/tests/loop_save
+    COMMAND ${CMAKE_COMMAND} -E env PORT_SAVEDIR=${CMAKE_BINARY_DIR}/kit/tests/loop_save $<TARGET_FILE:kit_loop_check>
+    COMMAND ${CMAKE_COMMAND} -E env PORT_SAVEDIR=${CMAKE_BINARY_DIR}/kit/tests/loop_save $<TARGET_FILE:kit_loop_check> --headless)
+  set(_loop_target kit_loop_check)
+endif()
 add_executable(kit_kinds_check kinds_check.c $<TARGET_OBJECTS:nk_app> $<TARGET_OBJECTS:nk_front>
   $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_resample>)
 target_link_libraries(kit_kinds_check PRIVATE ${NK_HOST_TARGETS} ${NK_RENDER_TARGETS})
@@ -42,6 +53,7 @@ set_target_properties(kit_stub_console PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMA
 # every kit check, and the name check, at once: cmake --build <dir> --target kit-check
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_custom_target(kit-check
+  ${_loop_commands}
   COMMAND ${CMAKE_COMMAND} -DNK_DIR=${NK_DIR} -P ${NK_DIR}/tests/kit_names.cmake
   COMMAND ${Python3_EXECUTABLE} ${NK_DIR}/tests/kinds_check.py $<TARGET_FILE:kit_kinds_check>
   COMMAND ${CMAKE_COMMAND} -E env --unset=RR_SIZE $<TARGET_FILE:kit_render_check>
@@ -58,5 +70,5 @@ add_custom_target(kit-check
   COMMAND ${Python3_EXECUTABLE} ${NK_DIR}/tests/states_check.py $<TARGET_FILE:kit_stub_console>
   COMMAND ${Python3_EXECUTABLE} ${NK_DIR}/tests/profile_lib_check.py
   DEPENDS kit_coro_check kit_fatal_check kit_routines_check kit_env_check kit_save_check kit_input_check
-          kit_stub_console kit_render_check kit_kinds_check
+          kit_stub_console kit_render_check kit_kinds_check ${_loop_target}
   VERBATIM)

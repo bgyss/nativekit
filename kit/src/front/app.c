@@ -131,6 +131,9 @@ static void draw_overlays(int tw, int th)
 
 /* ---- the application ---- */
 static int headless;
+static int quitting;
+
+void nk_quit(void) { quitting = 1; }
 
 /* --counts FILE (headless): each frame's accesses by the console's kinds
    of access (nk_console.access_kind), for the cost profile's fitter:
@@ -489,6 +492,8 @@ static void frame(void)
         c->input(1, b);
         if (c->frame)
             c->frame();
+        if (quitting)
+            exit(0);
         if ((max_frames >= 0 && frame_no >= max_frames) || (!more && nk_script_steps() && max_frames < 0))
             exit(0);
         return;
@@ -531,6 +536,8 @@ static void frame(void)
         nk_save_write();
     if (c->frame)
         c->frame();
+    if (quitting)
+        quit();
     /* the pace: each frame due a frame's time after the last */
     {
         uint64_t frame_ns = c->frame_ns();

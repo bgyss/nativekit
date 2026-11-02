@@ -36,6 +36,9 @@ typedef struct { int vk; uint32_t bit; const char *name; } nk_key;
 #define NK_PLAYERS 8
 #define NK_KINDS_MAX 16
 
+/* End the application at the current frame's end. */
+void nk_quit(void);
+
 typedef struct nk_console {
     const char *name;                   /* the console's name: the window title's fallback, messages */
     const char *env;                    /* its settings' prefix (env.h) */
