@@ -1,0 +1,69 @@
+# No [tools]: cmake, python3 and the rest come from the nix shell (flake.nix;
+# `nix develop`, or direnv with .envrc). Outside it, install cmake (3.16 or
+# later) and python3 yourself.
+
+[env]
+NSHVC_ASAR = "{{config_root}}/build/toolchains/asar/asar"
+# dylib on macOS; use bsnes_libretro.so on Linux, .dll on Windows
+NSHVC_ORACLE_CORE = "{{config_root}}/build/oracle-core/bsnes_libretro.dylib"
+
+[tasks.tools]
+description = "Fetch and build asar and the pinned reference core"
+run = "sh tools/toolchains/setup.sh all"
+
+[tasks."build:null"]
+run = "cmake -S . -B build/null -DNSHVC_TESTS=ON -DNSHVC_EXAMPLES=ON && cmake --build build/null -j8"
+
+[tasks."build:macos"]
+run = "cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal -DNSHVC_TESTS=ON -DNSHVC_EXAMPLES=ON && cmake --build build/macos -j8"
+
+[tasks."build:null-metal"]
+run = "cmake -S . -B build/null-metal -DNSHVC_RENDER=metal -DNSHVC_TESTS=ON && cmake --build build/null-metal -j8"
+
+[tasks."build:null-gl"]
+run = "cmake -S . -B build/null-gl -DNSHVC_RENDER=gl -DNSHVC_TESTS=ON && cmake --build build/null-gl -j8"
+
+[tasks."build:null-vulkan"]
+description = "Needs Vulkan headers and loader on CMAKE_PREFIX_PATH (the nix shell sets it; otherwise Homebrew)"
+run = "cmake -S . -B build/null-vulkan -DNSHVC_RENDER=vulkan -DNSHVC_TESTS=ON -UVulkan_INCLUDE_DIR -UVulkan_LIBRARY -UVulkan_GLSLANG_VALIDATOR_EXECUTABLE -DCMAKE_PREFIX_PATH=\"${CMAKE_PREFIX_PATH:-/opt/homebrew}\" && cmake --build build/null-vulkan -j8"
+
+[tasks."build:x86"]
+run = "cmake -S . -B build/x86 -DCMAKE_OSX_ARCHITECTURES=x86_64 -DNSHVC_TESTS=ON && cmake --build build/x86 -j8"
+
+[tasks."build:ios"]
+run = "unset LIBRARY_PATH CC CXX MACOSX_DEPLOYMENT_TARGET; PATH=/usr/bin:$PATH cmake -S . -B build/ios -G Xcode -UCMAKE_C_COMPILER -UCMAKE_CXX_COMPILER -UCMAKE_ASM_COMPILER -UCMAKE_OBJC_COMPILER -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DNSHVC_HOST=ios -DNSHVC_EXAMPLES=ON && cmake --build build/ios -- -quiet CODE_SIGNING_ALLOWED=NO"
+
+[tasks."build:none"]
+description = "No host (the app supplies host.h's functions): the library alone"
+run = "cmake -S . -B build/none -DNSHVC_HOST=none -DNSHVC_RENDER=soft && cmake --build build/none -j8"
+
+[tasks."build:win"]
+description = "MinGW cross build (x86_64-w64-mingw32-gcc from the nix shell)"
+run = "cmake -S . -B build/win -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_ASM_COMPILER=$(command -v x86_64-w64-mingw32-gcc) -DCMAKE_AR=$(command -v x86_64-w64-mingw32-ar) -DCMAKE_RANLIB=$(command -v x86_64-w64-mingw32-ranlib) -DNSHVC_HOST=windows -DNSHVC_RENDER=gl -DNSHVC_EXAMPLES=ON && cmake --build build/win -j8"
+
+[tasks.build]
+description = "All the macOS builds (Linux is untested)"
+depends = ["build:null", "build:macos", "build:null-metal", "build:null-gl", "build:null-vulkan", "build:x86", "build:ios", "build:win", "build:none"]
+
+[tasks."test:rom"]
+run = "python3 consoles/snes/tests/rom/run.py"
+
+[tasks."test:kit"]
+description = "The kit's own checks and its name check (the null build)"
+depends = ["build:null"]
+run = "cmake --build build/null --target kit-check"
+
+[tasks."test:consumer"]
+description = "A game as games use it: its own project, the repo root added as a subdirectory"
+run = "cmake -S consoles/snes/tests/consumer -B build/consumer -DNATIVESHVC=$PWD && cmake --build build/consumer -j8 && build/consumer/consumer --headless --frames 5"
+
+[tasks.test]
+description = "The full check set, and the consumer"
+depends = ["test:consumer"]
+run = "sh tools/check.sh"
+
+[tasks."golden:record"]
+run = "python3 consoles/snes/tests/golden.py record build/golden"
+
+[tasks."golden:compare"]
+run = "python3 consoles/snes/tests/golden.py compare build/golden"
