@@ -83,7 +83,7 @@ typedef struct nk_console {
     int      (*key)(int vk, int down);                     /* optional: 1 when the game took the key */
     void     (*touch)(int id, int phase, float x, float y);/* optional: the game's touch hook */
     /* the players' controllers from the frame's input: headless, the
-       script's buttons (b: players 0 and 1); else the kit's devices (input.h) */
+       script's buttons (b: players entries); else the kit's devices (input.h) */
     void     (*input)(int headless, const uint32_t *b);
     void     (*frame)(void);            /* optional: the game's frame hook */
 
@@ -92,7 +92,7 @@ typedef struct nk_console {
     int      region_count;
     int      (*battery)(nk_battery *b); /* optional: 0 no save */
     /* needed only for --counts: the hooks on every access, an access's
-       kind (0 to kind_count - 1) and the number of kinds (16 at most) */
+       kind (0 to kind_count - 1) and the number of kinds (NK_KINDS_MAX at most) */
     void     (*counts_hooks)(void (*rd)(uint32_t addr, uint8_t v), void (*wr)(uint32_t addr, uint8_t v));
     int      (*access_kind)(uint32_t addr);
     int      kind_count;
