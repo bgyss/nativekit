@@ -6,6 +6,9 @@ import hashlib
 import json
 import pathlib
 import sys
+from trace import Event, Writer, M68K, READ, WRITE
+
+TRACE_M68K_CPU = 1 << 0
 
 
 class Game(c.Structure):
@@ -39,6 +42,7 @@ def main():
     parser.add_argument("--input", type=pathlib.Path, help="JSON: frame numbers to port/button lists")
     parser.add_argument("--pad1", choices=("3", "6"), default="6")
     parser.add_argument("--pad2", choices=("3", "6"), default="6")
+    parser.add_argument("--trace", action="store_true", help="require the candidate M68K bus trace hook")
     args = parser.parse_args()
     if args.frames < 1 or not args.core.is_file() or not args.rom.is_file():
         parser.error("core and ROM must exist, and frames must be positive")
@@ -89,6 +93,42 @@ def main():
     queried = set()
     advertised = {}
     current_input = [{}]
+    trace_error = []
+    trace_writer = None
+    trace_file = None
+    emit_error = None
+
+    if args.trace:
+        try:
+            trace_version = core.nmd_trace_version
+            trace_capabilities = core.nmd_trace_capabilities
+            register_trace = core.nmd_trace_register
+            reset_trace = core.nmd_trace_reset
+            emit_error = core.nmd_trace_error
+        except AttributeError as exc:
+            raise RuntimeError("core does not export the trace hook ABI") from exc
+        trace_version.restype = c.c_uint32
+        trace_capabilities.restype = c.c_uint64
+        if trace_version() != 1 or trace_capabilities() & TRACE_M68K_CPU != TRACE_M68K_CPU:
+            raise RuntimeError("core lacks 68000 CPU-access trace capability")
+        trace_cb_type = c.CFUNCTYPE(None, c.c_void_p, c.c_uint64, c.c_uint8, c.c_uint8,
+                                    c.c_uint8, c.c_uint32, c.c_uint32)
+
+        @trace_cb_type
+        def on_trace(user, clock, device, operation, width, address, value):
+            try:
+                trace_writer.emit(Event(clock, device, operation, width, address, value))
+            except (OSError, ValueError) as exc:
+                trace_error.append(str(exc))
+
+        register_trace.argtypes = [c.c_uint32, trace_cb_type, c.c_void_p]
+        register_trace.restype = c.c_int
+        if not register_trace(1, on_trace, None):
+            raise RuntimeError("core refused trace ABI version 1")
+        emit_error.restype = c.c_int
+        reset_trace()
+        trace_file = (args.out / "bus.trace").open("w+b")
+        trace_writer = Writer(trace_file)
 
     @c.CFUNCTYPE(c.c_bool, c.c_uint, c.c_void_p)
     def environment(command, data):
@@ -178,8 +218,16 @@ def main():
     for frame_number in range(1, args.frames + 1):
         current_input[0] = script.get(frame_number, {})
         core.retro_run()
+        if args.trace and emit_error():
+            trace_error.append("core trace error")
+            break
     core.retro_unload_game()
     core.retro_deinit()
+    if trace_error:
+        raise RuntimeError("trace capture failed: " + "; ".join(trace_error))
+    if trace_writer:
+        trace_writer.close()
+        trace_file.close()
     if set(options) != queried:
         raise RuntimeError("core did not request required options: " +
                            ", ".join(sorted(key.decode() for key in set(options) - queried)))
@@ -201,6 +249,10 @@ def main():
                 "input": recorded_input,
                 "input_semantics": "one-based frame snapshots; unspecified ports and frames released",
                 "qualification": "exploratory; remaining core options use defaults"}
+    if args.trace:
+        manifest["trace_file"] = "bus.trace"
+        manifest["trace_capabilities"] = ["m68k_cpu_access"]
+        manifest["trace_events"] = trace_writer.count
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 

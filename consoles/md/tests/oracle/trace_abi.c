@@ -1,4 +1,4 @@
-/* Shared candidate hook logic; capabilities remain zero until core paths are proven. */
+/* Shared candidate hook logic; capabilities only cover instrumented paths. */
 #include "trace_abi.h"
 #include <stddef.h>
 #include <string.h>
@@ -9,7 +9,7 @@ static uint64_t epoch, last[6];
 static int failed;
 
 uint32_t nmd_trace_version(void) { return NMD_TRACE_ABI_VERSION; }
-uint64_t nmd_trace_capabilities(void) { return 0; }
+uint64_t nmd_trace_capabilities(void) { return NMD_TRACE_CAP_M68K_CPU; }
 
 int nmd_trace_register(uint32_t version, nmd_trace_callback callback, void *user)
 {

@@ -121,11 +121,38 @@ build_vasm() {
 }
 
 build_blastem() {
-    fetch_safe blastem "$BLASTEM_URL" "$BLASTEM_PIN"
-    d="$tc/src/blastem"
-    logged "$tc/blastem-build.log" make -C "$d" "libblastem.$ext" NOLTO=1 -j "$jobs"
+    fetch_safe blastem-source "$BLASTEM_URL" "$BLASTEM_PIN"
+    d="$tc/src/blastem-source"
+    patchdir="$here/patches/blastem"
+    stamp="$( (cat "$patchdir"/*.patch "$top/consoles/md/tests/oracle/trace_abi.c" \
+        "$top/consoles/md/tests/oracle/trace_abi.h"; echo "$BLASTEM_PIN") | shasum | cut -c1-40)"
+    buildsrc="$tc/src/blastem-build-$stamp"
+    if [ ! -d "$buildsrc" ]; then
+        mkdir "$buildsrc"
+        git -C "$d" archive "$BLASTEM_PIN" | tar -x -C "$buildsrc"
+        for p in "$patchdir"/*.patch; do patch -d "$buildsrc" -p1 < "$p"; done
+        cp "$top/consoles/md/tests/oracle/trace_abi.c" "$top/consoles/md/tests/oracle/trace_abi.h" "$buildsrc/"
+        echo "$stamp" > "$buildsrc/.nativekit-patch-stamp"
+    elif [ "$(cat "$buildsrc/.nativekit-patch-stamp" 2>/dev/null || true)" != "$stamp" ]; then
+        echo "refusing to reuse a BlastEm build tree with a mismatched patch stamp" >&2
+        exit 1
+    fi
+    source_stamp() {
+        (cd "$buildsrc" && shasum Makefile genesis.c link.T m68k.cpu m68k_util.c trace_abi.c trace_abi.h) |
+            shasum | cut -d ' ' -f 1
+    }
+    current_source_stamp="$(source_stamp)"
+    recorded_source_stamp="$(cat "$buildsrc/.nativekit-source-stamp" 2>/dev/null || true)"
+    if [ -n "$recorded_source_stamp" ] && [ "$current_source_stamp" != "$recorded_source_stamp" ]; then
+        echo "refusing to build a BlastEm tree with local source edits" >&2
+        exit 1
+    fi
+    if [ -z "$recorded_source_stamp" ]; then
+        echo "$current_source_stamp" > "$buildsrc/.nativekit-source-stamp"
+    fi
+    logged "$tc/blastem-build.log" make -C "$buildsrc" "libblastem.$ext" NOLTO=1 -j "$jobs"
     mkdir -p "$tc/blastem"
-    cp "$d/libblastem.$ext" "$tc/blastem/"
+    cp "$buildsrc/libblastem.$ext" "$tc/blastem/"
     echo "candidate reference core: $tc/blastem/libblastem.$ext"
 }
 

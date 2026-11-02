@@ -6,6 +6,8 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "oracle"))
+from trace import M68K, FETCH, READ, WRITE, read as read_trace
 
 root = pathlib.Path(__file__).resolve().parents[3]
 runner = root / "consoles/md/tests/oracle/run.py"
@@ -172,6 +174,38 @@ released:
                              "--pad1", "3"], capture_output=True, text=True, timeout=60)
     if result.returncode == 0:
         sys.exit("oracle_check: six-button-only input accepted for a three-button pad")
+    asm.write_text("        move.w #$1234,$00ff0000\n"
+                   "        move.w $00ff0000,d0\n"
+                   "loop:   bra.s loop\n")
+    bus_program = base / "bus.bin"
+    assembled = subprocess.run([str(assembler), "-Fbin", "-o", str(bus_program), str(asm)],
+                               capture_output=True, text=True)
+    if assembled.returncode:
+        sys.exit("oracle_check: bus fixture did not assemble: " + assembled.stderr)
+    bus_rom = bytearray(rom)
+    code = bus_program.read_bytes()
+    bus_rom[0x200:0x200 + len(code)] = code
+    bus_cart = base / "bus-cart.bin"
+    bus_cart.write_bytes(bus_rom)
+    out = base / "bus"
+    result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom", str(bus_cart),
+                             "--frames", "1", "--out", str(out), "--trace"],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        sys.exit("oracle_check: bus trace run failed: " + result.stderr)
+    with (out / "bus.trace").open("rb") as f:
+        events = list(read_trace(f))
+    bus_manifest = json.loads((out / "manifest.json").read_text())
+    if bus_manifest.get("trace_capabilities") != ["m68k_cpu_access"] or bus_manifest.get("trace_events") != len(events):
+        sys.exit("oracle_check: trace coverage metadata mismatch")
+    if not any(e.device == M68K and e.operation == WRITE and e.address == 0xFF0000 and e.value == 0x1234
+               for e in events):
+        sys.exit("oracle_check: missing work-RAM write event")
+    if not any(e.device == M68K and e.operation == READ and e.address == 0xFF0000 and e.value == 0x1234
+               for e in events):
+        sys.exit("oracle_check: missing work-RAM read event")
+    if not any(e.device == M68K and e.operation == FETCH and e.address == 0x200 for e in events):
+        sys.exit("oracle_check: missing explicit prefetch event: " + repr(events[:12]))
     script.write_text(json.dumps({"1": {"1": ["NOT_A_BUTTON"]}}))
     result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom", str(pad_cart),
                              "--frames", "4", "--out", str(base / "bad-input"), "--input", str(script)],

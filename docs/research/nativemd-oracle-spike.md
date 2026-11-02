@@ -34,6 +34,19 @@ timestamps would move backward. The runner or instrumentation needs an epoch
 accumulator updated at every adjustment, with a test spanning an adjustment
 and verifying monotonic clocks across the affected devices.
 
+The trace envelope and C callback helper live under `consoles/md/tests/oracle/`.
+The reproducible BlastEm patch connects generated 68000 byte/word reads, writes
+and explicit prefetches to that callback, and propagates the emulator's shared
+cycle-counter deductions into the epoch. Synthetic tests verify 68000 work-RAM
+read and write addresses and values. Those timestamps are after mapped-handler
+stalls. Unit checks cover version negotiation, invalid events, epoch adjustment
+and overflow, and reject truncated streams before exposing events. The core
+advertises only M68K CPU accesses; its libretro build selects BlastEm's generated
+C interpreter so instruction fetches go through the explicit hook. This build
+mode may affect reference behavior and needs separate validation. Z80, VDP
+ports and DMA, sound-register clocks, pixels and chip audio remain uninstrumented.
+This partial trace is not a complete oracle.
+
 On macOS arm64, exploratory `make libblastem.dylib` completed successfully.
 Compilation generated a large 68000 source and emitted warnings. The resulting
 arm64 library exports the libretro load, run, video and batch-audio entry points.
