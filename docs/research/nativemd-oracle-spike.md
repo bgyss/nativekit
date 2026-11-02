@@ -43,3 +43,19 @@ cartridge containing a 68000 branch-to-self and ran three frames, producing a
 runner's SNES-specific defaults and the blank synthetic image do not qualify it
 as the MD oracle. Bus, DMA, audio, pixel fidelity, pad timing and settings remain
 unverified.
+
+For the assembler, the exploratory Git mirror revision
+`685a87e5ed14285350ccdb6581c9771bc8df6c7d` identifies itself as vasm 1.9d.
+On this host, `CPU=m68k SYNTAX=mot` and `CPU=z80 SYNTAX=oldstyle` built
+successfully. The first assembled `moveq #1,d0; bra.s *` to `700160fe`, and
+the second assembled `ld a,42; halt` to `3e2a76`. This tests basic toolchain
+operation, not the full cartridge build or the provenance and licensing of a
+chosen distribution. The revision is a candidate until those are checked.
+
+The candidate's `doc/vasm.texi` permits non-commercial use and has a specific
+commercial-use exception for M68k targeting AmigaOS; it says other cases need
+written consent and that individual modules may carry additional terms. The
+local use here is a test tool, not a grant of rights for other uses. This Git
+mirror's commit records version 1.9d, but equivalence to an author-published
+archive has not been established. Keep its source and binaries out of the
+repository and document the restriction in any setup instructions.
