@@ -5,6 +5,8 @@
 
 static nmd_trace_callback receiver;
 static void *receiver_user;
+static nmd_trace_audio_callback audio_receiver;
+static void *audio_receiver_user;
 static uint64_t epoch, last[6];
 static int failed;
 
@@ -14,6 +16,33 @@ uint64_t nmd_trace_capabilities(void)
     uint64_t capabilities = NMD_TRACE_CAP_M68K_CPU;
 #ifdef NMD_TRACE_HAS_VDP_PORT
     capabilities |= NMD_TRACE_CAP_VDP_PORT;
+#endif
+#ifdef NMD_TRACE_HAS_PSG_WRITE
+    capabilities |= NMD_TRACE_CAP_PSG_WRITE;
+#endif
+#ifdef NMD_TRACE_HAS_YM_WRITE
+    capabilities |= NMD_TRACE_CAP_YM_WRITE;
+#endif
+#ifdef NMD_TRACE_HAS_YM_PORT
+    capabilities |= NMD_TRACE_CAP_YM_PORT;
+#endif
+#ifdef NMD_TRACE_HAS_Z80_CPU
+    capabilities |= NMD_TRACE_CAP_Z80_CPU;
+#endif
+#ifdef NMD_TRACE_HAS_VDP_DMA_68K
+    capabilities |= NMD_TRACE_CAP_VDP_DMA_68K;
+#endif
+#ifdef NMD_TRACE_HAS_CHIP_AUDIO
+    capabilities |= NMD_TRACE_CAP_CHIP_AUDIO;
+#endif
+#ifdef NMD_TRACE_HAS_VDP_DMA_FILL
+    capabilities |= NMD_TRACE_CAP_VDP_DMA_FILL;
+#endif
+#ifdef NMD_TRACE_HAS_VDP_DMA_COPY
+    capabilities |= NMD_TRACE_CAP_VDP_DMA_COPY;
+#endif
+#ifdef NMD_TRACE_HAS_VDP_HINT_LINE
+    capabilities |= NMD_TRACE_CAP_VDP_HINT_LINE;
 #endif
     return capabilities;
 }
@@ -25,6 +54,26 @@ int nmd_trace_register(uint32_t version, nmd_trace_callback callback, void *user
     receiver = callback;
     receiver_user = user;
     return 1;
+}
+
+int nmd_trace_audio_register(uint32_t version, nmd_trace_audio_callback callback, void *user)
+{
+    if (version != NMD_TRACE_ABI_VERSION)
+        return 0;
+    audio_receiver = callback;
+    audio_receiver_user = user;
+    return 1;
+}
+
+int nmd_trace_audio_active(void)
+{
+    return audio_receiver != NULL;
+}
+
+void nmd_trace_audio_emit(uint8_t device, int16_t left, int16_t right)
+{
+    if (audio_receiver && (device == NMD_TRACE_YM2612 || device == NMD_TRACE_PSG))
+        audio_receiver(audio_receiver_user, device, left, right);
 }
 
 void nmd_trace_reset(void)
@@ -46,7 +95,7 @@ void nmd_trace_emit(uint32_t local_clock, uint8_t device, uint8_t operation,
                     uint8_t width, uint32_t address, uint32_t value)
 {
     uint64_t clock;
-    if (failed || device < 1 || device > 5 || operation < 1 || operation > 4 ||
+    if (failed || device < 1 || device > 5 || operation < 1 || operation > NMD_TRACE_IRQ ||
         (width != 1 && width != 2 && width != 4) || UINT64_MAX - epoch < local_clock) {
         failed = 1;
         return;

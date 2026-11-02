@@ -1,9 +1,9 @@
 # nativemd oracle spike
 
 This is an exploratory assessment for stage 1, not a qualified reference runner.
-The locally inspected libretro BlastEm Git revision is
-`2230addc4dd74dd094fd264987fd808abba32d0e`. It is a candidate, not yet the
-project's pinned reference. The official BlastEm repository uses Mercurial;
+The configured libretro BlastEm candidate pin is
+`2230addc4dd74dd094fd264987fd808abba32d0e`. It is pinned for local builds, but
+is not a qualified reference. The official BlastEm repository uses Mercurial;
 the libretro repository tracks upstream and carries libretro changes.
 
 The libretro adapter in `libblastem.c` provides frame execution, video and
@@ -13,59 +13,76 @@ frame, which must be considered when designing scripted controller tests.
 
 On this arm64 host, the Makefile selects generated 68000 and Z80 cores. Their
 `.cpu` descriptions generate C, and the 68000 description uses separate
-prefetch and data-memory operations. The memory interfaces and their clock
-semantics must be traced before choosing hook points: logging only device port
-handlers would omit ordinary memory traffic. Existing PSG and YM event logging
-is a possible starting point, but does not establish complete timing or the
-required per-chip audio output.
+prefetch and data-memory operations. Logging only device port handlers would
+omit ordinary memory traffic. Existing PSG and YM event logging remains only
+one part of the evidence; it does not establish complete timing or the required
+per-chip audio output.
 
 In this revision, `m68k_util.c` implements the generated core's byte and word
 access helpers; each adds the base access cost before invoking its mapped
-handler, which can add stalls. `z80_util.c` has separate fast-memory and mapped
-paths, plus I/O helpers. Hook placement must capture both paths and define
-whether a recorded clock is before or after the mapped handler's stalls. The
-68000 prefetch calls the word-read operation, so identifying instruction fetches
-requires an explicit tag at the prefetch call site rather than guessing from an
-address comparison.
+handler, which can add stalls. The patch now instruments `z80_util.c` across its
+fast-memory, mapped-memory, and I/O paths. `z80.cpu` marks opcode fetches before
+the generated core reads them. A synthetic program proves fast Z80 RAM writes,
+a bank-window ROM read, a mapped YM-status read, and mapped YM writes. With the
+pinned `md1va3` model, the fixture checks 15 master clocks per Z80 T-state and a
+3T bank-window wait in the post-handler read timestamp. These checks cover the
+candidate paths exercised by the fixture, not all Z80 timing behavior.
+
+The synthetic 68000 bus fixture also checks byte and word `MOVE abs.l,Dn`
+read intervals: both measure 16 CPU clocks, or 112 master clocks at the pinned
+7-clock divider, matching Table 8-2 of the [Motorola M68000 User's Manual hosted
+by NXP](https://www.nxp.com/docs/en/reference-manual/MC68000UM.pdf). PSG port
+events match their 68000 bus-write clocks; Z80 YM port events match Z80 writes,
+while a YM register commit is stamped at the next 42-master-clock chip tick.
+These are candidate-path timing checks, not hardware qualification.
 
 `genesis.c` periodically subtracts a common cycle deduction from the 68000,
-Z80, VDP, YM and PSG counters. A trace that stores those raw counters as absolute
-timestamps would move backward. The runner or instrumentation needs an epoch
-accumulator updated at every adjustment, with a test spanning an adjustment
-and verifying monotonic clocks across the affected devices.
+Z80, VDP, YM and PSG counters. The instrumentation adds that deduction to a
+shared trace epoch before those counters are adjusted. ABI checks cover epoch
+monotonicity and overflow, but a long-running synthetic fixture has not yet
+crossed an adjustment while producing Z80 events; that cross-device behavior
+still needs direct validation.
 
 The trace envelope and C callback helper live under `consoles/md/tests/oracle/`.
-The reproducible BlastEm patch connects generated 68000 byte/word reads, writes
-and explicit prefetches to that callback, and propagates the emulator's shared
-cycle-counter deductions into the epoch. Synthetic tests verify 68000 work-RAM
-read and write addresses and values. Those timestamps are after mapped-handler
-stalls. Unit checks cover version negotiation, invalid events, epoch adjustment
-and overflow, and reject truncated streams before exposing events. The core
-advertises M68K CPU accesses and VDP ports separately; DMA transfers are not
-covered. Its libretro build selects BlastEm's generated C interpreter so
-instruction fetches go through the explicit hook. This build mode may affect
-reference behavior and needs separate validation. Z80, sound-register clocks,
-pixels and chip audio remain uninstrumented. This partial trace is not a
-complete oracle.
+The reproducible BlastEm patch connects generated 68000 and Z80 accesses,
+selected VDP port events, 68K-to-VDP source slots, VDP fill writes, YM2612/PSG
+writes, VDP copy writes, and common cycle-counter deductions to the callback. CPU-access clocks
+are emitted after mapped handlers return. The core advertises each available
+path separately in the manifest. The runner captures frames, mixed PCM, and
+separate resampled YM2612/PSG contributions at the frontend rate, before the
+final mix and DC blocker. Full device timing and raw chip-clock audio remain absent.
+Its libretro build selects BlastEm's generated C interpreter so
+the explicit fetch hooks run; this build mode may affect reference behavior and
+needs separate validation. The partial trace and mixed audio do not qualify the
+oracle.
 
-On macOS arm64, exploratory `make libblastem.dylib` completed successfully.
-Compilation generated a large 68000 source and emitted warnings. The resulting
-arm64 library exports the libretro load, run, video and batch-audio entry points.
-The existing generic portion of the reference runner loaded a locally generated
-cartridge containing a 68000 branch-to-self and ran three frames, producing a
-256 × 224 PPM. This only proves basic load and frame delivery on this host; the
-runner's SNES-specific defaults and the blank synthetic image do not qualify it
-as the MD oracle. Bus, DMA, audio, pixel fidelity, pad timing and settings remain
-unverified.
+The initial feature extractor at
+[`consoles/md/tools/features.py`](../../consoles/md/tools/features.py) returns
+evidence with `observed`, `not_observed`, or `unavailable` status. It can report
+VDP register modes, the three DMA kinds, interlace/shadow-highlight bits, Z80
+DAC writes, direct 68000 YM writes, pad TH probe sequences, and mapper-register
+accesses. HINT events report VDP pending lines, not 68000 interrupt acceptance.
+SRAM use remains unavailable unless the run supplies the cartridge SRAM window.
+
+On macOS arm64, the pinned-source `mise run tools:md` build completed with the
+Z80 patch applied. The generated core emitted 442 compiler warnings across
+three generated/upstream translation units. The resulting arm64 library exports
+the libretro load, run, video and batch-audio entry points.
+The current runner fixes and records its selected model, region, RAM, clock
+divider, pad, audio and overscan options. Explicit zero overscan yields
+283 × 243 frames in the synthetic check; this is callback geometry for that
+core configuration, not a nominal console-size claim. Synthetic input and sound
+checks exercise selected paths, but do not qualify pad timing, pixel/audio
+fidelity, DMA or the oracle.
 
 The inspected adapter publishes options for region and region forcing, initial
 RAM, 68000 clock divider, controller types, audio gains and low-pass cutoff,
-and overscan cropping. Its fallback uses the first value of an option when the
-frontend supplies none; the observed three-frame smoke used those fallbacks.
-The real runner must supply and record explicit values, and exercise both pad
-types. In this revision a divider of 7 is labeled native, RAM supports zero
-initialization, and a 24000 Hz low-pass cutoff is labeled off. These labels do
-not establish sample fidelity or hardware equivalence.
+and overscan cropping. The runner supplies explicit values and records which
+ones the core queried. Synthetic tests exercise 3- and 6-button settings and
+frame-snapshot input; the adapter still samples only once per frame. In this
+revision a divider of 7 is labeled native, RAM supports zero initialization, and
+a 24000 Hz low-pass cutoff is labeled off. These labels do not establish sample
+fidelity or hardware equivalence.
 
 For the assembler, the exploratory Git mirror revision
 `685a87e5ed14285350ccdb6581c9771bc8df6c7d` identifies itself as vasm 1.9d.

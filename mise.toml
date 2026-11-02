@@ -26,6 +26,14 @@ run = "python3 consoles/md/tests/oracle_check.py"
 description = "Check the candidate trace envelope and clock epochs"
 run = "python3 consoles/md/tests/trace_check.py && python3 consoles/md/tests/trace_abi_check.py"
 
+[tasks."test:md-features"]
+description = "Check evidence-aware extraction from candidate traces"
+run = "python3 consoles/md/tests/feature_check.py"
+
+[tasks."test:md-survey"]
+description = "Check bounded survey statuses, title sanitization, and aggregation"
+run = "python3 consoles/md/tests/survey_check.py"
+
 [tasks."build:null"]
 run = "cmake -S . -B build/null -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/null -j8"
 

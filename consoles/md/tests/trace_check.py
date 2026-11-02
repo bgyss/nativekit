@@ -6,11 +6,14 @@ import unittest
 
 from oracle import trace
 
+IRQ = 5
+
 
 class TraceCheck(unittest.TestCase):
     def test_round_trip_and_independent_device_clocks(self):
         events = [trace.Event(100, trace.M68K, trace.READ, 2, 0xC00004, 0x1234),
                   trace.Event(90, trace.Z80, trace.WRITE, 1, 0x4000, 0x56),
+                  trace.Event(101, trace.VDP, IRQ, 1, 100, 1),
                   trace.Event(103, trace.M68K, trace.FETCH, 2, 0x200, 0x60FE)]
         output = io.BytesIO()
         trace.write(output, events)
@@ -46,7 +49,8 @@ class TraceCheck(unittest.TestCase):
         event = trace.Event(1, trace.M68K, trace.READ, 1, 0, 1)
         for events in ([event, trace.Event(0, trace.M68K, trace.READ, 1, 0, 1)],
                        [trace.Event(1, 255, trace.READ, 1, 0, 1)],
-                       [trace.Event(1, trace.M68K, trace.READ, 3, 0, 1)]):
+                       [trace.Event(1, trace.M68K, trace.READ, 3, 0, 1)],
+                       [trace.Event(1, trace.M68K, 6, 1, 0, 1)]):
             with self.subTest(events=events), self.assertRaises(ValueError):
                 trace.write(io.BytesIO(), events)
 

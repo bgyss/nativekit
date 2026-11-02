@@ -1,7 +1,7 @@
-"""Candidate binary trace envelope; no core currently produces this format.
+"""Versioned candidate binary trace envelope.
 
 All integers are little endian. The 16-byte header is ``NMDT``, version (u16),
-record size (u16), and record count (u64). Version 1 records are 20 bytes: absolute master clock
+record size (u16), and record count (u64). Version 2 records are 20 bytes: absolute master clock
 (u64), device, operation, width, reserved (u8 each), address and value (u32
 each). Clocks are nondecreasing within each device; interleaved devices may
 be observed out of clock order. The reserved byte must be zero. A 12-byte
@@ -12,14 +12,14 @@ import struct
 import tempfile
 
 MAGIC = b"NMDT"
-VERSION = 1
+VERSION = 2
 HEADER = struct.Struct("<4sHHQ")
 RECORD = struct.Struct("<QBBBBII")
 FOOTER = struct.Struct("<4sQ")
 M68K, Z80, VDP, YM2612, PSG = range(1, 6)
-FETCH, READ, WRITE, DMA = range(1, 5)
+FETCH, READ, WRITE, DMA, IRQ = range(1, 6)
 DEVICES = {M68K, Z80, VDP, YM2612, PSG}
-OPERATIONS = {FETCH, READ, WRITE, DMA}
+OPERATIONS = {FETCH, READ, WRITE, DMA, IRQ}
 MAX_U64 = (1 << 64) - 1
 
 
