@@ -11,6 +11,13 @@ NSHVC_ORACLE_CORE = "{{config_root}}/build/oracle-core/bsnes_libretro.dylib"
 description = "Fetch and build asar and the pinned reference core"
 run = "sh tools/toolchains/setup.sh all"
 
+[tasks."tools:md"]
+description = "Build local candidate BlastEm and vasm test tools"
+run = "sh tools/toolchains/setup.sh vasm && sh tools/toolchains/setup.sh blastem"
+
+[tasks."test:md-toolchain"]
+run = "python3 consoles/md/tests/toolchain_check.py"
+
 [tasks."build:null"]
 run = "cmake -S . -B build/null -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/null -j8"
 

@@ -44,6 +44,15 @@ runner's SNES-specific defaults and the blank synthetic image do not qualify it
 as the MD oracle. Bus, DMA, audio, pixel fidelity, pad timing and settings remain
 unverified.
 
+The inspected adapter publishes options for region and region forcing, initial
+RAM, 68000 clock divider, controller types, audio gains and low-pass cutoff,
+and overscan cropping. Its fallback uses the first value of an option when the
+frontend supplies none; the observed three-frame smoke used those fallbacks.
+The real runner must supply and record explicit values, and exercise both pad
+types. In this revision a divider of 7 is labeled native, RAM supports zero
+initialization, and a 24000 Hz low-pass cutoff is labeled off. These labels do
+not establish sample fidelity or hardware equivalence.
+
 For the assembler, the exploratory Git mirror revision
 `685a87e5ed14285350ccdb6581c9771bc8df6c7d` identifies itself as vasm 1.9d.
 On this host, `CPU=m68k SYNTAX=mot` and `CPU=z80 SYNTAX=oldstyle` built
