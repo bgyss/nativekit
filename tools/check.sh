@@ -21,6 +21,7 @@ need() {
 log=build/check.last
 r() { echo "### $*"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 0 ] || fails=$((fails+1)); }
 x() { echo "### $* (expect exit 70)"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 70 ] || fails=$((fails+1)); }
+r sh tools/alias_check.sh
 r python3 consoles/snes/tests/rom/ext_check.py
 r python3 consoles/snes/tests/dsp/fuzz.py 1 2 3 4
 r python3 consoles/snes/tests/dsp/keys.py

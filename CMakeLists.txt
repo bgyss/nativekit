@@ -1,7 +1,7 @@
 # The monorepo: nativekit (kit/), the console-independent parts, and each
 # native console on it (consoles/). The SNES (consoles/snes) is nativeshvc:
 #
-#   cmake -B build -DNSHVC_HOST=macos -DNSHVC_RENDER=metal
+#   cmake -B build -DNK_HOST=macos -DNK_RENDER=metal
 #   cmake --build build
 #
 # builds the static library nshvc a game links with its C. Options as
@@ -16,24 +16,39 @@ if(NOT MSVC)
   enable_language(ASM)
 endif()
 
-set(NSHVC_HOST "null" CACHE STRING "the host: null, macos, windows, ios, none")
-if(APPLE AND NOT NSHVC_HOST STREQUAL "null")
+# Generic options; the original names remain accepted for existing games.
+foreach(_o HOST RENDER TESTS EXAMPLES)
+  if(DEFINED _NK_LAST_${_o} AND DEFINED NSHVC_${_o}
+     AND NOT "${NSHVC_${_o}}" STREQUAL "${_NK_LAST_${_o}}"
+     AND "${NK_${_o}}" STREQUAL "${_NK_LAST_${_o}}")
+    set(NK_${_o} "${NSHVC_${_o}}" CACHE STRING "" FORCE)
+  elseif(DEFINED NSHVC_${_o} AND NOT DEFINED NK_${_o})
+    set(NK_${_o} "${NSHVC_${_o}}" CACHE STRING "" FORCE)
+  endif()
+endforeach()
+set(NK_HOST "null" CACHE STRING "the host: null, macos, windows, ios, none")
+if(APPLE AND NOT NK_HOST STREQUAL "null")
   set(_render_default metal)
 elseif(WIN32)
   set(_render_default gl)
 else()
   set(_render_default soft)
 endif()
-set(NSHVC_RENDER "${_render_default}" CACHE STRING "the renderer: soft, metal, gl, vulkan")
-option(NSHVC_TESTS "build the tests" OFF)
-option(NSHVC_EXAMPLES "build the examples" OFF)
-
+set(NK_RENDER "${_render_default}" CACHE STRING "the renderer: soft, metal, gl, vulkan")
+option(NK_TESTS "build the tests" OFF)
+option(NK_EXAMPLES "build the examples" OFF)
+set(NK_CONSOLES "snes" CACHE STRING "the consoles to build")
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
-
-# the kit reads the options as NK_HOST, NK_RENDER and NK_TESTS; they keep nativeshvc's names for its games
-set(NK_HOST ${NSHVC_HOST})
-set(NK_RENDER ${NSHVC_RENDER})
-set(NK_TESTS ${NSHVC_TESTS})
+foreach(_o HOST RENDER TESTS EXAMPLES)
+  set(NSHVC_${_o} "${NK_${_o}}" CACHE STRING "legacy alias for NK_${_o}" FORCE)
+  set(NSHVC_${_o} "${NK_${_o}}")
+  set(_NK_LAST_${_o} "${NK_${_o}}" CACHE INTERNAL "last synchronized option" FORCE)
+endforeach()
 add_subdirectory(kit)
-add_subdirectory(consoles/snes)
+foreach(_c ${NK_CONSOLES})
+  if(NOT EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/consoles/${_c}/CMakeLists.txt)
+    message(FATAL_ERROR "nativekit: no console ${_c} (consoles/${_c})")
+  endif()
+  add_subdirectory(consoles/${_c})
+endforeach()
