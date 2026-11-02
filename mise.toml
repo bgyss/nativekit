@@ -22,6 +22,10 @@ run = "python3 consoles/md/tests/toolchain_check.py"
 description = "Exercise the exploratory libretro runner with a synthetic cartridge"
 run = "python3 consoles/md/tests/oracle_check.py"
 
+[tasks."test:md-trace"]
+description = "Check the candidate trace envelope and clock epochs"
+run = "python3 consoles/md/tests/trace_check.py && python3 consoles/md/tests/trace_abi_check.py"
+
 [tasks."build:null"]
 run = "cmake -S . -B build/null -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/null -j8"
 
