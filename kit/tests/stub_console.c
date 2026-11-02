@@ -64,12 +64,13 @@ static const nk_region regions[] = {
     { ".players", r_players, 0 },
 };
 static const nk_button buttons[] = { { "A", 1 }, { "B", 2 }, { "START", 8 } };
+static const nk_key keys[] = { { 'A', 1, "A" }, { 'B', 2, "B" } };
 static const char *const steps[] = { "poke" };
 
 nk_console stub_console = {
     .name = "stub", .env = "STUB", .play_ext = ".play",
     .shot = shot,
-    .buttons = buttons, .button_count = 3,
+    .keys = keys, .key_count = 2, .buttons = buttons, .button_count = 3,
     .steps = steps, .step_count = 1, .script_step = step,
     .regions = regions, .region_count = 5,
 };

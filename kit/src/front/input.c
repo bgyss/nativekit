@@ -56,21 +56,19 @@ const nk_input_source *nk_input_source_of(int player)
 }
 
 /* ---- the keyboard ---- */
-static unsigned keys;              /* the positional bits held */
+static uint32_t keys;              /* the positional bits held */
 static unsigned char held[256];    /* the virtual keys held */
 
-static const struct { int vk; unsigned bit; const char *name; } k_map[] = {
-    { 0x26, 1u << 12, "Up" }, { 0x28, 1u << 14, "Down" }, { 0x25, 1u << 15, "Left" },
-    { 0x27, 1u << 13, "Right" }, { 'Z', 1u << 0, "Z" }, { 'X', 1u << 1, "X" }, { 'A', 1u << 2, "A" },
-    { 'S', 1u << 3, "S" }, { 'Q', 1u << 4, "Q" }, { 'W', 1u << 5, "W" }, { 0x0D, 1u << 7, "Return" },
-    { 0x10, 1u << 6, "Right Shift" }, { 0x09, 1u << 6, "Tab" },
-};
+static const nk_key *k_map;
+static int k_n;
+
+void nk_input_keymap(const nk_key *map, int n) { k_map = map; k_n = n; }
 
 void nk_input_key(int vk, int down)
 {
-    size_t i;
-    unsigned m = 0;
-    for (i = 0; i < sizeof k_map / sizeof k_map[0]; i++)
+    int i;
+    uint32_t m = 0;
+    for (i = 0; i < k_n; i++)
         if (k_map[i].vk == vk)
             m |= k_map[i].bit;
     if (vk >= 0 && vk < 256)
@@ -88,15 +86,15 @@ int nk_input_key_held(int vk)
     return vk >= 0 && vk < 256 && held[vk];
 }
 
-unsigned nk_input_keyboard_bits(void)
+uint32_t nk_input_keyboard_bits(void)
 {
     return keys;
 }
 
-const char *nk_input_key_name(unsigned bit_mask)
+const char *nk_input_key_name(uint32_t bit_mask)
 {
-    size_t i;
-    for (i = 0; i < sizeof k_map / sizeof k_map[0]; i++)
+    int i;
+    for (i = 0; i < k_n; i++)
         if (k_map[i].bit == bit_mask)
             return k_map[i].name;
     return "";

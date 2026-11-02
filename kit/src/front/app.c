@@ -548,6 +548,7 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     const char *script = NULL, *out_dir = ".", *dir, *title;
     int i, ww, wh;
     c = con;
+    nk_input_keymap(c->keys, c->key_count);
     if (c->players < 1 || c->players > NK_PLAYERS)
         nk_fatal("the console has %d players, not 1 to %d", c->players, NK_PLAYERS);
     nk_env_prefix(c->env);

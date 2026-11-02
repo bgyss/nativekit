@@ -3,17 +3,18 @@
  * controllers, the mouse and touches, and which of them drives each player
  * now. A console maps them onto its own controllers.
  *
- * The keyboard and a controller give positional bits, host_pad's (host.h):
+ * Controllers give positional bits, host_pad's (host.h). The console supplies
+ * the keyboard map (nk_console.keys):
  *
- *   bit     controller        keyboard
- *   0       bottom face       Z
- *   1       right face        X
- *   2       left face         A
- *   3       top face          S
- *   4, 5    shoulders         Q, W
- *   6       view              Right Shift, Tab
- *   7       menu              Return
- *   12-15   d-pad up, right,  arrows
+ *   bit     controller
+ *   0       bottom face
+ *   1       right face
+ *   2       left face
+ *   3       top face
+ *   4, 5    shoulders
+ *   6       view
+ *   7       menu
+ *   12-15   d-pad up, right,
  *           down, left (the
  *           left stick past
  *           half sets these
@@ -42,9 +43,10 @@ unsigned nk_pad_bits(const host_pad *p);
 
 /* ---- the keyboard ---- */
 void nk_input_key(int vk, int down);
+void nk_input_keymap(const nk_key *keys, int n);
 int  nk_input_key_held(int vk);
-unsigned nk_input_keyboard_bits(void);       /* the keys held, as positional bits */
-const char *nk_input_key_name(unsigned bit_mask); /* the first key for a positional bit ("Z"), "" none */
+uint32_t nk_input_keyboard_bits(void);       /* the keys held, as positional bits */
+const char *nk_input_key_name(uint32_t bit_mask); /* the first key for a positional bit, "" none */
 void nk_input_focus_lost(void);
 
 /* ---- the mouse and touches ---- */

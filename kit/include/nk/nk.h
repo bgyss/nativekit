@@ -30,6 +30,9 @@ typedef struct {
     uint32_t bit;
 } nk_button;
 
+/* A host key, its positional bit, and the label shown to the player. */
+typedef struct { int vk; uint32_t bit; const char *name; } nk_key;
+
 #define NK_PLAYERS 8
 
 typedef struct nk_console {
@@ -66,6 +69,8 @@ typedef struct nk_console {
 
     /* the controllers */
     int players;
+    const nk_key *keys;
+    int key_count;
     const nk_button *buttons;
     int      button_count;
     const char *const *steps;           /* the script steps the console takes itself */

@@ -16,6 +16,7 @@
 #include "nk/host.h"
 #include "nk/input.h"
 #include "snes_input.h"
+#include "snes_console.h"
 
 static int fails;
 
@@ -56,6 +57,7 @@ static void abi_reset(void)
     static const int at[4] = { 100, 50, 900, 650 };
 
     memset(pads, 0, sizeof pads);
+    nk_input_keymap(snes_console.keys, snes_console.key_count);
     wr8(0x004200, 0x00);
 
     /* a joypad in each port: the keyboard is player 0 */
