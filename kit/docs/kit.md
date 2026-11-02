@@ -14,11 +14,12 @@ A console fills one table (`nk_console`, in [`nk.h`](../include/nk/nk.h)) and ca
 controllers. Games never include the kit's headers: a console's own headers are its
 game's contract.
 
-nativekit is at 0.1.0 ([contract-discipline.md](contract-discipline.md)).
+nativekit is at 0.2.0 ([contract-discipline.md](contract-discipline.md)).
 
 ## The parts
 
-Every header is in [`include/nk/`](../include/nk/); every source in [`src/`](../src/).
+Every header is in [`include/nk/`](../include/nk/); consoles include it as `nk/<name>.h`.
+Every source is in [`src/`](../src/).
 
 **The loop and `nk_console`** ([`nk.h`](../include/nk/nk.h),
 [`src/front/app.c`](../src/front/app.c)). `nk_main(console, cart, argc, argv)` reads the
@@ -30,15 +31,16 @@ drains the console's sound (`audio_take`, at `audio_hz`) through the resampler t
 device, brings the players' devices to the console (`input`), writes the battery save
 and draws the game's overlays. Headless, it runs as fast as it can and takes the
 script's buttons, shots and dumps. `--counts` writes each frame's accesses by the
-console's kinds (`access_kind`, `kind_count`, at most 16), for the cost profile's
+console's kinds (`access_kind`, `kind_count`, at most `NK_KINDS_MAX`), for the cost profile's
 fitter; a read in a run of more than 64 with no write between is left out. `--sound`
 writes the console's samples as made. The table's fields are commented in `nk.h`;
-those marked optional may be NULL.
+those marked optional may be NULL. Optional `kind_names` identify access kinds in error
+messages. `nk_quit()` ends the current frame; windowed runs save on quit, headless runs do not.
 
 **Scripts and states** ([`script.h`](../include/nk/script.h),
 [`src/front/script.c`](../src/front/script.c)). A headless run's script: `wait`,
 `hold`, `press`, `shot`, `dump`, `repeat` ... `end`, `save` and `load`, with the
-console's buttons (`buttons`, player 2's written `2.NAME`) and its own steps (`steps`,
+console's buttons (`buttons`, `N.NAME` for players 2 through `players`, up to `NK_PLAYERS`) and its own steps (`steps`,
 each line given to `script_step`). `shot NAME` writes the console's picture
 (`shot`) as a PPM; `dump NAME` writes each of the console's memories (`regions`) as
 `DIR/NAME<ext>`, in the table's order. A state is a process: `save` forks and one copy
@@ -56,7 +58,8 @@ face buttons, the shoulders, view and menu, the d-pad, the left stick past half 
 the d-pad too), with each device's name and each button's label as the device shows it.
 It tracks which device drives each player and reports changes (`nk_input_report`), and
 maps a point in the window to the console's column and row (`nk_input_point`). The
-console maps these onto its own controllers in its `input`.
+console supplies its keyboard map in `keys` and `key_count`, and maps inputs onto its own
+controllers in `input`.
 
 **The save** ([`save.h`](../include/nk/save.h), [`src/front/save.c`](../src/front/save.c)).
 The console's battery RAM (`battery` fills an `nk_battery`: the RAM, its size, the save
@@ -137,12 +140,13 @@ const nk_console abc_console = {
     .window_size = window_size, .aspect = aspect, .present = present,
     .shot = shot, .picture = picture,
     .audio_hz = 44100, .audio_take = audio_take, .audio_queued = audio_queued,
+    .players = 2, .keys = keys, .key_count = 8,
     .buttons = buttons, .button_count = 8,
     .steps = steps, .step_count = 1, .script_step = script_step,
     .input = input,
     .regions = regions, .region_count = 3,
     .battery = battery, .counts_hooks = counts_hooks, .access_kind = access_kind,
-    .kind_count = 4,
+    .kind_count = 4, .kind_names = kind_names,
 };
 
 int abc_main(const abc_cart *cart, int argc, char **argv)
@@ -181,8 +185,8 @@ console's library alone:
 | `nk_render` | the backend `NK_RENDER` names; its frameworks or libraries are its link libraries, for the console's library to link |
 
 `NK_HOST` (`null`, `macos`, `windows`, `ios`, `none`), `NK_RENDER` (`soft`, `metal`,
-`gl`, `vulkan`) and `NK_TESTS` are set by the top-level CMake from the console's own
-options, so a console keeps its options' names. The console links the host's own
+`gl`, `vulkan`), `NK_TESTS`, `NK_EXAMPLES`, and `NK_CONSOLES` are top-level options.
+The top-level build chooses its default console and retains its legacy option aliases. The console links the host's own
 frameworks and libraries. `NK_INCLUDE` is the kit's include path. The kit's version is
 [`VERSION`](../VERSION).
 
@@ -200,8 +204,8 @@ Read with the console's prefix (`<prefix>_NAME`):
 | `_FPS=1`, `_FPS_LOG=FILE` | the frame-rate meter at the window's top left; a line a presented frame |
 | `_SCALE=S` or `SXxSY` | headless: shots as a window that many pixels a console pixel shows them |
 
-Read as they are, with no prefix: `RR_SIZE=WxH` (a headless target's size, 256 x 224
-when not set), `PORT_SAVEDIR` and `PORT_RESDIR` (the save folder and the program's own
+Read as they are, with no prefix: `RR_SIZE=WxH` (overrides the console-provided headless
+size set with `rr_set_headless_size`), `PORT_SAVEDIR` and `PORT_RESDIR` (the save folder and the program's own
 files), and the hosts' own `PORT_LOGFILE` (Windows), `PORT_NOACTIVATE` (macOS) and
 `PORT_INPUTLOG` (iOS).
 
@@ -220,6 +224,9 @@ build) runs the name check and every check in [`tests/`](../tests/):
 
 | check | holds |
 |---|---|
+| `loop_check` | frame-end quit and save timing; no headless save |
+| `render_check` | console headless size, override and missing-size error |
+| `kinds_check.py` | named and unnamed invalid access-kind diagnostics |
 | `coro_check` | switching both ways, a coroutine's own stack, deep recursion on it |
 | `fatal_check` | a coroutine that returns reaches the console's `nk_fatal` (exit 70) |
 | `routines_check` | the lookup over tables of several strides, absent addresses |

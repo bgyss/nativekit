@@ -13,7 +13,7 @@ Windows, headless). A console fills one table and calls the kit's main. The kit 
 console, and the build fails if it does. Its documents are
 [`kit/docs/kit.md`](kit/docs/kit.md) (its parts and how a console uses them) and
 [`kit/docs/contract-discipline.md`](kit/docs/contract-discipline.md) (its versioning, and
-the standards every console here keeps). It is at 0.1.0.
+the standards every console here keeps). It is at 0.2.0.
 
 | console | folder | |
 |---|---|---|
@@ -32,7 +32,7 @@ is nativeshvc's author.
 Built from this folder, with CMake and C11:
 
 ```bash
-cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
+cmake -S . -B build/macos -DNK_HOST=macos -DNK_RENDER=metal && cmake --build build/macos
 ```
 
 makes nativeshvc's library `nshvc`, the kit folded in; a game adds this folder with
@@ -238,7 +238,7 @@ CMake, C11, no dependencies for the core. From the repository's root (nativeshvc
 built with the kit it runs on, [`kit/`](kit/)):
 
 ```bash
-cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
+cmake -S . -B build/macos -DNK_HOST=macos -DNK_RENDER=metal && cmake --build build/macos
 ```
 
 To get the toolchain without Homebrew, `nix develop` (or direnv, with the `.envrc`) gives
@@ -248,11 +248,12 @@ fresh clone. `mise run tools` builds asar and the pinned reference core the test
 against; `mise run build` builds every macOS configuration (iOS needs Xcode with the iOS
 SDK; Linux is untested) and `mise run test` runs the checks.
 
-`NSHVC_HOST` picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
-`NSHVC_RENDER` the renderer (`soft`, `metal`, `gl` or `vulkan`). `NSHVC_TESTS` and
-`NSHVC_EXAMPLES` build the tests and the examples. For iOS, add
+`NK_HOST` (also `NSHVC_HOST`) picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
+`NK_RENDER` (also `NSHVC_RENDER`) the renderer (`soft`, `metal`, `gl` or `vulkan`). `NK_TESTS` and
+`NK_EXAMPLES` build the tests and the examples; `NSHVC_TESTS` and `NSHVC_EXAMPLES`
+remain aliases. `NK_CONSOLES` selects the consoles and defaults to `snes`. For iOS, add
 `-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64
--DNSHVC_HOST=ios`.
+-DNK_HOST=ios`.
 
 ### 2. Write the C against the machine model
 
