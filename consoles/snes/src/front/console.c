@@ -98,7 +98,7 @@ void nshvc_overlay_place(int id, float cx, float cy, float scale, float angle_ra
    script's buttons with the game's; else the kit's devices with the
    game's (snes_input.c); then the players whose device changed to the
    game's input hook */
-void snes_input(int headless, const uint32_t b[2])
+void snes_input(int headless, const uint32_t *b)
 {
     if (headless) {
         nshvc_set_joypad(0, (uint16_t)(b[0] | game_buttons[0]));

@@ -22,6 +22,7 @@ void nk_fatal(const char *fmt, ...)
 }
 
 static uint32_t state = 1, frames;
+static uint32_t players[NK_PLAYERS];
 static uint32_t pic[8];
 
 static void stir(uint32_t b)
@@ -35,6 +36,7 @@ static void stir(uint32_t b)
 
 static const void *r_state(size_t *n) { *n = sizeof state; return &state; }
 static const void *r_frames(size_t *n) { *n = sizeof frames; return &frames; }
+static const void *r_players(size_t *n) { *n = sizeof players; return players; }
 static const void *r_none(size_t *n) { *n = 0; return NULL; }
 
 static const uint32_t *shot(int *w, int *h, int *xs, int *ys)
@@ -59,16 +61,17 @@ static int step(int n, char w[][1024])
 
 static const nk_region regions[] = {
     { ".state", r_state, 0 }, { ".frames", r_frames, 0 }, { ".none", r_none, 1 }, { ".empty", r_none, 0 },
+    { ".players", r_players, 0 },
 };
 static const nk_button buttons[] = { { "A", 1 }, { "B", 2 }, { "START", 8 } };
 static const char *const steps[] = { "poke" };
 
-const nk_console stub_console = {
+nk_console stub_console = {
     .name = "stub", .env = "STUB", .play_ext = ".play",
     .shot = shot,
     .buttons = buttons, .button_count = 3,
     .steps = steps, .step_count = 1, .script_step = step,
-    .regions = regions, .region_count = 4,
+    .regions = regions, .region_count = 5,
 };
 
 int main(int argc, char **argv)
@@ -82,18 +85,20 @@ int main(int argc, char **argv)
             out = argv[++i];
     }
     nk_env_prefix(stub_console.env);
+    stub_console.players = getenv("STUB_PLAYERS") ? atoi(getenv("STUB_PLAYERS")) : 2;
     nk_script_console(&stub_console);
     nk_script_args(argc, argv);
     if (!script)
         return 2;
     nk_script_load(script, out);
     {
-        uint32_t b0, b1;
+        uint32_t b[NK_PLAYERS];
         nk_script_takes();
-        nk_script_frame(&b0, &b1);
+        nk_script_frame(b);
         for (;;) {
-            stir(b0 | b1 << 16);
-            if (!nk_script_frame(&b0, &b1))
+            memcpy(players, b, sizeof players);
+            stir(b[0] | b[1] << 16);
+            if (!nk_script_frame(b))
                 return 0;
         }
     }

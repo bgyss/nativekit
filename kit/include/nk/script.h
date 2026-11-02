@@ -21,8 +21,8 @@
  * save and load fork, or, without fork, go on in a new copy of the program
  * that replays to the machine wanted (script.c).
  *
- * Buttons: the console's (nk_console.buttons), player 1; 2. before one for
- * player 2 (2.START). '#' starts a comment.
+ * Buttons: the console's (nk_console.buttons), player 1; N. selects another
+ * player up to the console's player count (2.START). '#' starts a comment.
  */
 #ifndef NK_SCRIPT_H
 #define NK_SCRIPT_H
@@ -48,7 +48,7 @@ int nk_script_steps(void);
 /* the shots and dumps due now, at the end of a frame */
 void nk_script_takes(void);
 /* the next frame's buttons from the script; 0 when it has ended */
-int nk_script_frame(uint32_t *b0, uint32_t *b1);
+int nk_script_frame(uint32_t b[NK_PLAYERS]);
 
 #ifdef __cplusplus
 }

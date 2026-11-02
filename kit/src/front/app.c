@@ -463,7 +463,7 @@ static void quit(void)
    else the window, input, save and the pace. */
 static void frame(void)
 {
-    uint32_t b[2] = { 0, 0 };
+    uint32_t b[NK_PLAYERS] = { 0 };
     frame_no++;
     if (headless) {
         static int rc = -1;
@@ -476,7 +476,7 @@ static void frame(void)
             rr_check();
         if (sound_f)
             sound_drain();
-        more = nk_script_frame(&b[0], &b[1]);
+        more = nk_script_frame(b);
         c->input(1, b);
         if (c->frame)
             c->frame();
@@ -548,6 +548,8 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     const char *script = NULL, *out_dir = ".", *dir, *title;
     int i, ww, wh;
     c = con;
+    if (c->players < 1 || c->players > NK_PLAYERS)
+        nk_fatal("the console has %d players, not 1 to %d", c->players, NK_PLAYERS);
     nk_env_prefix(c->env);
     nk_script_console(c);
     if (c->at_exit)
@@ -605,9 +607,9 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
            at the end of the frame before. The first frame has none before
            it: it is taken now (its buttons reach no controller read), with
            the shots and dumps before it. */
-        uint32_t b0, b1;
+        uint32_t b[NK_PLAYERS];
         nk_script_takes();
-        nk_script_frame(&b0, &b1);
+        nk_script_frame(b);
     }
     if (!headless) {
         host_thread_interactive();

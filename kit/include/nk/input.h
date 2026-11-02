@@ -28,7 +28,7 @@
 extern "C" {
 #endif
 
-#define NK_PLAYERS 8
+#include "nk.h"
 
 /* what drives a player: its kind, a controller's family and the device's
    name */

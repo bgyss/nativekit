@@ -151,7 +151,7 @@ const nk_console snes_console = {
     .rrcheck_own = "with Mode 7 or a canvas presented",
     .picture = nshvc_picture, .headless_scale = headless_scale,
     .audio_hz = NSHVC_DSP_RATE, .audio_take = nshvc_audio_take, .audio_queued = nshvc_audio_queued,
-    .buttons = buttons, .button_count = sizeof buttons / sizeof buttons[0],
+    .players = 2, .buttons = buttons, .button_count = sizeof buttons / sizeof buttons[0],
     .steps = steps, .step_count = sizeof steps / sizeof steps[0], .script_step = script_step,
     .key = snes_key, .touch = snes_touch, .input = snes_input, .frame = snes_game_frame,
     .regions = regions, .region_count = sizeof regions / sizeof regions[0],

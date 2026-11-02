@@ -30,6 +30,8 @@ typedef struct {
     uint32_t bit;
 } nk_button;
 
+#define NK_PLAYERS 8
+
 typedef struct nk_console {
     const char *name;                   /* the console's name: the window title's fallback, messages */
     const char *env;                    /* its settings' prefix (env.h) */
@@ -63,6 +65,7 @@ typedef struct nk_console {
     int      (*audio_queued)(void);
 
     /* the controllers */
+    int players;
     const nk_button *buttons;
     int      button_count;
     const char *const *steps;           /* the script steps the console takes itself */
@@ -72,7 +75,7 @@ typedef struct nk_console {
     void     (*touch)(int id, int phase, float x, float y);/* optional: the game's touch hook */
     /* the players' controllers from the frame's input: headless, the
        script's buttons (b: players 0 and 1); else the kit's devices (input.h) */
-    void     (*input)(int headless, const uint32_t b[2]);
+    void     (*input)(int headless, const uint32_t *b);
     void     (*frame)(void);            /* optional: the game's frame hook */
 
     /* memories */
