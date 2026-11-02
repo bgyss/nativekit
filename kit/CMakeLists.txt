@@ -81,6 +81,9 @@ elseif(NK_RENDER STREQUAL "vulkan")
   set(NK_RENDER_TARGETS nk_render)
 endif()
 
+# Every renderer shares the console-provided headless size.
+target_sources(nk_render PRIVATE ${NK_DIR}/src/render/rr_common.c)
+
 # time, files and the host. With NK_HOST none on a POSIX system the app
 # supplies all of host.h's functions itself: no nk_host then, and
 # NK_HOST_OBJECTS (the objects a console folds in) is empty.

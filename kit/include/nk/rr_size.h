@@ -1,6 +1,6 @@
 /*
  * rr_size.h: what every backend shares: the headless target size
- * (RR_SIZE=WxH, else 256 x 224) and sharp bilinear, the one definition the
+ * (RR_SIZE=WxH, else the console's size) and sharp bilinear, the definition the
  * backends' shaders and the software backend all compute.
  */
 #ifndef PORT_RR_SIZE_H
@@ -11,16 +11,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+void rr_headless_default(int *w, int *h);
+
 static inline void rr_headless_size(int *w, int *h)
 {
     const char *e = getenv("RR_SIZE");
     int a, b;
-    *w = 256;
-    *h = 224;
     if (e && sscanf(e, "%dx%d", &a, &b) == 2 && a > 0 && b > 0 && a <= 16384 && b <= 16384) {
         *w = a;
         *h = b;
+        return;
     }
+    rr_headless_default(w, h);
 }
 
 /* Sharp bilinear along one axis: for the sample point p (in texels, the

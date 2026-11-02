@@ -38,6 +38,8 @@ void nk_window_size(float *w, float *h)
     host_window_points(w, h);
     if (*w <= 0 || *h <= 0) {
         int tw = 0, th = 0;
+        c->window_size(&tw, &th);
+        rr_set_headless_size(tw, th);
         rr_headless_size(&tw, &th);
         *w = (float)tw;
         *h = (float)th;
@@ -580,6 +582,8 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     if (script)
         nk_script_load(script, out_dir);
     c->power(cart);
+    c->window_size(&ww, &wh);
+    rr_set_headless_size(ww, wh);
     if (headless && c->headless_scale) {
         /* shots as a window <env>_SCALE pixels a console pixel shows them */
         double sx, sy;
