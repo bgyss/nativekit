@@ -19,7 +19,9 @@ denote fetch, read, write and DMA. Widths are 1, 2 or 4 bytes. Events from
 different devices may be interleaved out of clock order; clocks for each device
 must be nondecreasing. The epoch accumulator adds cycle-counter deductions to
 later local counters. The callback is synchronous and passes each field by
-value. Its capability bits report available trace paths. The current M68K CPU
-access bit covers generated-core byte/word reads and writes plus explicit
-prefetches; it excludes DMA master transfers. Z80, VDP ports and DMA, YM2612,
-PSG, video and per-chip audio are not covered, so this is not a complete oracle.
+value. Its capability bits report available trace paths. The M68K CPU-access bit
+covers generated-core byte/word reads and writes plus explicit prefetches. The
+VDP-port bit covers control/data-port reads and writes observed by VDP handlers.
+For VDP records, address `0` denotes the data port and address `4` the control port.
+Neither bit covers DMA master transfers. Z80, YM2612, PSG, video and per-chip
+audio are not covered, so this is not a complete oracle.

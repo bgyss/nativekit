@@ -9,7 +9,14 @@ static uint64_t epoch, last[6];
 static int failed;
 
 uint32_t nmd_trace_version(void) { return NMD_TRACE_ABI_VERSION; }
-uint64_t nmd_trace_capabilities(void) { return NMD_TRACE_CAP_M68K_CPU; }
+uint64_t nmd_trace_capabilities(void)
+{
+    uint64_t capabilities = NMD_TRACE_CAP_M68K_CPU;
+#ifdef NMD_TRACE_HAS_VDP_PORT
+    capabilities |= NMD_TRACE_CAP_VDP_PORT;
+#endif
+    return capabilities;
+}
 
 int nmd_trace_register(uint32_t version, nmd_trace_callback callback, void *user)
 {

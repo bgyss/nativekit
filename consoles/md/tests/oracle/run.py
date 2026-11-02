@@ -9,6 +9,7 @@ import sys
 from trace import Event, Writer, M68K, READ, WRITE
 
 TRACE_M68K_CPU = 1 << 0
+TRACE_VDP_PORT = 1 << 1
 
 
 class Game(c.Structure):
@@ -109,7 +110,8 @@ def main():
             raise RuntimeError("core does not export the trace hook ABI") from exc
         trace_version.restype = c.c_uint32
         trace_capabilities.restype = c.c_uint64
-        if trace_version() != 1 or trace_capabilities() & TRACE_M68K_CPU != TRACE_M68K_CPU:
+        actual_capabilities = trace_capabilities()
+        if trace_version() != 1 or actual_capabilities & TRACE_M68K_CPU != TRACE_M68K_CPU:
             raise RuntimeError("core lacks 68000 CPU-access trace capability")
         trace_cb_type = c.CFUNCTYPE(None, c.c_void_p, c.c_uint64, c.c_uint8, c.c_uint8,
                                     c.c_uint8, c.c_uint32, c.c_uint32)
@@ -129,6 +131,9 @@ def main():
         reset_trace()
         trace_file = (args.out / "bus.trace").open("w+b")
         trace_writer = Writer(trace_file)
+        trace_capability_names = ["m68k_cpu_access"]
+        if actual_capabilities & TRACE_VDP_PORT:
+            trace_capability_names.append("vdp_port")
 
     @c.CFUNCTYPE(c.c_bool, c.c_uint, c.c_void_p)
     def environment(command, data):
@@ -251,7 +256,7 @@ def main():
                 "qualification": "exploratory; remaining core options use defaults"}
     if args.trace:
         manifest["trace_file"] = "bus.trace"
-        manifest["trace_capabilities"] = ["m68k_cpu_access"]
+        manifest["trace_capabilities"] = trace_capability_names
         manifest["trace_events"] = trace_writer.count
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 

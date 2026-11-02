@@ -19,8 +19,9 @@ The new tool checkouts refuse a revision change when local work is present.
 
 `mise run test:md-oracle-smoke` exercises the exploratory runner with generated
 cartridges. After `mise run tools:md`, `--trace` requires the candidate core's
-trace hook and writes `bus.trace`; it currently certifies only the M68K CPU
-access path. DMA, Z80, VDP-port and sound traces are still absent. The runner
+trace hook and writes `bus.trace`; it currently certifies M68K CPU accesses and
+VDP control/data port events. DMA, Z80 and sound traces are still absent. The
+runner
 at `consoles/md/tests/oracle/run.py` accepts `--core`,
 `--rom`, `--frames`, and an empty `--out` directory. Optional `--input` names a
 JSON object mapping one-based frame numbers to port numbers (`"1"` or `"2"`)

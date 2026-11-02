@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "oracle"))
-from trace import M68K, FETCH, READ, WRITE, read as read_trace
+from trace import M68K, VDP, FETCH, READ, WRITE, read as read_trace
 
 root = pathlib.Path(__file__).resolve().parents[3]
 runner = root / "consoles/md/tests/oracle/run.py"
@@ -174,7 +174,10 @@ released:
                              "--pad1", "3"], capture_output=True, text=True, timeout=60)
     if result.returncode == 0:
         sys.exit("oracle_check: six-button-only input accepted for a three-button pad")
-    asm.write_text("        move.w #$1234,$00ff0000\n"
+    asm.write_text("        move.w #$8104,$c00004\n"
+                   "        move.l #$c0000000,$c00004\n"
+                   "        move.w #$000e,$c00000\n"
+                   "        move.w #$1234,$00ff0000\n"
                    "        move.w $00ff0000,d0\n"
                    "loop:   bra.s loop\n")
     bus_program = base / "bus.bin"
@@ -196,7 +199,7 @@ released:
     with (out / "bus.trace").open("rb") as f:
         events = list(read_trace(f))
     bus_manifest = json.loads((out / "manifest.json").read_text())
-    if bus_manifest.get("trace_capabilities") != ["m68k_cpu_access"] or bus_manifest.get("trace_events") != len(events):
+    if bus_manifest.get("trace_capabilities") != ["m68k_cpu_access", "vdp_port"] or bus_manifest.get("trace_events") != len(events):
         sys.exit("oracle_check: trace coverage metadata mismatch")
     if not any(e.device == M68K and e.operation == WRITE and e.address == 0xFF0000 and e.value == 0x1234
                for e in events):
@@ -206,6 +209,12 @@ released:
         sys.exit("oracle_check: missing work-RAM read event")
     if not any(e.device == M68K and e.operation == FETCH and e.address == 0x200 for e in events):
         sys.exit("oracle_check: missing explicit prefetch event: " + repr(events[:12]))
+    if not any(e.device == VDP and e.operation == WRITE and e.address == 0 and e.value == 0x000E
+               for e in events):
+        sys.exit("oracle_check: missing VDP data-port write event")
+    if not any(e.device == VDP and e.operation == WRITE and e.address == 4 and e.value == 0x8104
+               for e in events):
+        sys.exit("oracle_check: missing VDP control-port write event")
     script.write_text(json.dumps({"1": {"1": ["NOT_A_BUTTON"]}}))
     result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom", str(pad_cart),
                              "--frames", "4", "--out", str(base / "bad-input"), "--input", str(script)],
