@@ -9,13 +9,13 @@ The two documents it builds on are:
 - **Spec (approved):** `docs/superpowers/specs/2026-11-01-nativemd-design.md`
 - **Stage 0 plan (completed):** `docs/superpowers/plans/2026-11-01-nativemd-stage0-kit.md`
 
-**Current state (2026-11-03):** Stages 0-2 are complete for their stated scopes. Stage 3 Tasks 1-3
-add the native Z80 coroutine, memory map, serial bank window, bus arbitration, PSG registers and
-tone/noise dividers, plus synthetic Z80 and sound fixtures. All 38 MD ROM cases pass or remain
-individually documented candidate differences; sound sample checks replay candidate-timestamped
-PSG writes to keep instruction clocks separate from the native C routine model. YM timers, FM
-operators, mixing, and the host audio queue remain open. BlastEm remains a candidate oracle, not a
-hardware qualification result. Continue with Task 4 in
+**Current state (2026-11-03):** Stages 0-2 are complete for their stated scopes. Stage 3 Tasks 1-4
+add the native Z80 coroutine, memory map, serial bank window, bus arbitration, PSG tone/noise, YM2612
+ports, candidate-bounded BUSY status, region-timed Timer A/B flags, and channel-six DAC samples.
+All 42 MD ROM cases pass or remain individually documented candidate differences; four known
+differences remain. Synthetic YM cases cover both banks, timer polling, and a candidate-timestamped
+DAC stream. YM FM operators, the full chip mix, and the host audio queue remain open. BlastEm remains
+a candidate oracle, not a hardware qualification result. Continue with Task 5 in
 `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
 
 Read the spec first, then this handoff, then the stage 0 plan.
@@ -56,7 +56,7 @@ Success, from the spec:
 Stages 0 and 1 are complete for their recorded scopes. Stage 1 evidence and limitations are in
 `docs/superpowers/plans/2026-11-01-nativemd-stage1-oracle.md` and its SDD ledger; Stage 2
 implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage2-bus-vdp.md`.
-Continue with Task 4 of the Stage 3 Z80 and sound plan above.
+Continue with Task 5 of the Stage 3 Z80 and sound plan above.
 
 1. From the repository root, use the `nativemd` branch.
 2. `nix develop`. Run everything inside it, and use the mise tasks.
@@ -142,8 +142,9 @@ after the previous stage has landed, because each one depends on what the previo
 - The Z80 runs on its own coroutine (`kit/include/nk/coro.h`), with its own routine table,
   through `zrd`/`zwr`. BUSREQ and RESET from the 68000 suspend and restart it at exact clocks.
   The bank window costs its real time and stalls the 68000.
-- The SN76489 and YM2612 (registers, timers, busy flag, DAC) live in `src/sound/`, and their mix
-  feeds `audio_take`. Resample with `kit/include/nk/resample.h`.
+- The SN76489 and YM2612 (ports, timers, busy flag, DAC) live in `src/sound/`; the YM2612 FM
+  operators, full chip mix to `audio_take`, and host audio queue remain pending. Resample with
+  `kit/include/nk/resample.h`.
 
 ### Stage 4: pads, cost profiles, the full comparison, the golden master, and 1.0
 - Pads: 3- and 6-button with TH timing, plus the version register and TMSS (`src/io/`).

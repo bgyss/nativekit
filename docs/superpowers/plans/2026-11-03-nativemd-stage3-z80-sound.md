@@ -46,8 +46,8 @@ BlastEm candidate.
    preserve or reset state as the hardware does, and never let the 68000 access Z80 RAM too early.
 2. Serial bank writes must shift exactly nine low bits; bank-window accesses must map to the right
    68000 address and stall correctly against ordinary bus traffic and DMA.
-3. Timer A/B overflow, reset, enable, and reload writes at the same clock as an access must not lose
-   an IRQ or clear a status bit before software reads it.
+3. Timer A/B overflow, reset, enable, and reload writes at the same clock as an access must preserve
+   overflow flags until the software reset bits clear them.
 4. PSG latch/data writes, tone divisor zero, noise clock source, and reset seed must remain defined
    across a partial write sequence and a frame boundary.
 5. The audio queue must preserve sample order across wrap, underrun, power reset, and concurrent
@@ -159,32 +159,40 @@ BlastEm candidate.
   C routine.
 - [x] **Step 5: Commit** PSG register/tone behavior before mixing it with YM output.
 
-### Task 4: Implement YM2612 ports, busy state, timers, IRQ, and DAC
+### Task 4: Implement YM2612 ports, busy status, timers, and DAC
 
 **Files:**
 - Modify: `consoles/md/src/sound/ym2612.c`
-- Modify: `consoles/md/src/console/bus.c`, `consoles/md/src/z80/z80bus.c`,
-  `consoles/md/src/console/dispatch.c`, `consoles/md/src/console/md_internal.h`,
-  `consoles/md/tests/unit/sound_check.c`, `consoles/md/tests/rom/{cases.py,run.py,testcart.c}`
+- Modify: `consoles/md/src/sound/sound.h`, `consoles/md/src/console/{bus.c,dispatch.c}`,
+  `consoles/md/tests/unit/{sound_check.c,bus_check.c,z80_check.c}`,
+  `consoles/md/tests/rom/{cases.py,mdtest.py,run.py,testcart.c}`, `consoles/md/tests/CMakeLists.txt`,
+  `consoles/md/tests/bus_check.py`, and `mise.toml`
 
 **Interfaces:**
 - `md_ym_read(uint8_t port,uint64_t clock)` and `md_ym_write(uint8_t port,uint8_t value,uint64_t clock)`
   serve 68000 byte ports `$A04000-$A04003` and Z80 memory `$4000-$4003`.
-- The device models both register banks, BUSY timing, Timer A/B load/enable/reset/overflow flags,
-  Z80 IRQ assertion, and channel-six DAC enable/data before operator synthesis is added.
-- Timer and busy deadlines are exposed to the shared scheduler; status reads observe and clear the
-  documented overflow flags without dropping a same-clock event.
+- The device models both address latches, register banks, BUSY status, Timer A/B load/enable/reset/
+  overflow flags, and the channel-six DAC sample before operator synthesis. YM timer flags are
+  polled; do not route timer overflow to the Z80. Sega documents the Z80 interrupt as VINT-only.
+- Timer deadlines use region-specific rational master-clock conversion from Sega's microsecond
+  formulas. Status reads report overflow flags; writes to register 27 clear them on reset bits.
+  BUSY uses the pinned candidate's 32-cycle window, beginning one YM clock after a data write, since
+  Sega does not specify its duration; keep that timing candidate-bounded.
+- 68000 YM accesses require BUSREQ acknowledgement. Byte writes select address/data ports; a word
+  write drives the connected high byte. YM output samples use 1008 master clocks per source tick.
 
-- [ ] **Step 1: Add `test_ym_ports_busy`, `test_ym_timer_a`, `test_ym_timer_b_irq`, and
+- [x] **Step 1: Add `test_ym_ports_busy`, `test_ym_timer_a`, `test_ym_timer_b_status`, and
   `test_ym_dac_samples`**, plus synthetic cases for both port banks, address/data sequencing,
-  byte-only access, timer periods/reset/overflow, IRQ masking/acknowledgement, and DAC sample edges.
-- [ ] **Step 2: Run `mise run test:md-sound` and focused candidate cases**; verify each timer and
-  status edge fails before state/deadline handling exists.
-- [ ] **Step 3: Implement timestamped YM ports and timer/IRQ/DAC state** in `ym2612.c`; add timer
+  byte-only access, timer periods/reset/overflow flags, and DAC sample edges.
+- [x] **Step 2: Run `mise run test:md-sound` and focused candidate cases**; the unit checks cover
+  timer/status boundaries and the ROM cases poll candidate timer flags.
+- [x] **Step 3: Implement timestamped YM ports and timer/status/DAC state** in `ym2612.c`; add timer
   deadlines to `md_advance_to` while preserving 68000/VDP/Z80 event order.
-- [ ] **Step 4: Run the sound and interrupt checks** and compare YM port values, BUSY/overflow flags,
-  timer IRQ clocks, and DAC samples with the candidate.
-- [ ] **Step 5: Commit** register/timer/DAC behavior before implementing FM operators.
+- [x] **Step 4: Run sound, bus, Z80, and interrupt checks**; compare port writes, timer status, and
+  the held DAC stream with candidate-timestamped YM register writes. The DAC PCM comparison permits
+  an eight-frame phase search, ignores the first 16 resampler startup frames, and uses mean error
+  <=32 and peak error <=600 s16 units; register writes are compared separately.
+- [x] **Step 5: Commit** register/timer/DAC behavior before implementing FM operators.
 
 ### Task 5: Implement YM2612 FM channels and envelopes
 

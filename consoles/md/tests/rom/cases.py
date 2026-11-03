@@ -26,6 +26,7 @@ class Case:
     region: str = "U"
     capture_frames: int = 2
     capture_audio: bool = False
+    capture_ym_audio: bool = False
     weave_fields: bool = False
     weave_dimensions: tuple[int, int] = (256, 224)
     z80_fixture_id: int = 0
@@ -210,6 +211,62 @@ def _z80_psg_noise_case():
     ), (0xE0, 0xE4, 0xF0), 0xA5)
 
 
+def _ym_write_register(bank, address, value):
+    port = 0xA04000 + (bank * 2)
+    return (Operation(WRITE, 1, port, address),
+            Operation(WRITE, 1, port + 1, value))
+
+
+def _ym_timer_case(name, timer_registers, control, status_mask):
+    accesses = [
+        *timer_registers,
+        *_ym_write_register(0, 0x27, control),
+        Operation(POLL, 1, 0xA04000, status_mask, compare_mask=status_mask),
+        Operation(READ, 1, 0xA04000, status_mask, compare_mask=status_mask),
+    ]
+    return Case(name, tuple(_ym_bus_request() + tuple(accesses) + _ym_bus_release()))
+
+
+def _ym_bus_request():
+    return (
+        Operation(WRITE, 2, 0xA11200, 0x0000),
+        Operation(WRITE, 2, 0xA11100, 0x0100),
+        Operation(WRITE, 2, 0xA11200, 0x0100),
+        Operation(POLL, 2, 0xA11100, 0x0000, compare_mask=0x0100),
+    )
+
+
+def _ym_bus_release():
+    return ()
+
+
+def _ym_sound_cases():
+    return [
+        Case("sound_ym_ports", (
+            *_ym_bus_request(),
+            *_ym_write_register(0, 0x30, 0xA5),
+            *_ym_write_register(1, 0x31, 0xB6),
+            *(Operation(READ, 1, 0xA04000 + port, 0, compare_mask=0x03)
+              for port in range(4)),
+            *_ym_bus_release(),
+        )),
+        _ym_timer_case("sound_ym_timer_a", (
+            *_ym_write_register(0, 0x24, 0xFF),
+            *_ym_write_register(0, 0x25, 0x03),
+        ), 0x05, 0x01),
+        _ym_timer_case("sound_ym_timer_b", (
+            *_ym_write_register(0, 0x26, 0xFE),
+        ), 0x0A, 0x02),
+        Case("sound_ym_dac", (
+            *_ym_bus_request(),
+            Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+            *_ym_write_register(0, 0x2B, 0x80),
+            *_ym_write_register(0, 0x2A, 0xFF),
+            *_ym_bus_release(),
+        ), capture_ym_audio=True, capture_frames=2),
+    ]
+
+
 def all_cases():
     return [Case("bus_map", (
         Operation(READ, 2, 0x00004000),
@@ -221,7 +278,9 @@ def all_cases():
         Operation(READ, 4, 0xE00002),
         Operation(READ, 2, 0x01004000),
         Operation(WRITE, 2, 0xA11000, 0x0100),
-        Operation(WRITE, 2, 0xA04000, 0x3000),
+        *_ym_bus_request(),
+        Operation(WRITE, 1, 0xA04000, 0x30),
+        *_ym_bus_release(),
         Operation(WRITE, 1, 0xA06000, 0x01),
         Operation(WRITE, 1, 0xA10003, 0xFF),
         Operation(WRITE, 2, 0xC00004, 0x8104),
@@ -241,7 +300,8 @@ def all_cases():
         Operation(POLL, 2, 0xA11100, 0x0100, compare_mask=0x0100),
         Operation(WRITE, 1, 0xFF0010, 0x00),
         Operation(READ, 1, 0xFF0010),
-    )), _z80_bank_window_case(), _z80_psg_tone_case(), _z80_psg_noise_case(), Case("tas_write", (
+    )), _z80_bank_window_case(), _z80_psg_tone_case(), _z80_psg_noise_case(),
+    *_ym_sound_cases(), Case("tas_write", (
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),
         Operation(READ, 1, 0xFF0020),

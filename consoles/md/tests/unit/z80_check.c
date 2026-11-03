@@ -217,9 +217,15 @@ static void test_z80_memory_map_and_bank_window(void)
     assert(map_ym_status == 0);
     assert(bank_window_value == 0xC3); /* Nine bits select $E00000. */
     assert(rd8(0xE00001) == 0x44); /* $8001 maps to $E00001. */
+    wr16(0xA11200, 0x0000);
+    wr16(0xA11100, 0x0100);
+    wr16(0xA11200, 0x0100);
+    while (rd16(0xA11100) & 0x0100u) {
+    }
     wr8(0xA04000, 0x22);
     wr8(0xA04001, 0x55);
     assert(rd8(0xA04000) == map_ym_status); /* Both CPUs share YM status. */
+    wr16(0xA11100, 0x0000);
 }
 
 static void test_busreq_acknowledges_at_z80_bus_boundary(void)

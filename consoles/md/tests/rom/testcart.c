@@ -355,6 +355,140 @@ static int replay_psg_events(const char *path, nmd_region region)
     return 1;
 }
 
+static int replay_ym_events(const char *path, nmd_region region)
+{
+    uint8_t *data;
+    size_t size;
+    uint32_t count;
+    uint64_t end_clock, last_clock = 0;
+    uint32_t i;
+
+    data = read_file(path, &size);
+    if (!data)
+        return 0;
+    if (size < 18u || memcmp(data, "NYM1", 4) || read_be16(data + 4) != 1) {
+        free(data);
+        return 0;
+    }
+    count = read_be32(data + 6);
+    end_clock = read_be64(data + 10);
+    if (size != 18u + (size_t)count * 11u) {
+        free(data);
+        return 0;
+    }
+    md_ym_reset(region);
+    for (i = 0; i < count; i++) {
+        const uint8_t *record = data + 18u + (size_t)i * 11u;
+        uint64_t clock = read_be64(record);
+        uint8_t bank = record[8];
+        uint8_t address = record[9];
+        uint8_t value = record[10];
+        if (clock < last_clock || clock > end_clock || bank > 1u) {
+            free(data);
+            return 0;
+        }
+        md_ym_write((uint8_t)(bank * 2u), address, clock);
+        md_ym_write((uint8_t)(bank * 2u + 1u), value, clock);
+        last_clock = clock;
+    }
+    free(data);
+    return 1;
+}
+
+static int write_ym_samples(const char *path, double output_rate, unsigned frames,
+                            uint64_t master_clock)
+{
+    Resampler *resampler = NULL;
+    int16_t *mono = NULL, *stereo = NULL, *pcm = NULL;
+    float *output = NULL;
+    FILE *file = NULL;
+    uint64_t source_count;
+    int source_frames, pushed, pulled;
+    size_t i;
+    int valid = 1;
+
+    if (!path || !(output_rate > 0.0) || !frames || frames > INT_MAX / 2u)
+        return 0;
+    md_ym_advance_to(master_clock);
+    source_count = md_ym.sample_count;
+    if (source_count > INT_MAX)
+        return 0;
+    source_frames = (int)source_count;
+    mono = (int16_t *)malloc((size_t)source_frames * sizeof *mono);
+    stereo = (int16_t *)malloc((size_t)source_frames * 2u * sizeof *stereo);
+    output = (float *)malloc((size_t)frames * 2u * sizeof *output);
+    pcm = (int16_t *)malloc((size_t)frames * 2u * sizeof *pcm);
+    if (!mono || !stereo || !output || !pcm) {
+        fprintf(stderr, "testcart: cannot allocate YM2612 conversion buffers\n");
+        valid = 0;
+        goto done;
+    }
+    if (md_ym_take_samples(mono, source_frames) != source_frames) {
+        fprintf(stderr, "testcart: YM2612 source sample count changed while draining\n");
+        valid = 0;
+        goto done;
+    }
+    for (i = 0; i < source_count; i++) {
+        int32_t channel = mono[i];
+        int32_t offset = channel >= 0 ? 112 : -112;
+        /* Recreate BlastEm's default zero-offset contribution for the other five channels. */
+        int16_t mixed = (int16_t)(5 * 73 + ((channel + offset) * 79) / 120);
+        stereo[i * 2u] = mixed;
+        stereo[i * 2u + 1u] = mixed;
+    }
+
+    resampler = resample_new(md_ym_source_rate(), output_rate);
+    if (!resampler) {
+        fprintf(stderr, "testcart: cannot create YM2612 resampler\n");
+        valid = 0;
+        goto done;
+    }
+    pushed = resample_push(resampler, stereo, source_frames);
+    if (pushed != source_frames) {
+        fprintf(stderr, "testcart: YM2612 resampler accepted %d of %d source frames\n",
+                pushed, source_frames);
+        valid = 0;
+        goto done;
+    }
+    pulled = resample_pull(resampler, output, (int)frames);
+    if (pulled != (int)frames) {
+        fprintf(stderr, "testcart: YM2612 resampler produced %d of %u output frames\n",
+                pulled, frames);
+        valid = 0;
+        goto done;
+    }
+    for (i = 0; i < (size_t)frames * 2u; i++) {
+        float sample = output[i];
+        if (sample >= 1.0f)
+            pcm[i] = 0x7FFF;
+        else if (sample <= -1.0f)
+            pcm[i] = (int16_t)-0x8000;
+        else
+            pcm[i] = (int16_t)(sample * 0x7FFF);
+    }
+    file = fopen(path, "wb");
+    if (!file) {
+        valid = 0;
+        goto done;
+    }
+    if (fwrite(pcm, sizeof *pcm, (size_t)frames * 2u, file) != (size_t)frames * 2u)
+        valid = 0;
+    if (fclose(file))
+        valid = 0;
+    file = NULL;
+
+done:
+    if (file)
+        fclose(file);
+    if (resampler)
+        resample_free(resampler);
+    free(mono);
+    free(stereo);
+    free(output);
+    free(pcm);
+    return valid;
+}
+
 static int execute_steps(const uint8_t *steps, size_t size)
 {
     uint16_t version, count;
@@ -382,7 +516,7 @@ static int execute_steps(const uint8_t *steps, size_t size)
         uint32_t value = read_be32(record + 8);
         if ((width != 1 && width != 2 && width != 4) ||
             (operation == STEP_TAS && width != 1) ||
-            (operation == STEP_POLL && (width != 2 || !compare_mask)) ||
+            (operation == STEP_POLL && ((width != 1 && width != 2) || !compare_mask)) ||
             (compare_mask && operation != STEP_READ && operation != STEP_POLL)) {
             fprintf(stderr, "testcart: invalid step %u\n", i);
             return 2;
@@ -404,7 +538,12 @@ static int execute_steps(const uint8_t *steps, size_t size)
         } else if (operation == STEP_TAS) {
             (void)nmd_tas(addr);
         } else if (operation == STEP_POLL) {
-            while ((rd16(addr) & compare_mask) != (uint16_t)value) {
+            if (width == 1) {
+                while ((rd8(addr) & compare_mask) != (uint8_t)value) {
+                }
+            } else {
+                while ((rd16(addr) & compare_mask) != (uint16_t)value) {
+                }
             }
         } else {
             fprintf(stderr, "testcart: unknown operation %u at step %u\n", operation, i);
@@ -418,10 +557,13 @@ int main(int argc, char **argv)
 {
     const char *rom_path = NULL, *steps_path = NULL, *picture_path = NULL;
     const char *psg_path = NULL, *psg_event_path = NULL;
+    const char *ym_path = NULL, *ym_event_path = NULL;
     const char *region = "U";
     unsigned frames = 2;
     unsigned psg_frames = 0;
     double psg_rate = 0;
+    unsigned ym_frames = 0;
+    double ym_rate = 0;
     uint8_t *rom, *steps;
     size_t rom_size, steps_size;
     uint16_t step_count, fixture_id, z80_entry;
@@ -440,6 +582,14 @@ int main(int argc, char **argv)
             psg_path = argv[++i];
         else if (!strcmp(argv[i], "--psg-events") && i + 1 < argc)
             psg_event_path = argv[++i];
+        else if (!strcmp(argv[i], "--ym-out") && i + 1 < argc)
+            ym_path = argv[++i];
+        else if (!strcmp(argv[i], "--ym-events") && i + 1 < argc)
+            ym_event_path = argv[++i];
+        else if (!strcmp(argv[i], "--ym-rate") && i + 1 < argc)
+            ym_rate = strtod(argv[++i], NULL);
+        else if (!strcmp(argv[i], "--ym-frames") && i + 1 < argc)
+            ym_frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--psg-rate") && i + 1 < argc)
             psg_rate = strtod(argv[++i], NULL);
         else if (!strcmp(argv[i], "--psg-frames") && i + 1 < argc)
@@ -463,6 +613,14 @@ int main(int argc, char **argv)
     }
     if (psg_event_path && !psg_path) {
         fprintf(stderr, "testcart: --psg-events requires --psg-out\n");
+        return 2;
+    }
+    if (ym_path && (!(ym_rate > 0.0) || !ym_frames)) {
+        fprintf(stderr, "testcart: --ym-out requires --ym-rate and --ym-frames\n");
+        return 2;
+    }
+    if (ym_event_path && !ym_path) {
+        fprintf(stderr, "testcart: --ym-events requires --ym-out\n");
         return 2;
     }
 
@@ -519,7 +677,12 @@ int main(int argc, char **argv)
         fprintf(stderr, "testcart: invalid PSG replay event file %s\n", psg_event_path);
         result = 2;
     }
-    if (!result && (picture_path || (psg_path && !psg_event_path))) {
+    if (!result && ym_event_path && !replay_ym_events(ym_event_path, cart.region)) {
+        fprintf(stderr, "testcart: invalid YM2612 replay event file %s\n", ym_event_path);
+        result = 2;
+    }
+    if (!result && (picture_path || (psg_path && !psg_event_path) ||
+                    (ym_path && !ym_event_path))) {
         unsigned frame;
         if (!frames || frames > 4) {
             fprintf(stderr, "testcart: frame count must be in 1-4\n");
@@ -531,6 +694,16 @@ int main(int argc, char **argv)
     if (!result && psg_path) {
         if (!write_psg_samples(psg_path, psg_rate, psg_frames)) {
             fprintf(stderr, "testcart: cannot write PSG samples %s\n", psg_path);
+            result = 2;
+        }
+    }
+    if (!result && ym_path) {
+        const uint64_t master_clock_hz = cart.region == NMD_PAL ?
+            53203395ull : 53693175ull;
+        uint64_t end_clock = (uint64_t)((double)ym_frames * master_clock_hz / ym_rate + 0.5);
+        uint64_t render_clock = end_clock + 64u * 1008u;
+        if (!write_ym_samples(ym_path, ym_rate, ym_frames, render_clock)) {
+            fprintf(stderr, "testcart: cannot write YM2612 samples %s\n", ym_path);
             result = 2;
         }
     }

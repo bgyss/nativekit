@@ -37,6 +37,10 @@ static int fail_if_fatal_mode_returns(const char *mode)
         (void)rd8(0xA00000);
     } else if (!strcmp(mode, "z80-word"))
         (void)rd16(0xA00000);
+    else if (!strcmp(mode, "ym-without-busreq")) {
+        wr16(0xA11100, 0x0000);
+        (void)rd8(0xA04000);
+    }
     else if (!strcmp(mode, "vdp-word-read-0a"))
         (void)rd16(0xC0000A);
     else if (!strcmp(mode, "vdp-word-read-d-0a"))
@@ -108,7 +112,13 @@ int main(int argc, char **argv)
 
     {
         uint64_t before = md_clock;
+        wr16(0xA11200, 0x0000);
+        wr16(0xA11100, 0x0100);
+        wr16(0xA11200, 0x0100);
+        while (rd16(0xA11100) & 0x0100u) {
+        }
         wr16(0xA04000, 0x3000);
+        wr8(0xA04001, 0x00);
         wr8(0xA06000, 0x01);
         wr8(0xA10003, 0xFF);
         wr16(0xC00004, 0x8104);
@@ -116,7 +126,9 @@ int main(int argc, char **argv)
         wr16(0xD00004, 0x8104);
         wr16(0xC00000, 0x000E);
         wr8(0xC00011, 0x9F);
-        assert(md_clock - before == 8u * 28u);
+        wr16(0xA11100, 0x0000);
+        assert(md_clock - before >= 14u * 28u);
+        assert((md_clock - before) % 28u == 0);
     }
 
     wr16(0xA11100, 0x0100);

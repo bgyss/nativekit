@@ -184,8 +184,12 @@ static uint8_t md_read8(uint32_t addr, int z80_access)
         nk_fatal("68000 read from the unconnected low lane of Z80 BUSREQ at $%06X",
                  (unsigned)addr);
 
-    if (addr >= 0xA04000u && addr <= 0xA04003u)
+    if (addr >= 0xA04000u && addr <= 0xA04003u) {
+        if (!z80_access && !md_z80_busack)
+            nk_fatal("68000 YM2612 read at $%06X without BUSREQ acknowledgement",
+                     (unsigned)addr);
         return md_ym_read((uint8_t)(addr - 0xA04000u), md_clock);
+    }
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
     if (md_is_vdp(addr)) {
@@ -274,6 +278,9 @@ static void md_write8(uint32_t addr, uint8_t value, int z80_access)
         return;
 
     if (addr >= 0xA04000u && addr <= 0xA04003u) {
+        if (!md_z80_busack)
+            nk_fatal("68000 YM2612 write at $%06X without BUSREQ acknowledgement",
+                     (unsigned)addr);
         md_ym_write((uint8_t)(addr - 0xA04000u), value, md_clock);
         return;
     }
@@ -328,9 +335,10 @@ static void md_write16(uint32_t addr, uint16_t value)
     }
 
     if (addr >= 0xA04000u && addr <= 0xA04002u) {
-        uint8_t port = (uint8_t)(addr - 0xA04000u);
-        md_ym_write(port, (uint8_t)(value >> 8), md_clock);
-        md_ym_write((uint8_t)(port + 1u), (uint8_t)value, md_clock);
+        if (!md_z80_busack)
+            nk_fatal("68000 YM2612 write at $%06X without BUSREQ acknowledgement",
+                     (unsigned)addr);
+        md_ym_write((uint8_t)(addr - 0xA04000u), (uint8_t)(value >> 8), md_clock);
         return;
     }
 

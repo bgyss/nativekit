@@ -29,7 +29,7 @@ depends = ["build:null"]
 run = "cmake --build build/null --target z80_check && python3 consoles/md/tests/z80_check.py"
 
 [tasks."test:md-sound"]
-description = "Check PSG register writes, tone dividers, attenuation, and noise"
+description = "Check YM2612 and PSG register writes, timers, DAC, tones, attenuation, and noise"
 depends = ["build:null"]
 run = "cmake --build build/null --target sound_check && build/null/tests/sound_check"
 
