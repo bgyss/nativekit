@@ -24,8 +24,9 @@ An `observed` status means trace evidence was captured, not that a setting was
 active. For boolean settings, the `enabled` value distinguishes active from
 explicitly disabled.
 
-Feature evidence contains addresses, values, clocks, and register writes from
-the trace. The JSON output does not include input paths or ROM contents.
+Feature evidence contains clocks, device and port addresses, and selected
+register values. It omits transferred DMA and DAC payload values, save-memory
+bytes, input paths, and ROM files.
 
 ## Bounded library survey
 

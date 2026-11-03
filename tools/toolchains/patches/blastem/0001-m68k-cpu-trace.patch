@@ -75,19 +75,21 @@ index d844080..faae883 100644
  		psg_write(gen->psg, value);
  	} else {
  		vdp_test_port_write(gen->vdp, value << 8 | value);
-@@ -1319,6 +1324,7 @@ static m68k_context * io_write(uint32_t location, m68k_context * context, uint8_
+@@ -1319,6 +1324,8 @@ static m68k_context * io_write(uint32_t location, m68k_context * context, uint8_
  #endif
  			} else if (location < 0x6000) {
  				sync_sound(gen, context->cycles);
-+				nmd_trace_emit(context->cycles, NMD_TRACE_YM2612, NMD_TRACE_WRITE, 1, location & 3, value);
++				nmd_trace_emit(context->cycles, NMD_TRACE_YM2612, NMD_TRACE_WRITE, 1,
++				               NMD_TRACE_YM_PORT_M68K_ADDR_TAG | (location & 3), value);
  				if (location & 1) {
  					ym_data_write(gen->ym, value);
  				} else if(location & 2) {
-@@ -1765,6 +1771,7 @@ static void * z80_write_ym(uint32_t location, void * vcontext, uint8_t value)
+@@ -1765,6 +1772,8 @@ static void * z80_write_ym(uint32_t location, void * vcontext, uint8_t value)
  	z80_context * context = vcontext;
  	genesis_context * gen = context->system;
  	sync_sound(gen, context->Z80_CYCLE);
-+	nmd_trace_emit(context->Z80_CYCLE, NMD_TRACE_YM2612, NMD_TRACE_WRITE, 1, location & 3, value);
++	nmd_trace_emit(context->Z80_CYCLE, NMD_TRACE_YM2612, NMD_TRACE_WRITE, 1,
++	               NMD_TRACE_YM_PORT_Z80_ADDR_TAG | (location & 3), value);
  	if (location & 1) {
  		ym_data_write(gen->ym, value);
  	} else if (location & 2) {
@@ -158,20 +160,23 @@ index 8aa7171..8c1de0f 100644
  #ifdef DEBUG_DISASM
  	if (tmp == context->pc) {
  		m68kinst inst;
-@@ -54,6 +64,7 @@ void m68k_write_8(m68k_context *context)
+@@ -54,6 +64,8 @@ void m68k_write_8(m68k_context *context)
  	uint32_t address = context->scratch2 & context->opts->gen.address_mask;
  	uint32_t index = address >> 16;
- 	context->write8[index](address, context, context->scratch1, context->write8_data[index]);
-+	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, NMD_TRACE_WRITE, 1, address, context->scratch1);
++	uint8_t value = context->scratch1;
+-	context->write8[index](address, context, context->scratch1, context->write8_data[index]);
++	context->write8[index](address, context, value, context->write8_data[index]);
++	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, NMD_TRACE_WRITE, 1, address, value);
  #ifdef DEBUG_DISASM
  	printf("Write.b %05X: %02X\n", context->scratch2, context->scratch1);
  #endif
 @@ -74,6 +85,8 @@ void m68k_write_16(m68k_context *context)
  	int32_t address = context->scratch2 & context->opts->gen.address_mask;
  	uint32_t index = address >> 16;
- 	context->write16[index](address, context, context->scratch1, context->write16_data[index]);
-+	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, NMD_TRACE_WRITE, 2,
-+	               context->scratch2 & context->opts->gen.address_mask, context->scratch1);
++	uint16_t value = context->scratch1;
+-	context->write16[index](address, context, context->scratch1, context->write16_data[index]);
++	context->write16[index](address, context, value, context->write16_data[index]);
++	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, NMD_TRACE_WRITE, 2, address, value);
  #ifdef DEBUG_DISASM
  	printf("Write %05X: %04X\n", context->scratch2, context->scratch1);
  #endif
@@ -314,7 +319,12 @@ index b4b6051..3079b3c 100644
  		vdp_advance_dma(context);
  	}
  	fifo_entry * start = context->fifo + context->fifo_read;
-@@ -1198,6 +1201,10 @@ static void external_slot(vdp_context * context)
+@@ -1194,0 +1197,4 @@ static void external_slot(vdp_context * context)
++				if (fill_dma_slot) {
++					nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 2,
++					               NMD_TRACE_DMA_FILL_ADDR_TAG | start->address, start->value);
++				}
+@@ -1198,6 +1204,10 @@ static void external_slot(vdp_context * context)
  				event_vram_byte(context->cycles, start->address, byte, context->regs[REG_AUTOINC]);
  				vdp_check_update_sat_byte(context, address, byte);
  				write_vram_byte(context, address, byte);
@@ -325,7 +335,18 @@ index b4b6051..3079b3c 100644
  				if (!start->partial) {
  					start->address = address;
  					start->partial = 1;
-@@ -1268,7 +1275,11 @@ static void external_slot(vdp_context * context)
+@@ -1231,0 +1242,4 @@ static void external_slot(vdp_context * context)
++			if (fill_dma_slot) {
++				nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 2,
++				               NMD_TRACE_DMA_FILL_ADDR_TAG | start->address, val);
++			}
+@@ -1249,0 +1264,5 @@ static void external_slot(vdp_context * context)
++				if (fill_dma_slot) {
++					nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 2,
++					               NMD_TRACE_DMA_FILL_ADDR_TAG | start->address,
++					               context->vsram[(start->address/2) & 63]);
++				}
+@@ -1268,7 +1287,11 @@ static void external_slot(vdp_context * context)
  		}
  	} else if ((context->flags & FLAG_DMA_RUN) && (context->regs[REG_DMASRC_H] & DMA_TYPE_MASK) == DMA_COPY) {
  		if (context->flags & FLAG_READ_FETCHED) {

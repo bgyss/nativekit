@@ -61,8 +61,22 @@ class AVInfo(c.Structure):
     _fields_ = [("geometry", Geometry), ("timing", Timing)]
 
 
+class SystemInfo(c.Structure):
+    _fields_ = [("library_name", c.c_char_p), ("library_version", c.c_char_p),
+                ("valid_extensions", c.c_char_p), ("need_fullpath", c.c_bool),
+                ("block_extract", c.c_bool)]
+
+
 class Variable(c.Structure):
     _fields_ = [("key", c.c_char_p), ("value", c.c_char_p)]
+
+
+def _game_descriptor(rom_path, need_fullpath):
+    """Build a libretro game descriptor and retain memory-backed content."""
+    if need_fullpath:
+        return Game(str(rom_path.resolve()).encode(), None, 0, None), None
+    content = c.create_string_buffer(rom_path.read_bytes())
+    return Game(None, c.cast(content, c.c_void_p), len(content) - 1, None), content
 
 
 def main():
@@ -298,9 +312,13 @@ def main():
     if error or unsupported:
         raise RuntimeError("unsupported required options: " + ", ".join(unsupported))
     core.retro_init()
+    core.retro_get_system_info.argtypes = [c.POINTER(SystemInfo)]
+    core.retro_get_system_info.restype = None
+    system_info = SystemInfo()
+    core.retro_get_system_info(c.byref(system_info))
     core.retro_load_game.argtypes = [c.POINTER(Game)]
     core.retro_load_game.restype = c.c_bool
-    game = Game(str(args.rom.resolve()).encode(), None, 0, None)
+    game, content_buffer = _game_descriptor(args.rom, system_info.need_fullpath)
     if not core.retro_load_game(c.byref(game)):
         raise RuntimeError("core refused cartridge")
     info = AVInfo()
@@ -338,7 +356,8 @@ def main():
     recorded_input = {str(frame): {str(port + 1): [button_names[button] for button in sorted(values)]
                                    for port, values in sorted(ports.items())}
                       for frame, ports in sorted(script.items())}
-    manifest = {"core_sha256": digest.hexdigest(), "frames": frame_count[0], "sample_rate": info.timing.sample_rate,
+    manifest = {"core_sha256": digest.hexdigest(), "frames": frame_count[0],
+                "need_fullpath": bool(system_info.need_fullpath), "sample_rate": info.timing.sample_rate,
                 "frame_sizes": frame_sizes,
                 "capture_mode": "feature-only" if args.feature_only else "full",
                 "audio_format": "s16-native-endian-stereo", "pixel_format": "XRGB8888",

@@ -52,13 +52,13 @@ the candidate vasm mirror revision is `685a87e5ed14285350ccdb6581c9771bc8df6c7d`
 Before pinning the latter, verify its relationship to an author-published 1.9d
 distribution and applicable module terms; record what was and was not verified.
 
-- [ ] Add a test that builds both assemblers and asserts 68000 `moveq #1,d0; bra.s *`
+- [x] Add a test that builds both assemblers and asserts 68000 `moveq #1,d0; bra.s *`
   emits `700160fe` and Z80 `ld a,42; halt` emits `3e2a76`. Watch it fail before setup.
-- [ ] Add immutable pins and explicit setup targets for BlastEm and both vasm binaries;
+- [x] Add immutable pins and explicit setup targets for BlastEm and both vasm binaries;
   preserve existing `tools` behavior and place products under `build/`. Verify a clean
   rebuild and a second invocation at the same pins. Do not reset a checkout containing
   uncommitted user changes.
-- [ ] Build the core on macOS arm64 and verify its libretro exports. Record warnings;
+- [x] Build the core on macOS arm64 and verify its libretro exports. Record warnings;
   run the existing SNES gates. Commit the toolchain and test changes.
 
 ### 2. Headless libretro runner and synthetic cartridge
@@ -70,15 +70,15 @@ Mise task definitions.
 directory and input script. It emits unfiltered frame images and mixed PCM, with
 format and rate recorded in a machine-readable manifest. Failure is nonzero.
 
-- [ ] Create a synthetic cartridge with reset vectors, valid header and a deterministic
+- [x] Create a synthetic cartridge with reset vectors, valid header and a deterministic
   loop, plus an input-sensitive variant. Test load failure, frame count, image dimensions,
   nonempty audio and deterministic repeated output. Prove the test catches a changed
   frame or input.
-- [ ] Implement the runner against the libretro API, handling `need_fullpath`, pixel
+- [x] Implement the runner against the libretro API, handling `need_fullpath`, pixel
   format and frame pitch, and fixing region, model, clock, filter and RAM-init options.
   Record the selected values and reject unsupported required settings rather than
   silently relying on defaults. Compare two clean runs.
-- [ ] Keep the existing runner and SNES tests intact; run the stage 0 gate and commit.
+- [x] Keep the existing runner and SNES tests intact; run the stage 0 gate and commit.
 
 ### 3. Versioned trace and clock epochs
 
@@ -89,38 +89,38 @@ synthetic fixtures and tests.
 width, address/value where applicable, and 64-bit master clock. The runner rejects
 unknown versions and incomplete records. A hook ABI reports capabilities explicitly.
 
-- [ ] Test round trips, malformed and truncated records, and a forced counter-adjustment
+- [x] Test round trips, malformed and truncated records, and a forced counter-adjustment
   boundary. Assert monotonic timestamps and cross-device epoch consistency.
-- [ ] Patch the locally pinned core to export the hook ABI and accumulate every relevant
+- [x] Patch the locally pinned core to export the hook ABI and accumulate every relevant
   cycle deduction; apply patches reproducibly to a clean pinned checkout. Verify patch
   reapplication and a deliberate trace-version mismatch.
-- [ ] Run the fixture and stage 0 gates; commit the format, patch and tests.
+- [x] Run the fixture and stage 0 gates; commit the format, patch and tests.
 
 ### 4. CPU and device observations
 
 **Files:** BlastEm patches, synthetic 68000/Z80 cartridges, oracle tests and trace reader.
 
-- [ ] Add fixtures with known byte/word reads and writes, instruction fetches, Z80 fast
+- [x] Add fixtures with known byte/word reads and writes, instruction fetches, Z80 fast
   RAM and bank-window accesses, VDP port reads/writes and DMA, and timed YM/PSG writes.
   Assert ordered events, widths, values and clocks against independently calculated
   instruction sequences, including a stalled access. Plant an omitted hook in each path
   and show the tests fail.
-- [ ] Instrument the generated cores and device paths at the pinned revision. Explicitly
+- [x] Instrument the generated cores and device paths at the pinned revision. Explicitly
   tag prefetches; include fast and mapped Z80 paths, DMA slots, VDP accesses and register
   writes. State whether clocks are access-start or access-completion and capture stalls.
-- [ ] Capture unfiltered per-frame pixels, mixed sound and each chip's sound; fixtures
+- [x] Capture unfiltered per-frame pixels, mixed sound and each chip's sound; fixtures
   assert nonzero expected signals and deterministic outputs. Do not promote this task
   until each required stream is actually emitted and its clock relationship is tested.
-- [ ] Run oracle fixtures and stage 0 gates; commit patches and tests.
+- [x] Run oracle fixtures and stage 0 gates; commit patches and tests.
 
 ### 5. Feature extraction
 
 **Files:** `consoles/md/tools/` feature extractor and synthetic trace fixtures.
 
-- [ ] Test each required observation: VDP modes/registers, DMA kinds, interlace,
+- [x] Test each required observation: VDP modes/registers, DMA kinds, interlace,
   shadow/highlight, HINT lines, Z80 DAC/direct writes, six-button probing and
   SRAM/mapper use. Include negative and incomplete-coverage cases.
-- [ ] Implement extraction from the versioned trace. Each observation carries the
+- [x] Implement extraction from the versioned trace. Each observation carries the
   evidence needed to distinguish observed, not observed under the bounded run, and
   unavailable. Verify tests reject unsupported trace capabilities; commit.
 
@@ -128,14 +128,14 @@ unknown versions and incomplete records. A hook ABI reports capabilities explici
 
 **Files:** `consoles/md/tools/survey.py`, `consoles/md/docs/survey.md`, tests.
 
-- [ ] Test a synthetic directory with two cartridges, duplicate titles, an invalid file,
+- [x] Test a synthetic directory with two cartridges, duplicate titles, an invalid file,
   an unsupported mapper and a path-like title. Verify fixed no-input and Start runs,
   deterministic aggregate counts, per-title statuses and no paths or cartridge bytes.
-- [ ] Implement `survey.py <rom-dir>` using the runner with a documented fixed frame
+- [x] Implement `survey.py <rom-dir>` using the runner with a documented fixed frame
   count and Start timing. Emit only sanitized titles, features, bounded-run status and
   aggregate counts; preserve errors without embedding paths. Do not infer absence from
   a failed or unsupported run.
-- [ ] Run it on the supplied local library only after the fixtures pass. Inspect the
+- [x] Run it on the supplied local library only after the fixtures pass. Inspect the
   generated document for paths and content, run all stage 0 gates and the stage 1
   fixtures, and commit only the validated report and tooling.
 
@@ -145,3 +145,10 @@ Review the full branch against the spec and the five review-focus cases. Report 
 exact core and assembler revisions, host, commands, failures and limitations. Stage 1
 is complete only when every specified stream and survey feature has direct evidence;
 a core build or blank-frame smoke test is not sufficient.
+
+**Status:** Complete for the pinned `md1va3` exploratory valid-traffic fixtures on macOS arm64.
+The traces do not qualify BlastEm as a hardware-accurate oracle. Hook-omission mutations cover
+the exercised M68K, Z80, VDP-port, DMA, HINT, YM2612, PSG and chip-audio paths. Mutations do not
+cover the Pico-specific epoch adjustment, the 128-KiB VRAM word-fill arm, or invalid VDP data-read
+returns. Exact equivalence between the pinned vasm mirror and the author's 1.9d archive remains
+unverified; the available provenance and applicable module terms are recorded separately.

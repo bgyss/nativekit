@@ -10,21 +10,28 @@ from trace import Event, M68K, Z80, VDP, YM2612, READ, WRITE, DMA, IRQ, read as 
 
 DMA_FILL_ADDR_TAG = 0x10000000
 DMA_COPY_ADDR_TAG = 0x20000000
+YM_PORT_M68K_ADDR_TAG = 0x80000000
+YM_PORT_Z80_ADDR_TAG = 0x40000000
+YM_PORT_SOURCE_MASK = 0xF0000000
+TH_TIMEOUT = 56000
+MAX_HINT_LINES = 512
 
 
 class FeatureError(ValueError):
     """The trace or run manifest is incomplete or unsupported."""
 
 
-def _event_record(event):
-    return {
+def _event_record(event, include_value=True):
+    record = {
         "clock": event.clock,
         "device": event.device,
         "operation": event.operation,
         "width": event.width,
         "address": event.address,
-        "value": event.value,
     }
+    if include_value:
+        record["value"] = event.value
+    return record
 
 
 def _observation(capabilities, required, evidence, value=None, scope_reason=None):
@@ -48,14 +55,27 @@ def _observation(capabilities, required, evidence, value=None, scope_reason=None
 
 def _register_writes(events):
     writes = []
+    mode5_enabled = False
+    pending_second_word = False
     for event in events:
-        if (event.device == VDP and event.operation == WRITE and event.address == 4 and
-                event.width == 2 and event.value & 0xC000 == 0x8000):
-            writes.append({
-                "clock": event.clock,
-                "register": event.value >> 8 & 0x1F,
-                "value": event.value & 0xFF,
-            })
+        if (pending_second_word and event.device == VDP and event.operation in (READ, WRITE) and
+                event.address in (0, 4) and
+                not (event.operation == WRITE and event.address == 4 and event.width == 2)):
+            pending_second_word = False
+        if (event.device != VDP or event.operation != WRITE or event.address != 4 or
+                event.width != 2):
+            continue
+        if pending_second_word:
+            pending_second_word = False
+            continue
+        if event.value & 0xC000 == 0x8000:
+            register = event.value >> 8 & 0x1F
+            value = event.value & 0xFF
+            writes.append({"clock": event.clock, "register": register, "value": value})
+            if register == 1:
+                mode5_enabled = bool(value & 0x04)
+        elif mode5_enabled:
+            pending_second_word = True
     return writes
 
 
@@ -78,12 +98,22 @@ def _sram_range(manifest):
 
 def _scope_reason(manifest, scope_key, required_range):
     scope = manifest.get("trace_scope")
-    if scope is None or scope == "full-candidate-trace":
+    feature_only = manifest.get("capture_mode") == "feature-only"
+    if scope is None:
+        return "feature-only trace is missing explicit scope metadata" if feature_only else None
+    if scope == "full-candidate-trace":
+        if feature_only:
+            return "feature-only trace cannot claim full-candidate scope"
         return None
     if scope != "survey-feature-filter-v1":
         return "unsupported trace scope: " + str(scope)
     filters = manifest.get("trace_filters")
-    recorded = filters.get(scope_key, []) if isinstance(filters, dict) else []
+    if not isinstance(filters, dict):
+        return "invalid trace filter metadata"
+    recorded = filters.get(scope_key, [])
+    if (not isinstance(recorded, list) or
+            any(not isinstance(item, str) for item in recorded)):
+        return "invalid trace filter metadata"
     if "all" in recorded or required_range in recorded:
         return None
     return f"trace filter does not cover {scope_key}:{required_range}"
@@ -93,29 +123,70 @@ def _six_button_probe(events, capabilities, manifest):
     required = ["m68k_cpu_access"]
     scope_reason = _scope_reason(manifest, "m68k_cpu_access", "pad_ports")
     data_ports = (0xA10003, 0xA10005, 0xA10007)
-    matched = []
     for port in data_ports:
-        previous_th = None
-        transitions = []
+        port_index = (port - data_ports[0]) // 2
+        control_port = 0xA10009 + port_index * 2
+        control = 0
+        data = 0
+        known_data = False
+        th_high = None
+        rise_count = 0
+        timeout_cycle = None
+        rises = []
         for event in events:
-            if event.device != M68K or event.address != port:
+            if event.device != M68K:
                 continue
-            if event.operation == WRITE:
-                th = event.value & 0x40
-                if previous_th is not None and th != previous_th:
-                    transitions.append(event)
-                    transitions = transitions[-3:]
-                previous_th = th
-            elif event.operation == READ and len(transitions) == 3:
-                if event.clock - transitions[0].clock <= 1_000_000:
-                    matched = [_event_record(item) for item in transitions]
-                    matched.append(_event_record(event))
-                    return _observation(capabilities, required, matched, {
+            if event.width == 1:
+                io_port = event.address
+            elif event.width == 2 and event.address & 1 == 0:
+                io_port = event.address + 1
+            else:
+                continue
+            if io_port not in (port, control_port):
+                continue
+            value = event.value & 0xFF
+            if io_port == control_port and event.operation == WRITE:
+                old_direction = bool(control & 0x40)
+                control = value
+                new_direction = bool(control & 0x40)
+                if new_direction != old_direction:
+                    rise_count = 0
+                    rises = []
+                    timeout_cycle = None
+                    th_high = bool(known_data and new_direction and data & 0x40) if known_data else None
+            elif io_port == port and event.operation == WRITE:
+                was_known = known_data
+                data = value
+                known_data = True
+                if not control & 0x40:
+                    th_high = False
+                    continue
+                next_th_high = bool(data & 0x40)
+                if not was_known or th_high is None:
+                    th_high = next_th_high
+                    continue
+                if next_th_high != th_high:
+                    if timeout_cycle is not None and event.clock >= timeout_cycle:
+                        rise_count = 0
+                        rises = []
+                    if next_th_high:
+                        rise_count += 1
+                        rises.append(event)
+                    timeout_cycle = event.clock + TH_TIMEOUT
+                th_high = next_th_high
+            elif io_port == port and event.operation == READ:
+                if timeout_cycle is not None and event.clock >= timeout_cycle:
+                    rise_count = 0
+                    rises = []
+                if th_high and rise_count == 3:
+                    evidence = [_event_record(item) for item in rises[-3:]]
+                    evidence.append(_event_record(event))
+                    return _observation(capabilities, required, evidence, {
                         "data_port": port,
-                        "heuristic": "read after three TH transitions within 1,000,000 master clocks",
+                        "heuristic": "read with TH high after three rising edges within 56,000 clocks",
                     }, scope_reason)
-    return _observation(capabilities, required, matched, {
-        "heuristic": "read after three TH transitions within 1,000,000 master clocks",
+    return _observation(capabilities, required, [], {
+        "heuristic": "read with TH high after three rising edges within 56,000 clocks",
     }, scope_reason)
 
 
@@ -123,7 +194,8 @@ def _z80_dac_writes(events):
     z80_data = [event for event in events if event.device == Z80 and event.operation == WRITE and
                 event.address == 0x4001]
     ym_port_data = [event for event in events if event.device == YM2612 and event.operation == WRITE and
-                    event.address == 1]
+                    event.address & YM_PORT_SOURCE_MASK == YM_PORT_Z80_ADDR_TAG and
+                    event.address & 3 == 1]
     ym_dac = [event for event in events if event.device == YM2612 and event.operation == WRITE and
               event.address == 0x2A]
     matches = []
@@ -135,11 +207,12 @@ def _z80_dac_writes(events):
             if any(port_event.value == bus_event.value and port_event.clock == bus_event.clock
                    for port_event in ym_port_data):
                 matches.append({
-                    "z80_bus": _event_record(bus_event),
+                    "z80_bus": _event_record(bus_event, include_value=False),
                     "ym_port": _event_record(next(port_event for port_event in ym_port_data
                                                    if port_event.value == bus_event.value and
-                                                   port_event.clock == bus_event.clock)),
-                    "ym_register": _event_record(register_event),
+                                                   port_event.clock == bus_event.clock),
+                                              include_value=False),
+                    "ym_register": _event_record(register_event, include_value=False),
                 })
                 paired = True
                 break
@@ -172,22 +245,37 @@ def extract_features(manifest, events):
     register_writes = _register_writes(events)
 
     def register_feature(register, mask, value_name):
-        write = _last_register(register_writes, register)
+        history = [write for write in register_writes if write["register"] == register]
+        write = history[-1] if history else None
         evidence = [] if write is None else [write]
-        value = None if write is None else {value_name: bool(write["value"] & mask),
-                                            "register_value": write["value"]}
-        return _observation(capabilities, vdp_cap, evidence, value)
+        value = None if write is None else {
+            value_name: bool(write["value"] & mask),
+            "ever_enabled": any(item["value"] & mask for item in history),
+            "register_value": write["value"],
+        }
+        return _observation(capabilities, vdp_cap, evidence, value, vdp_scope_reason)
 
     mode4_write = _last_register(register_writes, 0)
     mode5_write = _last_register(register_writes, 1)
     interlace_write = _last_register(register_writes, 12)
+    interlace_history = [write for write in register_writes if write["register"] == 12]
     interlace_value = None if interlace_write is None else {
         "enabled": bool(interlace_write["value"] & 0x02),
+        "ever_enabled": any(write["value"] & 0x02 for write in interlace_history),
         "double_resolution": bool(interlace_write["value"] & 0x02 and interlace_write["value"] & 0x04),
         "register_value": interlace_write["value"],
     }
 
-    vdp_register_evidence = register_writes
+    last_register_writes = {}
+    for write in register_writes:
+        last_register_writes[write["register"]] = write
+    register_ids = sorted(last_register_writes)
+    vdp_register_evidence = [last_register_writes[register] for register in register_ids]
+    vdp_register_value = {
+        "register_ids": register_ids,
+        "last_values": {str(register): last_register_writes[register]["value"]
+                        for register in register_ids},
+    }
     vdp_cap = ["vdp_port"]
     vdp_scope_reason = _scope_reason(manifest, "device_events", "vdp")
     mode_evidence = [write for write in (mode4_write, mode5_write) if write is not None]
@@ -205,7 +293,7 @@ def extract_features(manifest, events):
     else:
         mode4_enabled = bool(mode4_write["value"] & 0x04)
         mode5_enabled = bool(mode5_write["value"] & 0x04)
-        mode = "mode5" if mode4_enabled and mode5_enabled else "mode4" if mode4_enabled else "inactive"
+        mode = "mode5" if mode5_enabled else "mode4" if mode4_enabled else "inactive"
         mode_observation = {"status": "observed", "evidence": mode_evidence,
                             "value": {"mode": mode, "mode4_bit": mode4_enabled,
                                       "mode5_bit": mode5_enabled,
@@ -214,23 +302,13 @@ def extract_features(manifest, events):
 
     features = {
         "vdp_registers": _observation(capabilities, vdp_cap, vdp_register_evidence,
-                                       scope_reason=vdp_scope_reason),
+                                       vdp_register_value, vdp_scope_reason),
         "vdp_mode": mode_observation,
         "interlace": _observation(capabilities, vdp_cap,
                                    [] if interlace_write is None else [interlace_write], interlace_value,
                                    vdp_scope_reason),
-        "shadow_highlight": _observation(
-            capabilities, vdp_cap,
-            [] if interlace_write is None else [interlace_write],
-            None if interlace_write is None else {"enabled": bool(interlace_write["value"] & 0x08),
-                                                  "register_value": interlace_write["value"]},
-            vdp_scope_reason),
-        "hint_enabled": _observation(
-            capabilities, vdp_cap,
-            [] if mode4_write is None else [mode4_write],
-            None if mode4_write is None else {"enabled": bool(mode4_write["value"] & 0x10),
-                                              "register_value": mode4_write["value"]},
-            vdp_scope_reason),
+        "shadow_highlight": register_feature(12, 0x08, "enabled"),
+        "hint_enabled": register_feature(0, 0x10, "enabled"),
     }
 
     for name, capability in (("dma_68k_to_vdp", "vdp_68k_dma_source"),
@@ -241,19 +319,30 @@ def extract_features(manifest, events):
             dma_events = [event for event in dma_events if event.width == 2 and
                           event.address < DMA_FILL_ADDR_TAG]
         elif capability == "vdp_dma_fill":
-            dma_events = [event for event in dma_events if event.width == 1 and
+            dma_events = [event for event in dma_events if event.width in (1, 2) and
                           event.address & 0xF0000000 == DMA_FILL_ADDR_TAG]
         elif capability == "vdp_dma_copy":
             dma_events = [event for event in dma_events if event.width == 1 and
                           event.address & 0xF0000000 == DMA_COPY_ADDR_TAG]
         features[name] = _observation(capabilities, [capability],
-                                      [_event_record(event) for event in dma_events],
+                                      [_event_record(event, include_value=False) for event in dma_events],
                                       scope_reason=_scope_reason(manifest, "device_events", "dma"))
 
     hint_events = [event for event in events if event.device == VDP and event.operation == IRQ]
+    hint_lines = sorted({event.address for event in hint_events})[:MAX_HINT_LINES]
+    hint_line_events = []
+    seen_hint_lines = set()
+    for event in hint_events:
+        if event.address in seen_hint_lines:
+            continue
+        seen_hint_lines.add(event.address)
+        hint_line_events.append(_event_record(event))
+        if len(hint_line_events) == MAX_HINT_LINES:
+            break
     features["hint_lines"] = _observation(
-        capabilities, ["vdp_hint_lines"], [_event_record(event) for event in hint_events],
-        {"line_count": len(hint_events)}, _scope_reason(manifest, "device_events", "hint"))
+        capabilities, ["vdp_hint_lines"], hint_line_events,
+        {"line_count": len(hint_lines), "event_count": len(hint_events), "lines": hint_lines},
+        _scope_reason(manifest, "device_events", "hint"))
 
     dac_matches = _z80_dac_writes(events)
     features["z80_dac_streaming"] = _observation(
@@ -261,11 +350,28 @@ def extract_features(manifest, events):
         dac_matches if len(dac_matches) >= 2 else [], {"matched_writes": len(dac_matches)},
         _scope_reason(manifest, "z80_cpu_access", "ym_ports"))
 
-    direct_ym = [event for event in events if event.device == M68K and event.operation == WRITE and
-                 0xA04000 <= event.address < 0xA06000]
+    ym_port_writes = [event for event in events if event.device == YM2612 and
+                      event.operation == WRITE and
+                      event.address & YM_PORT_SOURCE_MASK == YM_PORT_M68K_ADDR_TAG]
+    direct_ym = []
+    for bus_event in events:
+        if (bus_event.device != M68K or bus_event.operation != WRITE or
+                bus_event.width not in (1, 2) or
+                not 0xA04000 <= bus_event.address < 0xA06000):
+            continue
+        accepted_value = bus_event.value & 0xFF
+        if bus_event.width == 2:
+            accepted_value = bus_event.value >> 8 & 0xFF
+        port_write = next((event for event in ym_port_writes
+                           if event.clock == bus_event.clock and
+                           event.address & 3 == (bus_event.address & 3) and
+                           event.value == accepted_value), None)
+        if port_write is not None:
+            direct_ym.append({"cpu_bus": _event_record(bus_event, include_value=False),
+                              "ym_port": _event_record(port_write, include_value=False)})
     features["direct_68k_ym_writes"] = _observation(
         capabilities, ["m68k_cpu_access", "ym2612_port_write"],
-        [_event_record(event) for event in direct_ym],
+        direct_ym,
         scope_reason=_scope_reason(manifest, "m68k_cpu_access", "ym_ports"))
 
     features["six_button_probe"] = _six_button_probe(events, capabilities, manifest)
@@ -273,7 +379,8 @@ def extract_features(manifest, events):
     mapper_writes = [event for event in events if event.device == M68K and event.operation == WRITE and
                      0xA13000 <= event.address < 0xA13100]
     features["mapper_register_access"] = _observation(
-        capabilities, ["m68k_cpu_access"], [_event_record(event) for event in mapper_writes],
+        capabilities, ["m68k_cpu_access"],
+        [_event_record(event, include_value=False) for event in mapper_writes],
         scope_reason=_scope_reason(manifest, "m68k_cpu_access", "mapper_registers"))
 
     sram_range = _sram_range(manifest)
@@ -287,16 +394,24 @@ def extract_features(manifest, events):
         sram_events = [event for event in events if event.device == M68K and event.operation in (READ, WRITE) and
                        start <= event.address < end]
         features["sram_access"] = _observation(
-            capabilities, ["m68k_cpu_access"], [_event_record(event) for event in sram_events],
+            capabilities, ["m68k_cpu_access"],
+            [_event_record(event, include_value=False) for event in sram_events],
             {"start": start, "end": end},
             _scope_reason(manifest, "m68k_cpu_access", "sram_window"))
+
+    report_scope = manifest.get("trace_scope")
+    if report_scope is None:
+        report_scope = "unknown" if manifest.get("capture_mode") == "feature-only" else "full-candidate-trace"
+    elif (manifest.get("capture_mode") == "feature-only" and
+          report_scope == "full-candidate-trace"):
+        report_scope = "unknown"
 
     return {
         "core_sha256": manifest.get("core_sha256"),
         "frames": frames,
         "input": manifest.get("input", {}),
         "trace_capabilities": sorted(capabilities),
-        "trace_scope": manifest.get("trace_scope", "full-candidate-trace"),
+        "trace_scope": report_scope,
         "features": features,
     }
 

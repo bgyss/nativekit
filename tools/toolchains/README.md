@@ -12,13 +12,15 @@ The vasm pin is [Leffmann's Git source at commit
 `685a87e5ed14285350ccdb6581c9771bc8df6c7d`](https://github.com/Leffmann/vasm/tree/685a87e5ed14285350ccdb6581c9771bc8df6c7d).
 The GitHub project describes it as Frank Wille's portable assembler and links
 to the official project site. Both the commit subject and `vasm.c` identify it
-as version 1.9d. The selected M68k, Motorola syntax, Z80, oldstyle syntax, and
-binary-output module docs say they are covered by vasm's main terms. The
-[current official vasm manual](https://sun.hasenbraten.de/vasm/release/vasm.pdf) permits unmodified
+as version 1.9d. The selected M68k, Motorola syntax, oldstyle syntax, and
+binary-output module docs say they are covered by vasm's main terms. The selected
+Z80 backend has a separate BSD-style notice in its source and module docs; preserve
+that notice as well. The [current official vasm manual](https://sun.hasenbraten.de/vasm/release/vasm.pdf) permits unmodified
 archive redistribution and non-commercial use; its commercial exception is
 limited to M68k targeting AmigaOS, with written consent required otherwise. This
 setup builds the tools locally and does not ship them. Exact equivalence between
-this mirror tree and an author-published 1.9d archive remains unverified.
+this mirror tree and an author-published 1.9d archive remains unverified; see the
+[provenance audit](../../docs/research/vasm-1.9d-provenance-audit.md).
 
 The BlastEm pin is a candidate core with exploratory local trace hooks. A
 successful build does not qualify it as the timing or fidelity oracle; see

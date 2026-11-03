@@ -38,10 +38,11 @@ These are candidate-path timing checks, not hardware qualification.
 
 `genesis.c` periodically subtracts a common cycle deduction from the 68000,
 Z80, VDP, YM and PSG counters. The instrumentation adds that deduction to a
-shared trace epoch before those counters are adjusted. ABI checks cover epoch
-monotonicity and overflow, but a long-running synthetic fixture has not yet
-crossed an adjustment while producing Z80 events; that cross-device behavior
-still needs direct validation.
+shared trace epoch before those counters are adjusted. The 5,000-frame fixture
+crosses the 32-bit boundary, checks VDP events afterward, and checks Z80 YM
+writes before and after the adjustment. Post-adjustment Z80 bus and YM port
+clocks agree. This verifies the exercised candidate path, not hardware timing
+fidelity or every device-counter relationship.
 
 The trace envelope and C callback helper live under `consoles/md/tests/oracle/`.
 The reproducible BlastEm patch connects generated 68000 and Z80 accesses,

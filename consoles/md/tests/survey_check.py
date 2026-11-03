@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Bounded survey tests using generated cartridges and a fake runner."""
 import json
+import hashlib
 import pathlib
 import subprocess
 import sys
@@ -11,7 +12,7 @@ root = pathlib.Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(root / "consoles/md/tools"))
 sys.path.insert(0, str(root / "consoles/md/tests/oracle"))
 from survey import render_markdown, survey_directory
-from trace import Event, M68K, VDP, READ, WRITE, write as write_trace
+from trace import Event, M68K, VDP, READ, WRITE, IRQ, write as write_trace
 
 
 CAPS = [
@@ -37,6 +38,9 @@ class SurveyCheck(unittest.TestCase):
             tmp = pathlib.Path(temp)
             rom_dir = tmp / "roms"
             rom_dir.mkdir()
+            core = tmp / "candidate-core"
+            core.write_bytes(b"candidate core")
+            core_sha256 = hashlib.sha256(core.read_bytes()).hexdigest()
             (rom_dir / "one.bin").write_bytes(rom_bytes("DUPLICATE"))
             (rom_dir / "two.gen").write_bytes(rom_bytes("DUPLICATE"))
             (rom_dir / "pathlike.md").write_bytes(rom_bytes("../../unsafe/title"))
@@ -68,11 +72,12 @@ class SurveyCheck(unittest.TestCase):
                 if b"INCOMPLETE" in rom_path.read_bytes():
                     return subprocess.CompletedProcess(command, 0, "", "")
                 out_dir.mkdir(parents=True, exist_ok=True)
-                events = [Event(100, VDP, WRITE, 2, 4, 0x8104)]
+                events = [Event(100, VDP, WRITE, 2, 4, 0x8104),
+                          Event(110, VDP, IRQ, 1, 120, 1)]
                 with (out_dir / "bus.trace").open("w+b") as stream:
                     write_trace(stream, events)
                 manifest = {
-                    "core_sha256": "c" * 64,
+                    "core_sha256": core_sha256,
                     "frames": frames,
                     "capture_mode": "feature-only",
                     "trace_scope": "survey-feature-filter-v1",
@@ -88,11 +93,11 @@ class SurveyCheck(unittest.TestCase):
                 (out_dir / "manifest.json").write_text(json.dumps(manifest))
                 return subprocess.CompletedProcess(command, 0, "", "")
 
-            report = survey_directory(rom_dir, pathlib.Path("unused-core"),
+            report = survey_directory(rom_dir, core,
                                       pathlib.Path("unused-runner"), frames=3,
                                       start_frame=2, executor=fake_runner)
             markdown = render_markdown(report)
-            repeated = survey_directory(rom_dir, pathlib.Path("unused-core"),
+            repeated = survey_directory(rom_dir, core,
                                         pathlib.Path("unused-runner"), frames=3,
                                         start_frame=2, executor=fake_runner)
             self.assertEqual(markdown, render_markdown(repeated))
@@ -102,6 +107,8 @@ class SurveyCheck(unittest.TestCase):
             self.assertNotIn("../../", markdown)
             self.assertIn("survey-feature-filter-v1", markdown)
             self.assertIn('"Observed" describes captured evidence, not feature use', markdown)
+            self.assertIn('vdp_registers=observed:{"last_values":{"1":4},"register_ids":[1]}', markdown)
+            self.assertIn('hint_lines=observed:{"event_count":1,"line_count":1,"lines":[120]}', markdown)
             self.assertNotIn("FAIL_RUN", markdown)
             self.assertIn("DUPLICATE", markdown)
             self.assertIn("DUPLICATE [2]", markdown)
@@ -138,6 +145,9 @@ class SurveyCheck(unittest.TestCase):
             tmp = pathlib.Path(temp)
             rom_dir = tmp / "roms"
             rom_dir.mkdir()
+            core = tmp / "candidate-core"
+            core.write_bytes(b"candidate core")
+            core_sha256 = hashlib.sha256(core.read_bytes()).hexdigest()
             rom = rom_bytes("SRAM HEADER")
             rom[0x1B0:0x1B2] = b"RA"
             rom[0x1B4:0x1B8] = (0x200001).to_bytes(4, "big")
@@ -165,7 +175,7 @@ class SurveyCheck(unittest.TestCase):
                     "device_events": ["all"],
                 }
                 manifest = {
-                    "core_sha256": "d" * 64,
+                    "core_sha256": core_sha256,
                     "frames": frames,
                     "capture_mode": "feature-only",
                     "trace_scope": "survey-feature-filter-v1",
@@ -177,7 +187,7 @@ class SurveyCheck(unittest.TestCase):
                 (output / "manifest.json").write_text(json.dumps(manifest))
                 return subprocess.CompletedProcess(command, 0, "", "")
 
-            report = survey_directory(rom_dir, pathlib.Path("unused-core"),
+            report = survey_directory(rom_dir, core,
                                       pathlib.Path("unused-runner"), frames=3,
                                       start_frame=2, executor=fake_runner)
             title = report["titles"][0]
@@ -186,6 +196,145 @@ class SurveyCheck(unittest.TestCase):
                 self.assertEqual(sram["status"], "observed")
                 self.assertEqual(sram["value"], {"start": 0x200000, "end": 0x210000})
                 self.assertEqual(sram["evidence"][0]["address"], 0x200010)
+
+    def test_non_sega_payload_title_is_not_reported(self):
+        with tempfile.TemporaryDirectory() as temp:
+            tmp = pathlib.Path(temp)
+            rom_dir = tmp / "roms"
+            rom_dir.mkdir()
+            core = tmp / "candidate-core"
+            core.write_bytes(b"candidate core")
+            data = bytearray(1024)
+            data[0x150:0x180] = b"PRIVATE_MARKER".ljust(48, b" ")
+            (rom_dir / "payload.bin").write_bytes(data)
+            calls = []
+
+            def fake_runner(command, capture_output, text, timeout):
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 1, "", "failed")
+
+            report = survey_directory(rom_dir, core,
+                                      pathlib.Path("unused-runner"), frames=2,
+                                      start_frame=1, executor=fake_runner)
+            markdown = render_markdown(report)
+            self.assertEqual(calls, [])
+            self.assertEqual(report["titles"][0]["title"], "untitled")
+            self.assertEqual(report["titles"][0]["no_input"]["status"], "invalid")
+            self.assertNotIn("PRIVATE_MARKER", markdown)
+
+    def test_null_runner_manifest_marks_run_incomplete(self):
+        with tempfile.TemporaryDirectory() as temp:
+            tmp = pathlib.Path(temp)
+            rom_dir = tmp / "roms"
+            rom_dir.mkdir()
+            core = tmp / "candidate-core"
+            core.write_bytes(b"candidate core")
+            (rom_dir / "valid.bin").write_bytes(rom_bytes("VALID"))
+
+            def fake_runner(command, capture_output, text, timeout):
+                output = pathlib.Path(command[command.index("--out") + 1])
+                output.mkdir(parents=True, exist_ok=True)
+                with (output / "bus.trace").open("w+b") as stream:
+                    write_trace(stream, [Event(100, VDP, WRITE, 2, 4, 0x8104)])
+                (output / "manifest.json").write_text("null")
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            report = survey_directory(rom_dir, core,
+                                      pathlib.Path("runner"), frames=2,
+                                      start_frame=1, executor=fake_runner)
+            self.assertEqual(report["titles"][0]["no_input"]["status"], "incomplete")
+            self.assertEqual(report["titles"][0]["start"]["status"], "incomplete")
+
+    def test_feature_only_scope_and_filter_metadata_must_be_well_formed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            tmp = pathlib.Path(temp)
+            rom_dir = tmp / "roms"
+            rom_dir.mkdir()
+            core = tmp / "candidate-core"
+            core.write_bytes(b"candidate core")
+            core_sha256 = hashlib.sha256(core.read_bytes()).hexdigest()
+            (rom_dir / "valid.bin").write_bytes(rom_bytes("VALID"))
+            valid_filters = {
+                "m68k_cpu_access": ["ym_ports", "pad_ports", "mapper_registers"],
+                "z80_cpu_access": ["ym_ports", "bank_registers", "bank_window"],
+                "device_events": ["all"],
+            }
+            bad_metadata = (
+                {"capture_mode": "feature-only", "trace_filters": valid_filters},
+                {"capture_mode": "feature-only", "trace_scope": "survey-feature-filter-v1",
+                 "trace_filters": "all"},
+                {"capture_mode": "feature-only", "trace_scope": "survey-feature-filter-v1",
+                 "trace_filters": {**valid_filters, "device_events": "all"}},
+            )
+
+            for index, metadata in enumerate(bad_metadata):
+                def fake_runner(command, capture_output, text, timeout):
+                    output = pathlib.Path(command[command.index("--out") + 1])
+                    frames = int(command[command.index("--frames") + 1])
+                    expected_input = {}
+                    if "--input" in command:
+                        expected_input = json.loads(pathlib.Path(
+                            command[command.index("--input") + 1]).read_text())
+                    output.mkdir(parents=True, exist_ok=True)
+                    events = [Event(100, VDP, WRITE, 2, 4, 0x8104)]
+                    with (output / "bus.trace").open("w+b") as stream:
+                        write_trace(stream, events)
+                    manifest = {
+                        **metadata,
+                        "core_sha256": core_sha256,
+                        "frames": frames,
+                        "trace_capabilities": CAPS,
+                        "trace_events": len(events),
+                        "input": expected_input,
+                    }
+                    (output / "manifest.json").write_text(json.dumps(manifest))
+                    return subprocess.CompletedProcess(command, 0, "", "")
+
+                report = survey_directory(rom_dir, core, pathlib.Path("runner"), frames=2,
+                                          start_frame=1, executor=fake_runner)
+                with self.subTest(metadata=index):
+                    self.assertEqual(report["titles"][0]["no_input"]["status"], "incomplete")
+                    self.assertEqual(report["titles"][0]["start"]["status"], "incomplete")
+
+    def test_runner_core_digest_cannot_publish_a_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            tmp = pathlib.Path(temp)
+            rom_dir = tmp / "roms"
+            rom_dir.mkdir()
+            core = tmp / "candidate-core"
+            core.write_bytes(b"candidate core")
+            (rom_dir / "valid.bin").write_bytes(rom_bytes("VALID"))
+
+            def fake_runner(command, capture_output, text, timeout):
+                output = pathlib.Path(command[command.index("--out") + 1])
+                frames = int(command[command.index("--frames") + 1])
+                expected_input = {}
+                if "--input" in command:
+                    expected_input = json.loads(pathlib.Path(
+                        command[command.index("--input") + 1]).read_text())
+                output.mkdir(parents=True, exist_ok=True)
+                events = [Event(100, VDP, WRITE, 2, 4, 0x8104)]
+                with (output / "bus.trace").open("w+b") as stream:
+                    write_trace(stream, events)
+                manifest = {
+                    "core_sha256": str(tmp / "private" / "rom-library"),
+                    "frames": frames,
+                    "capture_mode": "feature-only",
+                    "trace_scope": "survey-feature-filter-v1",
+                    "trace_filters": {"device_events": ["all"]},
+                    "trace_capabilities": CAPS,
+                    "trace_events": len(events),
+                    "input": expected_input,
+                }
+                (output / "manifest.json").write_text(json.dumps(manifest))
+                return subprocess.CompletedProcess(command, 0, "", "")
+
+            report = survey_directory(rom_dir, core,
+                                      pathlib.Path("runner"), frames=2,
+                                      start_frame=1, executor=fake_runner)
+            markdown = render_markdown(report)
+            self.assertNotIn("private/rom-library", markdown)
+            self.assertEqual(report["titles"][0]["no_input"]["status"], "incomplete")
 
 
 if __name__ == "__main__":

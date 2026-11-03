@@ -40,9 +40,11 @@ each field by value. Capability bits report instrumented paths:
   V-counter line, the value is the HINT reload register, and the clock is the
   VDP line-boundary time.
 - `ym2612_write`, `ym2612_port_write`, and `psg_write`: selected register and
-  port writes only. CPU port events use access-completion time; a YM register
-  commit is timestamped at the next YM internal clock boundary (42 master
-  clocks for the pinned model).
+  port writes only. YM port events tag their source in the address: `0x80000000`
+  for a 68000 bus write and `0x40000000` for a Z80 bus write, ORed with the
+  two-bit YM port number. CPU port events use access-completion time; a YM
+  register commit is timestamped at the next YM internal clock boundary (42
+  master clocks for the pinned model).
 - `chip_audio`: the runner writes `ym2612.raw` and `psg.raw` as S16-native-endian
   stereo PCM at the manifest sample rate. These are source-resampled,
   source-gained contributions captured before the final mix and DC blocker; the

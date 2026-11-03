@@ -11,6 +11,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "oracle"))
 from trace import M68K, Z80, VDP, YM2612, PSG, FETCH, READ, WRITE, DMA, IRQ, read as read_trace
 
 root = pathlib.Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(root / "consoles/md/tools"))
+from features import extract_features
+
+YM_PORT_Z80_ADDR_TAG = 0x40000000
+YM_PORT_M68K_ADDR_TAG = 0x80000000
 runner = root / "consoles/md/tests/oracle/run.py"
 extension = "dylib" if sys.platform == "darwin" else "so"
 core = root / "build/toolchains/blastem" / ("libblastem." + extension)
@@ -27,6 +32,16 @@ with tempfile.TemporaryDirectory() as temp:
     rom[0x200:0x202] = bytes.fromhex("60fe")
     cart = base / "fixture.bin"
     cart.write_bytes(rom)
+    sys.path.insert(0, str(runner.parent))
+    from run import _game_descriptor
+    memory_game, memory_content = _game_descriptor(cart, False)
+    if (memory_game.path is not None or memory_game.data is None or
+            memory_game.size != len(rom) or memory_content.raw[:len(rom)] != bytes(rom)):
+        sys.exit("oracle_check: memory-backed libretro content descriptor is invalid")
+    path_game, path_content = _game_descriptor(cart, True)
+    if (path_content is not None or path_game.path != str(cart.resolve()).encode() or
+            path_game.data is not None or path_game.size != 0):
+        sys.exit("oracle_check: full-path libretro content descriptor is invalid")
     outputs = []
     for index in range(2):
         out = base / str(index)
@@ -49,13 +64,14 @@ with tempfile.TemporaryDirectory() as temp:
             sys.exit("oracle_check: required options were not fixed")
         if not set(manifest["options"]).issubset(manifest["queried_options"]):
             sys.exit("oracle_check: core did not request every fixed option")
-        frame = (out / "frame_000003.ppm").read_bytes()
+        frames = [(out / f"frame_{frame_index:06}.ppm").read_bytes()
+                  for frame_index in range(1, 4)]
         if (manifest["frames"] != 3 or manifest["frame_sizes"] != [[283, 243]] * 3
-                or not frame.startswith(b"P6\n283 243\n255\n")):
+                or any(not frame.startswith(b"P6\n283 243\n255\n") for frame in frames)):
             sys.exit("oracle_check: missing frame")
         if manifest["sample_rate"] <= 0 or not (out / "audio.raw").stat().st_size:
             sys.exit("oracle_check: missing audio")
-        outputs.append((frame, (out / "audio.raw").read_bytes(), manifest))
+        outputs.append((frames, (out / "audio.raw").read_bytes(), manifest))
     if outputs[0] != outputs[1]:
         sys.exit("oracle_check: repeated runs differ")
     missing = subprocess.run([sys.executable, str(runner), "--core", str(base / "missing"),
@@ -119,9 +135,10 @@ void retro_set_input_state(void *p) { (void)p; }
     program = base / "pad.bin"
     asm.write_text("""\
         move.w #$8104,$c00004
-        move.b #$40,$a10009
-        move.b #0,$a10003
+        move.w #$0040,$a10008
+        move.w #0,$a10002
 loop:   move.l #$c0000000,$c00004
+        move.w $a10002,d2
         btst #5,$a10003
         bne.s released
         move.w #$000e,$c00000
@@ -138,6 +155,23 @@ released:
     pad_rom[0x200:0x200 + len(code)] = code
     pad_cart = base / "pad.bin"
     pad_cart.write_bytes(pad_rom)
+    out = base / "pad-word-io-trace"
+    result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom", str(pad_cart),
+                             "--frames", "1", "--out", str(out), "--trace", "--feature-only"],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        sys.exit("oracle_check: word-width pad I/O run failed: " + result.stderr)
+    with (out / "bus.trace").open("rb") as stream:
+        pad_events = list(read_trace(stream))
+    if not any(e.device == M68K and e.operation == WRITE and e.width == 2 and
+               e.address == 0xA10008 and e.value == 0x0040 for e in pad_events):
+        sys.exit("oracle_check: missing word-width pad control write")
+    if not any(e.device == M68K and e.operation == WRITE and e.width == 2 and
+               e.address == 0xA10002 and e.value == 0 for e in pad_events):
+        sys.exit("oracle_check: missing word-width pad data write")
+    if not any(e.device == M68K and e.operation == READ and e.width == 2 and
+               e.address == 0xA10002 and e.value >> 8 == e.value & 0xFF for e in pad_events):
+        sys.exit("oracle_check: missing byte-replicated word-width pad read")
     script = base / "input.json"
     script.write_text(json.dumps({str(frame): {"1": ["START"]} for frame in range(1, 5)}))
     frames = []
@@ -192,6 +226,16 @@ released:
                    "        move.w $00ff0000,d0\n"
                    "        move.b #$5a,$00ff0002\n"
                    "        move.b $00ff0002,d1\n"
+                   "        move.l #$deadbeef,d0\n"
+                   "        move.b d0,$00ff0004\n"
+                   "        move.w d0,$00ff0006\n"
+                   "        move.w #0,$00a11200\n"
+                   "        move.w #$0100,$00a11100\n"
+                   "        move.w #$0100,$00a11200\n"
+                   "wait_z80: move.w $00a11100,d1\n"
+                   "        btst #8,d1\n"
+                   "        bne.s wait_z80\n"
+                   "        move.w #$3000,$00a04000\n"
                    "loop:   bra.s loop\n")
     bus_program = base / "bus.bin"
     assembled = subprocess.run([str(assembler), "-Fbin", "-o", str(bus_program), str(asm)],
@@ -227,6 +271,27 @@ released:
     if not any(e.device == M68K and e.operation == READ and e.width == 1 and
                e.address == 0xFF0002 and e.value == 0x5a for e in events):
         sys.exit("oracle_check: missing work-RAM byte read event")
+    if not any(e.device == M68K and e.operation == WRITE and e.width == 1 and
+               e.address == 0xFF0004 and e.value == 0xef for e in events):
+        sys.exit("oracle_check: 68000 byte write trace value was not narrowed: " +
+                 repr([e for e in events if e.device == M68K and e.address == 0xFF0004]))
+    if not any(e.device == M68K and e.operation == WRITE and e.width == 2 and
+               e.address == 0xFF0006 and e.value == 0xbeef for e in events):
+        sys.exit("oracle_check: 68000 word write trace value was not narrowed: " +
+                 repr([e for e in events if e.device == M68K and e.address == 0xFF0006]))
+    if not any(e.device == M68K and e.operation == WRITE and e.width == 2 and
+               e.address == 0xA04000 and e.value == 0x3000 for e in events):
+        sys.exit("oracle_check: missing word-width direct YM bus write")
+    direct_bus = next(e for e in events if e.device == M68K and e.operation == WRITE and
+                      e.width == 2 and e.address == 0xA04000 and e.value == 0x3000)
+    direct_port = next((e for e in events if e.device == YM2612 and e.operation == WRITE and
+                        e.address == (YM_PORT_M68K_ADDR_TAG | 0) and e.value == 0x30), None)
+    if direct_port is None or direct_port.clock != direct_bus.clock:
+        sys.exit("oracle_check: word-width direct YM transaction was not source-tagged: " +
+                 repr((direct_bus, direct_port,
+                       [event for event in events if event.device == YM2612],
+                       [event for event in events if event.device == M68K and
+                        event.address in (0xA11100, 0xA11200, 0xA04000)][-8:])))
     word_write = next(e for e in events if e.device == M68K and e.operation == WRITE and
                       e.width == 2 and e.address == 0xFF0000 and e.value == 0x1234)
     word_read = next(e for e in events if e.device == M68K and e.operation == READ and
@@ -255,6 +320,60 @@ released:
                e.address == 0 and e.value == 0xa55a for e in events):
         sys.exit("oracle_check: missing expected DMA data-port readback: " + repr(
             [e for e in events if e.device == VDP and e.operation == READ and e.address == 0]))
+
+    # Pin the candidate's device-port times against the 68000 completion events
+    # for this fixed four-access program. Device-side events follow the VDP
+    # scheduler; CPU events are emitted after the mapped handler returns.
+    port_timing_asm = base / "vdp-port-timing.s"
+    port_timing_asm.write_text("        move.w #$8104,$c00004\n"
+                               "        move.w #$000e,$c00000\n"
+                               "        move.w $c00004,d0\n"
+                               "        move.w $c00000,d1\n"
+                               "loop:   bra.s loop\n")
+    port_timing_program = base / "vdp-port-timing.bin"
+    subprocess.run([str(assembler), "-Fbin", "-o", str(port_timing_program), str(port_timing_asm)],
+                   check=True, capture_output=True)
+    port_timing_rom = bytearray(rom)
+    port_timing_code = port_timing_program.read_bytes()
+    port_timing_rom[0x200:0x200 + len(port_timing_code)] = port_timing_code
+    port_timing_cart = base / "vdp-port-timing.binrom"
+    port_timing_cart.write_bytes(port_timing_rom)
+    port_timing_out = base / "vdp-port-timing"
+    result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom",
+                             str(port_timing_cart), "--frames", "1", "--out", str(port_timing_out),
+                             "--trace"], capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        sys.exit("oracle_check: VDP port timing run failed: " + result.stderr)
+    with (port_timing_out / "bus.trace").open("rb") as stream:
+        port_timing_events = list(read_trace(stream))
+    port_cpu_control_write = next(e for e in port_timing_events if e.device == M68K and
+                                  e.operation == WRITE and e.width == 2 and
+                                  e.address == 0xC00004 and e.value == 0x8104)
+    port_vdp_control_write = next(e for e in port_timing_events if e.device == VDP and
+                                  e.operation == WRITE and e.width == 2 and
+                                  e.address == 4 and e.value == 0x8104)
+    port_cpu_data_write = next(e for e in port_timing_events if e.device == M68K and
+                               e.operation == WRITE and e.width == 2 and
+                               e.address == 0xC00000 and e.value == 0x000E)
+    port_vdp_data_write = next(e for e in port_timing_events if e.device == VDP and
+                               e.operation == WRITE and e.width == 2 and
+                               e.address == 0 and e.value == 0x000E)
+    port_cpu_control_read = next(e for e in port_timing_events if e.device == M68K and
+                                 e.operation == READ and e.width == 2 and e.address == 0xC00004)
+    port_vdp_control_read = next(e for e in port_timing_events if e.device == VDP and
+                                 e.operation == READ and e.width == 2 and e.address == 4)
+    port_cpu_data_read = next(e for e in port_timing_events if e.device == M68K and
+                              e.operation == READ and e.width == 2 and e.address == 0xC00000)
+    port_vdp_data_read = next(e for e in port_timing_events if e.device == VDP and
+                              e.operation == READ and e.width == 2 and e.address == 0)
+    port_clock_deltas = (port_vdp_control_write.clock - port_cpu_control_write.clock,
+                         port_vdp_data_write.clock - port_cpu_data_write.clock,
+                         port_vdp_control_read.clock - port_cpu_control_read.clock,
+                         port_vdp_data_read.clock - port_cpu_data_read.clock)
+    if port_clock_deltas != (8, -12, -4, 0):
+        sys.exit("oracle_check: VDP port event clocks drifted from the candidate fixture: " +
+                 repr((port_clock_deltas, port_timing_events)))
+
     dma_events = [e for e in events if e.device == VDP and e.operation == DMA]
     if len(dma_events) != 1 or (dma_events[0].width, dma_events[0].address, dma_events[0].value) != (2, 0x400, 0xa55a):
         sys.exit("oracle_check: 68K-to-VDP DMA source-slot mismatch: " + repr(dma_events))
@@ -262,37 +381,45 @@ released:
                       e.address == 4 and e.value == 0x0080)
     if dma_events[0].clock != dma_launch.clock:
         sys.exit("oracle_check: first DMA source slot clock mismatch: " + repr((dma_launch, dma_events[0])))
-    asm.write_text("        move.w #$8114,$c00004\n"
-                   "        move.w #$8f01,$c00004\n"
-                   "        move.w #$9301,$c00004\n"
-                   "        move.w #$9400,$c00004\n"
-                   "        move.w #$9780,$c00004\n"
-                   "        move.l #$40000080,$c00004\n"
-                   "        move.w #$a500,$c00000\n"
-                   "loop:   bra.s loop\n")
-    fill_program = base / "fill.bin"
-    subprocess.run([str(assembler), "-Fbin", "-o", str(fill_program), str(asm)],
-                   check=True, capture_output=True)
-    fill_rom = bytearray(rom)
-    code = fill_program.read_bytes()
-    fill_rom[0x200:0x200 + len(code)] = code
-    fill_cart = base / "fill.binrom"
-    fill_cart.write_bytes(fill_rom)
-    fill_out = base / "fill"
-    result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom", str(fill_cart),
-                             "--frames", "1", "--out", str(fill_out), "--trace"],
-                            capture_output=True, text=True, timeout=60)
-    if result.returncode:
-        sys.exit("oracle_check: fill DMA run failed: " + result.stderr)
-    with (fill_out / "bus.trace").open("rb") as f:
-        fill_events = list(read_trace(f))
-    fill_dma = [e for e in fill_events if e.device == VDP and e.operation == DMA]
-    if len(fill_dma) != 1 or (fill_dma[0].width, fill_dma[0].address, fill_dma[0].value) != (1, 0x10000001, 0xa5):
-        sys.exit("oracle_check: missing VDP fill-DMA byte slot: " + repr(fill_dma))
-    fill_seed = next(e for e in fill_events if e.device == VDP and e.operation == WRITE and
-                     e.address == 0 and e.value == 0xa500)
-    if fill_dma[0].clock - fill_seed.clock != 5 * 20:
-        sys.exit("oracle_check: VDP fill-DMA source-slot clock mismatch: " + repr((fill_seed, fill_dma[0])))
+    fill_cases = (("vram", 0x40000080, 1, 0x10000001, 0x00a5),
+                  ("cram", 0xc0000080, 2, 0x10000001, 0x0000),
+                  ("vsram", 0x40000090, 2, 0x10000001, 0x0000))
+    for name, command, width, destination, value in fill_cases:
+        asm.write_text("        move.w #$8114,$c00004\n"
+                       "        move.w #$8f01,$c00004\n"
+                       "        move.w #$9301,$c00004\n"
+                       "        move.w #$9400,$c00004\n"
+                       "        move.w #$9780,$c00004\n"
+                       f"        move.l #${command:08x},$c00004\n"
+                       "        move.w #$a500,$c00000\n"
+                       "loop:   bra.s loop\n")
+        fill_program = base / f"{name}-fill.bin"
+        subprocess.run([str(assembler), "-Fbin", "-o", str(fill_program), str(asm)],
+                       check=True, capture_output=True)
+        fill_rom = bytearray(rom)
+        code = fill_program.read_bytes()
+        fill_rom[0x200:0x200 + len(code)] = code
+        fill_cart = base / f"{name}-fill.binrom"
+        fill_cart.write_bytes(fill_rom)
+        fill_out = base / f"{name}-fill"
+        result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom", str(fill_cart),
+                                 "--frames", "1", "--out", str(fill_out), "--trace"],
+                                capture_output=True, text=True, timeout=60)
+        if result.returncode:
+            sys.exit(f"oracle_check: {name} fill-DMA run failed: " + result.stderr)
+        with (fill_out / "bus.trace").open("rb") as f:
+            fill_events = list(read_trace(f))
+        fill_dma = [e for e in fill_events if e.device == VDP and e.operation == DMA]
+        if (len(fill_dma) != 1 or
+                (fill_dma[0].width, fill_dma[0].address, fill_dma[0].value) !=
+                (width, destination, value)):
+            sys.exit(f"oracle_check: missing or incorrect {name} fill-DMA slot: " + repr(fill_dma))
+        if name == "vram":
+            fill_seed = next(e for e in fill_events if e.device == VDP and e.operation == WRITE and
+                             e.address == 0 and e.value == 0xa500)
+            if fill_dma[0].clock - fill_seed.clock != 5 * 20:
+                sys.exit("oracle_check: VDP fill-DMA source-slot clock mismatch: " +
+                         repr((fill_seed, fill_dma[0])))
     asm.write_text("        move.w #$8114,$c00004\n"
                    "        move.w #$8f01,$c00004\n"
                    "        move.l #$40000000,$c00004\n"
@@ -408,7 +535,8 @@ released:
     z80_after_wrap = [e for e in epoch_events if e.device == Z80 and e.operation == WRITE and
                       e.address == 0x4001 and e.value == 0x7f and e.clock > wrap]
     ym_after_wrap = [e for e in epoch_events if e.device == YM2612 and e.operation == WRITE and
-                     e.address == 1 and e.value == 0x7f and e.clock > wrap]
+                     e.address == (YM_PORT_Z80_ADDR_TAG | 1) and
+                     e.value == 0x7f and e.clock > wrap]
     if not vdp_after_wrap or not z80_before_wrap or not z80_after_wrap:
         sys.exit("oracle_check: trace did not span the common-counter adjustment with VDP and Z80 events: " +
                  repr((vdp_after_wrap[-1:] if vdp_after_wrap else [],
@@ -440,6 +568,12 @@ released:
     hint_lines = [e for e in hint_events if e.device == VDP and e.operation == IRQ]
     if not hint_lines or any(e.width != 1 or e.value != 1 or e.address >= 224 for e in hint_lines):
         sys.exit("oracle_check: VDP HINT line events mismatch: " + repr(hint_lines[:12]))
+    # The NTSC candidate has 3,420 master clocks per line. This fixture's
+    # reload value emits a pending event every second V-counter line.
+    if (len(hint_lines) < 2 or
+            any((right.address - left.address, right.clock - left.clock) != (2, 2 * 3420)
+                for left, right in zip(hint_lines, hint_lines[1:]))):
+        sys.exit("oracle_check: VDP HINT line clocks mismatch: " + repr(hint_lines[:12]))
     feature_path = root / "consoles/md/tools/features.py"
     feature_output = hint_out / "features.json"
     result = subprocess.run([sys.executable, str(feature_path), "--manifest", str(hint_out / "manifest.json"),
@@ -540,7 +674,8 @@ loop:   bra.s loop
     ym_setup = b"".join(bytes.fromhex(
         f"3e {register:02x} 32 00 40 3e {value:02x} 32 01 40")
         for register, value in ym_registers)
-    z80_program = z80_prefix + ym_setup + bytes.fromhex("18 fe")
+    z80_program = z80_prefix + ym_setup + bytes.fromhex(
+        "3e 80 32 11 7f 3e 10 32 11 7f 3e 90 32 11 7f d3 7f db 7f 18 fe")
     lines = ["        move.w #0,$a11200", "        move.w #$0100,$a11100",
              "        move.w #$0100,$a11200"]
     lines.extend(f"        move.b #${value:02x},$a0{offset:04x}"
@@ -602,6 +737,14 @@ loop:   bra.s loop
     if not any(e.operation == WRITE and e.width == 1 and e.address == 0x4001 and e.value == 0x7f
                for e in z80_events):
         sys.exit("oracle_check: missing mapped Z80 YM-data write event")
+    for value in (0x80, 0x10, 0x90):
+        z80_psg_bus = next((e for e in z80_events if e.operation == WRITE and
+                            e.width == 1 and e.address == 0x7F11 and e.value == value), None)
+        psg_write = next((e for e in ym_events if e.device == PSG and e.operation == WRITE and
+                          e.value == value), None)
+        if z80_psg_bus is None or psg_write is None or z80_psg_bus.clock != psg_write.clock:
+            sys.exit("oracle_check: Z80 PSG port write is missing or mistimed: " +
+                     repr((value, z80_psg_bus, psg_write)))
     bank_writes = [e for e in z80_events if e.operation == WRITE and e.address == 0x6000]
     if [e.value for e in bank_writes] != [1] + [0] * 8:
         sys.exit("oracle_check: Z80 bank-select write sequence mismatch: " + repr(bank_writes))
@@ -632,16 +775,56 @@ loop:   bra.s loop
     ]
     if any(left.clock >= right.clock for left, right in zip(z80_landmarks, z80_landmarks[1:])):
         sys.exit("oracle_check: Z80 fetch, bank, RAM and YM events are out of order: " + repr(z80_landmarks))
-    if not any(e.device == YM2612 and e.operation == WRITE and e.address == 0 and e.value == 0x30
+
+    io_z80 = bytes.fromhex("3e 5a d3 7f db 7f 18 fe")
+    io_lines = ["        move.w #0,$a11200", "        move.w #$0100,$a11100",
+                "        move.w #$0100,$a11200"]
+    io_lines.extend(f"        move.b #${value:02x},$a0{offset:04x}"
+                    for offset, value in enumerate(io_z80))
+    io_lines.extend(("        move.w #0,$a11100", "loop:   bra.s loop"))
+    io_asm = base / "z80-io.s"
+    io_asm.write_text("\n".join(io_lines) + "\n")
+    io_program = base / "z80-io.bin"
+    subprocess.run([str(assembler), "-Fbin", "-o", str(io_program), str(io_asm)],
+                   check=True, capture_output=True)
+    io_rom = bytearray(rom)
+    io_code = io_program.read_bytes()
+    io_rom[0x200:0x200 + len(io_code)] = io_code
+    io_cart = base / "z80-io.binrom"
+    io_cart.write_bytes(io_rom)
+    io_out = base / "z80-io"
+    result = subprocess.run([sys.executable, str(runner), "--core", str(core), "--rom", str(io_cart),
+                             "--frames", "2", "--out", str(io_out), "--trace"],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        sys.exit("oracle_check: Z80 IN/OUT timing run failed: " + result.stderr)
+    with (io_out / "bus.trace").open("rb") as stream:
+        io_events = [e for e in read_trace(stream) if e.device == Z80 and e.address == 0x7F and
+                     e.operation in (READ, WRITE)]
+    if (len(io_events) != 2 or
+            [(e.operation, e.width, e.value) for e in io_events] != [(WRITE, 1, 0x5A), (READ, 1, 0xFF)]):
+        sys.exit("oracle_check: Z80 IN/OUT access width or value mismatch: " + repr(io_events))
+    if io_events[1].clock - io_events[0].clock != 11 * z80_tstate:
+        sys.exit("oracle_check: Z80 IN/OUT completion clocks mismatch: " + repr(io_events))
+
+    direct_feature = extract_features(bus_manifest, events)["features"]["direct_68k_ym_writes"]
+    if (direct_feature["status"] != "observed" or
+            not any(item["cpu_bus"]["width"] == 2 for item in direct_feature["evidence"])):
+        sys.exit("oracle_check: direct YM extractor missed the accepted word bus write: " +
+                 repr(direct_feature))
+    if not any(e.device == YM2612 and e.operation == WRITE and
+               e.address == (YM_PORT_Z80_ADDR_TAG | 0) and e.value == 0x30
                for e in ym_events):
         sys.exit("oracle_check: missing YM address-port write event: " + repr(
             [e for e in ym_events if e.device == M68K and e.operation == WRITE and e.address >= 0xA00000]))
-    if not any(e.device == YM2612 and e.operation == WRITE and e.address == 1 and e.value == 0x7f
+    if not any(e.device == YM2612 and e.operation == WRITE and
+               e.address == (YM_PORT_Z80_ADDR_TAG | 1) and e.value == 0x7f
                for e in ym_events):
         sys.exit("oracle_check: missing YM data-port write event")
     z80_ym_data = next(e for e in z80_events if e.operation == WRITE and e.address == 0x4001 and e.value == 0x7f)
     ym_port_data = next(e for e in ym_events
-                        if e.device == YM2612 and e.operation == WRITE and e.address == 1 and e.value == 0x7f)
+                        if e.device == YM2612 and e.operation == WRITE and
+                        e.address == (YM_PORT_Z80_ADDR_TAG | 1) and e.value == 0x7f)
     ym_register_data = next(e for e in ym_events
                             if e.device == YM2612 and e.operation == WRITE and e.address == 0x30 and e.value == 0x7f)
     if z80_ym_data.clock != ym_port_data.clock:
