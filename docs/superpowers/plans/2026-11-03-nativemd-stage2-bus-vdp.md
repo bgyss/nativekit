@@ -104,6 +104,9 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 - `md_console` is the only `nk_console` table. `nmd_main()` delegates to `nk_main()`; no
   console-specific concept is added to `kit/`. Its name is `nativemd` and its settings prefix is
   `NMD`.
+- The `nmd` target folds in `nk_coro`, `nk_resample`, `nk_dispatch`, `nk_front`, `nk_input`,
+  `nk_app`, the selected `nk_render`, and `NK_HOST_OBJECTS`, following the SNES target's CMake
+  wiring. It links host frameworks/libraries selected by the generic `NK_HOST` option.
 
 - [ ] Run `cmake -S . -B build/md-stage2-red -DNK_CONSOLES="snes;md"` before the target exists;
   confirm it fails with `nativekit: no console md`.
