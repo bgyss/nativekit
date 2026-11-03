@@ -12,7 +12,9 @@ if result.returncode:
     sys.exit("dma_check: valid transfer cases failed: " + result.stderr)
 
 for mode, message in (("source-bounds", "outside cartridge ROM"),
-                      ("zero-count", "outside cartridge ROM")):
+                      ("zero-count", "outside cartridge ROM"),
+                      ("fill-non-vram", "only supports VRAM"),
+                      ("copy-non-vram", "only supports VRAM")):
     result = subprocess.run([str(BINARY), mode], capture_output=True, text=True)
     if (result.returncode != 70 or not result.stderr.startswith("nativemd: ") or
             message not in result.stderr):

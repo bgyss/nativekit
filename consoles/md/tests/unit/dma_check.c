@@ -167,6 +167,16 @@ static int fatal_case(const char *mode, nmd_cart *cart)
 {
     uint32_t source;
     uint16_t words;
+    if (!strcmp(mode, "fill-non-vram") || !strcmp(mode, "copy-non-vram")) {
+        nmd_power(cart);
+        nmd_wait_vblank();
+        reg_write(1, 0x10);
+        reg_write(19, 1);
+        reg_write(20, 0);
+        reg_write(23, !strcmp(mode, "fill-non-vram") ? 0x80 : 0xC0);
+        control_write(0xC0000080); /* CRAM plus DMA: fill/copy must reject it. */
+        return 3;
+    }
     if (!strcmp(mode, "source-bounds")) {
         source = 0x400;
         words = 1;
