@@ -9,6 +9,7 @@
 #include "md_internal.h"
 #include "nk/fatal.h"
 #include "nk/routines.h"
+#include "../sound/sound.h"
 
 #define MD_IRQ_QUEUE_CAPACITY 64u
 #define MD_NEVER UINT64_MAX
@@ -161,8 +162,10 @@ void md_advance_to(uint64_t to_clock)
             irq_event_count--;
             process_irq_event(&event);
         }
+        md_z80_sync_to(md_clock);
     }
     md_clock = to_clock;
+    md_z80_sync_to(md_clock);
 }
 
 static void take_interrupt(int level)
@@ -218,8 +221,11 @@ void md_timing_reset(const nmd_cart *cart)
     md_irq_last_service_clock = 0;
     md_vdp_reset(cart);
     md_dma_reset();
+    md_ym_reset();
+    md_psg_reset();
     md_clock_hook = md_advance_to;
     md_irq_check_hook = md_irq_dispatch_pending;
+    md_z80_power(cart);
 }
 
 uint64_t nmd_wait_until(int (*ready)(void *ctx), void *ctx)

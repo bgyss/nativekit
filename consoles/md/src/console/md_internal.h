@@ -15,16 +15,22 @@ extern uint64_t md_clock;
 extern uint8_t md_z80_ram[0x2000];
 extern uint8_t md_memory_mode;
 extern uint8_t md_z80_busreq;
+extern uint8_t md_z80_busack;
 extern uint8_t md_z80_reset;
 extern unsigned md_irq_defer_depth;
 
 enum {
     MD_BUS_TRACE_READ = 2,
-    MD_BUS_TRACE_WRITE = 3
+    MD_BUS_TRACE_WRITE = 3,
+    MD_Z80_TRACE_READ = 2,
+    MD_Z80_TRACE_WRITE = 3
 };
 typedef void (*md_bus_trace_fn)(uint64_t clock, uint8_t operation, uint8_t width,
                                 uint32_t addr, uint32_t value);
 extern md_bus_trace_fn md_bus_trace_hook;
+typedef void (*md_z80_bus_trace_fn)(uint64_t clock, uint8_t operation, uint8_t width,
+                                    uint32_t addr, uint32_t value);
+extern md_z80_bus_trace_fn md_z80_bus_trace_hook;
 
 /* The scheduler services device deadlines; interrupt checks run after an
  * access, except while a longword or TAS read-modify-write is indivisible. */
@@ -37,6 +43,17 @@ void md_irq_defer_end(void);
 
 void md_timing_reset(const nmd_cart *cart);
 void md_advance_to(uint64_t to_clock);
+void md_z80_power(const nmd_cart *cart);
+void md_z80_sync_to(uint64_t master_clock);
+uint64_t md_z80_cycle_count(void);
+void md_z80_bus_access_begin(unsigned tstates);
+void md_z80_bus_access_end(void);
+int md_z80_bus_call_active(void);
+void md_z80_bus_reset(void);
+uint8_t md_z80_window_read8(uint32_t addr);
+void md_z80_window_write8(uint32_t addr, uint8_t value);
+int md_z80_window_bus_ready(void);
+void md_z80_window_bus_reserve(void);
 /* `level` 2 asserts the EXT interrupt request; 0 releases the input line. */
 void md_ext_irq_at(int level, uint64_t clock);
 void md_irq_request_at(int level, uint64_t clock);

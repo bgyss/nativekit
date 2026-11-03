@@ -23,6 +23,11 @@ description = "Check that the nmd console entry point links to the kit"
 depends = ["build:null"]
 run = "cmake --build build/null --target console_check && build/null/tests/console_check"
 
+[tasks."test:md-z80"]
+description = "Check Z80 reset, BUSREQ, memory map, bank window, and coroutine behavior"
+depends = ["build:null"]
+run = "cmake --build build/null --target z80_check && python3 consoles/md/tests/z80_check.py"
+
 [tasks."test:md-bus"]
 description = "Check the 68000 bus map, byte lanes, timing, and fatal accesses"
 depends = ["build:null"]

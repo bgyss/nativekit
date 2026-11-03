@@ -6,6 +6,7 @@
 
 #include "nmd/cart.h"
 #include "nmd/machine.h"
+#include "nmd/z80.h"
 
 #ifdef __cplusplus
 extern "C" {

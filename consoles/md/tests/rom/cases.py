@@ -27,6 +27,13 @@ class Case:
     capture_frames: int = 2
     weave_fields: bool = False
     weave_dimensions: tuple[int, int] = (256, 224)
+    z80_fixture_id: int = 0
+    z80_entry: int = 0
+    z80_program: tuple[str, ...] = ()
+    z80_load_index: int = 0
+    z80_accesses: tuple[Operation, ...] = ()
+    rom_size: int = 32768
+    rom_data: tuple[tuple[int, int], ...] = ()
 
 
 def _vdp_reg(index, value):
@@ -125,6 +132,37 @@ def _render_scene(name, tile_colors, plane_a_rows=None, plane_b_row=None,
                 weave_dimensions=(320 if h40 else 256, 240 if v30 else 224))
 
 
+def _z80_bank_window_case():
+    z80_program = (
+        "        ld      a,1",
+        *("        ld      ($6000),a" for _ in range(7)),
+        "        xor     a",
+        *("        ld      ($6000),a" for _ in range(2)),
+        "        ld      a,($FFFF)",
+        "        ld      ($0010),a",
+        "hang:   jr      hang",
+    )
+    operations = [
+        Operation(WRITE, 2, 0xA11200, 0x0000),
+        Operation(WRITE, 2, 0xA11100, 0x0100),
+        Operation(WRITE, 2, 0xA11200, 0x0100),
+        Operation(POLL, 2, 0xA11100, 0x0000, compare_mask=0x0100),
+        Operation(WRITE, 2, 0xA11100, 0x0000),
+        *(Operation(READ, 1, 0xE00000) for _ in range(48)),
+        Operation(WRITE, 2, 0xA11100, 0x0100),
+        Operation(POLL, 2, 0xA11100, 0x0000, compare_mask=0x0100),
+        Operation(READ, 1, 0xA00010, 0xC3, compare_mask=0x00FF),
+    ]
+    z80_accesses = tuple(
+        [Operation(WRITE, 1, 0x6000, 1) for _ in range(7)] +
+        [Operation(WRITE, 1, 0x6000, 0) for _ in range(2)] +
+        [Operation(READ, 1, 0xFFFF, 0xC3)])
+    return Case("z80_bank_window", tuple(operations), z80_fixture_id=1,
+                z80_entry=0, z80_program=z80_program, z80_load_index=4,
+                z80_accesses=z80_accesses, rom_size=0x400000,
+                rom_data=((0x3FFFFF, 0xC3),))
+
+
 def all_cases():
     return [Case("bus_map", (
         Operation(READ, 2, 0x00004000),
@@ -156,7 +194,7 @@ def all_cases():
         Operation(POLL, 2, 0xA11100, 0x0100, compare_mask=0x0100),
         Operation(WRITE, 1, 0xFF0010, 0x00),
         Operation(READ, 1, 0xFF0010),
-    )), Case("tas_write", (
+    )), _z80_bank_window_case(), Case("tas_write", (
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),
         Operation(READ, 1, 0xFF0020),

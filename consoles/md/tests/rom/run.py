@@ -16,7 +16,7 @@ sys.path.insert(0, str(HERE.parent / "oracle"))
 
 import cases  # noqa: E402
 import mdtest  # noqa: E402
-from trace import M68K, VDP, DMA, READ, WRITE, read as read_trace  # noqa: E402
+from trace import M68K, Z80, VDP, DMA, READ, WRITE, read as read_trace  # noqa: E402
 
 
 def _target_addresses(case):
@@ -26,23 +26,28 @@ def _target_addresses(case):
         addresses.add(address)
         if op.width == 4:
             addresses.add((address + 2) & 0xFFFFFF)
+    if case.z80_fixture_id:
+        addresses.update(range(0xA00000, 0xA02000))
     return addresses
 
 
 def _native_events(result):
-    bus_events, vdp_events, dma_events = [], [], []
+    bus_events, vdp_events, dma_events, z80_events = [], [], [], []
     for line in result.stdout.splitlines():
         fields = line.split("\t")
-        if len(fields) == 6 and fields[0] == "VDP":
-            _, clock, operation, width, port, value = fields
-            event = (int(operation), int(width), int(port, 16), int(value, 16), int(clock))
-            (dma_events if event[0] == DMA else vdp_events).append(event)
+        if len(fields) == 6 and fields[0] in ("VDP", "Z80"):
+            device, clock, operation, width, address, value = fields
+            event = (int(operation), int(width), int(address, 16), int(value, 16), int(clock))
+            if device == "Z80":
+                z80_events.append(event)
+            else:
+                (dma_events if event[0] == DMA else vdp_events).append(event)
             continue
         if len(fields) != 5:
             raise ValueError("testcart emitted an invalid bus trace line")
         clock, operation, width, addr, value = fields
         bus_events.append((int(operation), int(width), int(addr, 16), int(value, 16), int(clock)))
-    return bus_events, vdp_events, dma_events
+    return bus_events, vdp_events, dma_events, z80_events
 
 
 def _candidate_events(trace_path, addresses):
@@ -57,7 +62,9 @@ def _candidate_events(trace_path, addresses):
            if event.device == VDP and event.operation in (READ, WRITE) and event.address in (0, 4, 8)]
     dma = [(event.operation, event.width, event.address, event.value, event.clock)
            for event in trace if event.device == VDP and event.operation == DMA]
-    return bus, vdp, dma
+    z80 = [(event.operation, event.width, event.address, event.value, event.clock)
+           for event in trace if event.device == Z80 and event.operation in (READ, WRITE)]
+    return bus, vdp, dma, z80
 
 
 def _event_value_masks(case):
@@ -194,14 +201,62 @@ def _compare_dma(case, native_vdp, native_dma, candidate_vdp, candidate_dma):
     return None
 
 
+def _compare_z80(case, native_z80, candidate_z80):
+    if not case.z80_accesses:
+        return None
+
+    expected = []
+    for op in case.z80_accesses:
+        operation = READ if op.code == cases.READ else WRITE if op.code == cases.WRITE else None
+        if operation is None:
+            return f"unsupported expected Z80 operation {op.code}"
+        expected.append((operation, op.width, op.addr & 0xFFFF, op.value))
+
+    selected_keys = {event[:3] for event in expected}
+    native = [event[:4] for event in native_z80 if event[:3] in selected_keys]
+    candidate = [event[:4] for event in candidate_z80 if event[:3] in selected_keys]
+    if len(native) != len(expected) or len(candidate) != len(expected):
+        return (f"Z80 access counts: expected {len(expected)}, native {len(native)}, "
+                f"candidate {len(candidate)}")
+    for index, (want, native_event, candidate_event) in enumerate(
+            zip(expected, native, candidate)):
+        if native_event != want or candidate_event != want:
+            return (f"Z80 access {index}: expected {want!r}, native {native_event!r}, "
+                    f"candidate {candidate_event!r}")
+    return None
+
+
 def _ignore_render_sync_reads(case, bus_events, vdp_events):
     sync_ports = {
         (op.addr & 0x1F) & 0x1D
         for op in case.operations
         if op.code == cases.POLL and 0xC00000 <= (op.addr & 0xFFFFFF) <= 0xDFFFFF
     }
-    if not sync_ports:
+    bus_poll_addresses = {
+        op.addr & 0xFFFFFF for op in case.operations
+        if op.code == cases.POLL and not 0xC00000 <= (op.addr & 0xFFFFFF) <= 0xDFFFFF
+    }
+    if not sync_ports and not bus_poll_addresses:
         return bus_events, vdp_events
+
+    def strip_bus_polls(events):
+        if not bus_poll_addresses:
+            return events
+        keep_reads = Counter(op.addr & 0xFFFFFF for op in case.operations
+                            if op.code == cases.READ and
+                            (op.addr & 0xFFFFFF) in bus_poll_addresses)
+        counts = Counter(event[2] for event in events
+                         if event[0] == READ and event[2] in bus_poll_addresses)
+        discard = Counter({addr: max(0, count - keep_reads[addr])
+                           for addr, count in counts.items()})
+        filtered = []
+        for event in events:
+            addr = event[2] if event[0] == READ else None
+            if addr in bus_poll_addresses and discard[addr]:
+                discard[addr] -= 1
+            else:
+                filtered.append(event)
+        return filtered
 
     def bus_port(event):
         address = event[2]
@@ -229,7 +284,7 @@ def _ignore_render_sync_reads(case, bus_events, vdp_events):
                 filtered.append(event)
         return filtered
 
-    bus = strip_sync_reads(bus_events, bus_port)
+    bus = strip_sync_reads(strip_bus_polls(bus_events), bus_port)
     vdp = strip_sync_reads(vdp_events, lambda event: event[2])
     return bus, vdp
 
@@ -306,11 +361,11 @@ def _weave_fields(first_path, second_path, width, field_height, output_path):
     output_path.write_bytes(f"P6\n{width} {field_height * 2}\n255\n".encode() + frame)
 
 
-def run_one(case, assembler, core, testcart):
+def run_one(case, assembler, z80_assembler, core, testcart):
     with tempfile.TemporaryDirectory(prefix="nmd-rom-") as temp:
         base = pathlib.Path(temp)
         try:
-            rom, steps = mdtest.build_case(case, base, assembler)
+            rom, steps = mdtest.build_case(case, base, assembler, z80_assembler)
         except RuntimeError as error:
             return str(error)
         oracle_out = base / "oracle"
@@ -336,8 +391,8 @@ def run_one(case, assembler, core, testcart):
             return "native testcart failed: " + native.stderr.strip()[-500:]
 
         try:
-            native_bus, native_vdp, native_dma = _native_events(native)
-            candidate_bus, candidate_vdp, candidate_dma = _candidate_events(
+            native_bus, native_vdp, native_dma, native_z80 = _native_events(native)
+            candidate_bus, candidate_vdp, candidate_dma, candidate_z80 = _candidate_events(
                 oracle_out / "bus.trace", _target_addresses(case))
         except (OSError, ValueError) as error:
             return "trace read failed: " + str(error)
@@ -352,6 +407,9 @@ def run_one(case, assembler, core, testcart):
             return difference
         difference = _compare_dma(case, native_vdp, native_dma,
                                   candidate_vdp, candidate_dma)
+        if difference:
+            return difference
+        difference = _compare_z80(case, native_z80, candidate_z80)
         if difference:
             return difference
         if case.render:
@@ -400,18 +458,20 @@ def main(argv=None):
     extension = "dylib" if sys.platform == "darwin" else "so"
     assembler = pathlib.Path(os.environ.get(
         "NMD_ASSEMBLER", ROOT / "build/toolchains/vasm/vasmm68k_mot"))
+    z80_assembler = pathlib.Path(os.environ.get(
+        "NMD_Z80_ASSEMBLER", ROOT / "build/toolchains/vasm/vasmz80_oldstyle"))
     core = pathlib.Path(os.environ.get(
         "NMD_ORACLE_CORE", ROOT / "build/toolchains/blastem" / ("libblastem." + extension)))
     testcart = pathlib.Path(os.environ.get(
         "NMD_TESTCART", ROOT / "build/null/tests/md_testcart"))
-    for path in (assembler, core, testcart):
+    for path in (assembler, z80_assembler, core, testcart):
         if not path.is_file():
             sys.exit("run.py: missing required tool or executable: " + path.name)
 
     known = _known_cases()
     failures = fixed = known_differences = 0
     for case in tests:
-        difference = run_one(case, assembler, core, testcart)
+        difference = run_one(case, assembler, z80_assembler, core, testcart)
         if case.name in known:
             if difference:
                 known_differences += 1

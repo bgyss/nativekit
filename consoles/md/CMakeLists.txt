@@ -5,7 +5,10 @@ endif()
 project(nativemd VERSION 0.1.0 LANGUAGES C)
 set(NMD_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
-add_library(nmd STATIC src/console/bus.c src/console/dispatch.c src/vdp/vdp.c src/vdp/dma.c
+add_library(nmd STATIC src/console/bus.c src/console/dispatch.c src/z80/z80.c
+  src/z80/z80bus.c
+  src/sound/sn76489.c src/sound/ym2612.c
+  src/vdp/vdp.c src/vdp/dma.c
   src/vdp/render.c
   src/front/md_console.c src/front/md_present.c)
 target_include_directories(nmd PUBLIC include PRIVATE src/front src/console ${NK_INCLUDE})

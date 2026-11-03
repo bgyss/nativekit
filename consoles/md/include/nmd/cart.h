@@ -7,6 +7,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "nmd/z80.h"
+
 typedef enum {
     NMD_NTSC = 0,
     NMD_PAL = 1
@@ -25,6 +27,8 @@ typedef struct nmd_cart {
     uint32_t rom_size;
     const nmd_routine *routines;
     size_t routine_count;
+    const nmd_z80_routine *z80_routines;
+    size_t z80_routine_count;
 } nmd_cart;
 
 #endif

@@ -12,6 +12,7 @@
 
 #include "md_internal.h"
 #include "nk/fatal.h"
+#include "../sound/sound.h"
 
 #define MD_ADDRESS_MASK 0x00FFFFFFu
 #define MD_BUS_CYCLE_MASTER_CLOCKS 28ull /* 4 M68000 clocks, 7 master clocks each */
@@ -21,6 +22,7 @@ uint64_t md_clock;
 uint8_t md_z80_ram[0x2000];
 uint8_t md_memory_mode;
 uint8_t md_z80_busreq;
+uint8_t md_z80_busack;
 uint8_t md_z80_reset;
 unsigned md_irq_defer_depth;
 void (*md_clock_hook)(uint64_t to_clock);
@@ -29,6 +31,7 @@ md_bus_trace_fn md_bus_trace_hook;
 
 static const nmd_cart *active_cart;
 static uint8_t work_ram[0x10000];
+static uint64_t md_68k_bus_busy_until;
 
 static _Noreturn void md_vfatal(const char *fmt, va_list ap)
 {
@@ -65,11 +68,20 @@ static void md_bus_advance_to(uint64_t to_clock)
 static void md_bus_cycle_complete(uint64_t access_start)
 {
     uint64_t access_end = access_start + MD_BUS_CYCLE_MASTER_CLOCKS;
+    if (md_68k_bus_busy_until < access_end)
+        md_68k_bus_busy_until = access_end;
     if (md_clock > access_end)
         access_end = md_clock;
     md_bus_advance_to(access_end);
     while (md_dma_bus_owned())
         md_bus_advance_to(md_dma_next_event());
+}
+
+static void md_bus_begin_access(void)
+{
+    md_bus_advance_to(md_clock);
+    while (md_68k_bus_busy_until > md_clock)
+        md_bus_advance_to(md_68k_bus_busy_until);
 }
 
 static void md_bus_trace(uint8_t operation, uint8_t width, uint32_t addr, uint32_t value)
@@ -151,13 +163,13 @@ static uint32_t md_vdp_word_port(uint32_t addr)
     return UINT32_MAX;
 }
 
-static uint8_t md_read8(uint32_t addr)
+static uint8_t md_read8(uint32_t addr, int z80_access)
 {
     if (addr <= 0x3FFFFFu)
         return md_rom_bytes(addr, 1)[0];
 
     if (md_is_z80_ram(addr)) {
-        if (!md_z80_busreq)
+        if (!z80_access && !md_z80_busack)
             nk_fatal("68000 read of Z80 RAM at $%06X without BUSREQ", (unsigned)addr);
         return md_z80_ram[addr & 0x1FFFu];
     }
@@ -166,14 +178,14 @@ static uint8_t md_read8(uint32_t addr)
         return work_ram[addr & 0xFFFFu];
 
     if (addr == 0xA11100u)
-        return md_z80_busreq ? 0 : 1;
+        return md_z80_busack ? 0 : 1;
 
     if (addr == 0xA11101u)
         nk_fatal("68000 read from the unconnected low lane of Z80 BUSREQ at $%06X",
                  (unsigned)addr);
 
     if (addr >= 0xA04000u && addr <= 0xA04003u)
-        nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
+        return md_ym_read((uint8_t)(addr - 0xA04000u), md_clock);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
     if (md_is_vdp(addr)) {
@@ -205,10 +217,10 @@ static uint16_t md_read16(uint32_t addr)
     }
 
     if (addr == 0xA11100u)
-        return md_z80_busreq ? 0 : 0x0100;
+        return md_z80_busack ? 0 : 0x0100;
 
     if (addr >= 0xA04000u && addr <= 0xA04003u)
-        nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
+        nk_fatal("YM2612 byte ports require byte access at $%06X", (unsigned)addr);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
     if (md_is_vdp(addr)) {
@@ -221,13 +233,13 @@ static uint16_t md_read16(uint32_t addr)
     nk_fatal("unsupported 68000 word read at $%06X", (unsigned)addr);
 }
 
-static void md_write8(uint32_t addr, uint8_t value)
+static void md_write8(uint32_t addr, uint8_t value, int z80_access)
 {
     if (addr <= 0x3FFFFFu)
         nk_fatal("68000 byte write to cartridge ROM at $%06X", (unsigned)addr);
 
     if (md_is_z80_ram(addr)) {
-        if (!md_z80_busreq)
+        if (!z80_access && !md_z80_busack)
             nk_fatal("68000 write of Z80 RAM at $%06X without BUSREQ", (unsigned)addr);
         md_z80_ram[addr & 0x1FFFu] = value;
         return;
@@ -247,6 +259,8 @@ static void md_write8(uint32_t addr, uint8_t value)
 
     if (addr == 0xA11100u) {
         md_z80_busreq = value & 1u;
+        if (!md_z80_busreq)
+            md_z80_busack = 0;
         return;
     }
     if (addr == 0xA11101u)
@@ -259,8 +273,12 @@ static void md_write8(uint32_t addr, uint8_t value)
     if (addr == 0xA11201u)
         return;
 
-    if ((addr >= 0xA04000u && addr <= 0xA04003u) ||
-        addr == 0xA06000u || addr == 0xA06001u ||
+    if (addr >= 0xA04000u && addr <= 0xA04003u) {
+        md_ym_write((uint8_t)(addr - 0xA04000u), value, md_clock);
+        return;
+    }
+
+    if (addr == 0xA06000u || addr == 0xA06001u ||
         (addr >= 0xA10000u && addr <= 0xA1001Fu))
         return; /* mapped writes; chip state belongs to later stages */
 
@@ -270,8 +288,10 @@ static void md_write8(uint32_t addr, uint8_t value)
             md_vdp_write8(port, value, md_clock);
             return;
         }
-        if (port == 0x11u)
-            return; /* the PSG is an 8-bit write port */
+        if (port == 0x11u) {
+            md_psg_write(value, md_clock);
+            return;
+        }
     }
 
     nk_fatal("unsupported 68000 byte write at $%06X", (unsigned)addr);
@@ -298,6 +318,8 @@ static void md_write16(uint32_t addr, uint16_t value)
     }
     if (addr == 0xA11100u) {
         md_z80_busreq = (uint8_t)((value >> 8) & 1u);
+        if (!md_z80_busreq)
+            md_z80_busack = 0;
         return;
     }
     if (addr == 0xA11200u) {
@@ -305,8 +327,14 @@ static void md_write16(uint32_t addr, uint16_t value)
         return;
     }
 
-    if ((addr >= 0xA04000u && addr <= 0xA04003u) ||
-        addr == 0xA06000u ||
+    if (addr >= 0xA04000u && addr <= 0xA04002u) {
+        uint8_t port = (uint8_t)(addr - 0xA04000u);
+        md_ym_write(port, (uint8_t)(value >> 8), md_clock);
+        md_ym_write((uint8_t)(port + 1u), (uint8_t)value, md_clock);
+        return;
+    }
+
+    if (addr == 0xA06000u ||
         (addr >= 0xA10000u && addr <= 0xA1001Eu))
         return; /* mapped writes; chip state belongs to later stages */
 
@@ -321,6 +349,28 @@ static void md_write16(uint32_t addr, uint16_t value)
     nk_fatal("unsupported 68000 word write at $%06X", (unsigned)addr);
 }
 
+int md_z80_window_bus_ready(void)
+{
+    return md_68k_bus_busy_until <= md_clock && !md_dma_bus_owned();
+}
+
+void md_z80_window_bus_reserve(void)
+{
+    if (!md_z80_window_bus_ready())
+        nk_fatal("Z80 bank access reserved the 68000 bus while it was busy");
+    md_68k_bus_busy_until = md_clock + MD_BUS_CYCLE_MASTER_CLOCKS;
+}
+
+uint8_t md_z80_window_read8(uint32_t addr)
+{
+    return md_read8(md_address(addr), 1);
+}
+
+void md_z80_window_write8(uint32_t addr, uint8_t value)
+{
+    md_write8(md_address(addr), value, 1);
+}
+
 void md_bus_reset(const nmd_cart *cart)
 {
     active_cart = cart;
@@ -328,10 +378,13 @@ void md_bus_reset(const nmd_cart *cart)
     nmd_cpu.sr = 0x2700; /* reset starts in supervisor mode with all IRQs masked */
     memset(work_ram, 0, sizeof work_ram);
     memset(md_z80_ram, 0, sizeof md_z80_ram);
+    md_z80_bus_reset();
     md_clock = 0;
     md_memory_mode = 0;
     md_z80_busreq = 1;
+    md_z80_busack = 1;
     md_z80_reset = 1;
+    md_68k_bus_busy_until = 0;
     md_irq_defer_depth = 0;
 }
 
@@ -354,9 +407,9 @@ uint8_t nmd_bus_read8(uint32_t addr)
     uint8_t value;
     uint64_t access_start;
     addr = md_address(addr);
-    md_bus_advance_to(md_clock);
+    md_bus_begin_access();
     access_start = md_clock;
-    value = md_read8(addr);
+    value = md_read8(addr, 0);
     md_bus_cycle_complete(access_start);
     md_bus_trace(MD_BUS_TRACE_READ, 1, addr, value);
     md_bus_interrupt_check();
@@ -369,7 +422,7 @@ uint16_t nmd_bus_read16(uint32_t addr)
     uint64_t access_start;
     addr = md_address(addr);
     md_require_aligned(addr, "word read");
-    md_bus_advance_to(md_clock);
+    md_bus_begin_access();
     access_start = md_clock;
     value = md_read16(addr);
     md_bus_cycle_complete(access_start);
@@ -382,9 +435,9 @@ void nmd_bus_write8(uint32_t addr, uint8_t value)
 {
     uint64_t access_start;
     addr = md_address(addr);
-    md_bus_advance_to(md_clock);
+    md_bus_begin_access();
     access_start = md_clock;
-    md_write8(addr, value);
+    md_write8(addr, value, 0);
     md_bus_cycle_complete(access_start);
     md_bus_trace(MD_BUS_TRACE_WRITE, 1, addr, value);
     md_bus_interrupt_check();
@@ -395,7 +448,7 @@ void nmd_bus_write16(uint32_t addr, uint16_t value)
     uint64_t access_start;
     addr = md_address(addr);
     md_require_aligned(addr, "word write");
-    md_bus_advance_to(md_clock);
+    md_bus_begin_access();
     access_start = md_clock;
     md_write16(addr, value);
     md_bus_cycle_complete(access_start);

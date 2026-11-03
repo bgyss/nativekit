@@ -70,25 +70,29 @@ BlastEm candidate.
   `const nmd_z80_routine *z80_routines` and `size_t z80_routine_count`.
 - `typedef struct nmd_z80_state { uint8_t a,f,b,c,d,e,h,l,i,r,iff1,iff2,im; uint16_t ix,iy,sp,pc; }
   nmd_z80_state` is exposed as `extern nmd_z80_state nmd_z80`.
+- A cart with an empty Z80 routine table represents no native Z80 program and stays idle; a
+  nonempty table without the reset entry is a fatal contract error.
 - Game-facing calls are `uint8_t zrd(uint16_t addr)`, `void zwr(uint16_t addr,uint8_t value)`,
   `uint8_t zin(uint8_t port)`, `void zout(uint8_t port,uint8_t value)`,
-  `uint64_t nmd_z80_wait_until(int (*ready)(void *ctx),void *ctx)`,
-  `void nmd_z80_call(uint16_t addr,uint16_t ret)`, `uint16_t nmd_z80_ret(void)`, and
-  `void nmd_z80_restart(uint16_t addr)`.
+  `uint64_t nmd_z80_wait_until(int (*ready)(void *ctx),void *ctx)`, and
+  `void nmd_z80_restart(uint16_t addr)`. Z80 C helper functions call each other as ordinary C;
+  the routine table is for reset, restart, and interrupt entry points, not an instruction emulator.
 - One Z80 T-state is 15 master clocks. Memory accesses cost three T-states and I/O accesses four;
   waits advance the coroutine one T-state at a time. The shared scheduler catches the Z80 up before
   68000-visible device observations.
 
-- [ ] **Step 1: Write `test_z80_reset_gate`, `test_z80_routine_lookup_and_return`,
-  `test_z80_coroutine_resume`, and `test_z80_tick_conversion`** in `z80_check.c`. Assert that reset
+- [x] **Step 1: Write Z80 reset, routine lookup/restart, coroutine resume, and clock conversion
+  checks** in `z80_check.c`. Assert that reset
   is held on power, the `$0000` callback does not run until reset release, BUSREQ stops execution
-  at a bus-call boundary, release resumes the saved state, and a new RESET clears it.
-- [ ] **Step 2: Run `mise run test:md-z80` and verify the lifecycle cases fail** before supplying the
+  at a bus-call boundary, release resumes the saved state, and a new RESET returns PC to `$0000`
+  with interrupts disabled before the routine starts again.
+- [x] **Step 2: Run `mise run test:md-z80` and verify the lifecycle cases fail** before supplying the
   coroutine and routine table.
-- [ ] **Step 3: Implement `nmd_z80_state`, address-sorted routine lookup, call/return/restart, clock conversion, and
+- [x] **Step 3: Implement `nmd_z80_state`, address-sorted routine lookup/restart, clock conversion, and
   `coro_new`/`coro_switch` lifecycle** in `src/z80/z80.c`; connect power/reset and scheduler hooks.
-- [ ] **Step 4: Run `mise run test:md-z80`** and verify entry, suspension, resume, and reset timing.
-- [ ] **Step 5: Commit** the Z80 runtime and contract changes.
+- [x] **Step 4: Run `mise run test:md-z80`** and verify entry, suspension, resume, and reset timing.
+- [x] **Step 5: Commit** the Z80 runtime and contract with Task 2; the shared coroutine bus boundary
+  makes these one foundation change.
 
 ### Task 2: Implement the Z80 map, bank register, and arbitration
 
@@ -110,24 +114,24 @@ BlastEm candidate.
 - The ROM-case format can carry a Z80 assembly fixture and its C-routine entry address; the
   candidate executes the assembled Z80 program while `md_testcart` starts the matching native C
   routine from the same step table.
-- The 68000-facing wrappers `md_ym2612_read`/`md_ym2612_write` and the Z80 decoder use the same
-  timestamped device functions, so reads from either CPU observe one YM state.
+- The 68000-facing wrappers and the Z80 decoder use the same `md_ym_read`/`md_ym_write` calls;
+  reads from either CPU observe one YM state.
 
-- [ ] **Step 1: Add `test_z80_memory_map`, `test_bank_serial_select`, `test_z80_bank_window`,
-  `test_busreq_boundary`, and `test_dma_bank_stall`**. Assert all map regions, each of nine serial
+- [x] **Step 1: Add Z80 memory-map/bank-window, BUSREQ-boundary, and DMA-stall checks** in
+  `z80_check.c`. Assert all map regions, each of nine serial
   bank bits, 24-bit bank-window addresses, BUSREQ acknowledgement, reset, prohibited accesses, and
   that a bank access waits until the pending DMA releases the 68000 bus.
-- [ ] **Step 2: Run `mise run test:md-z80` and `mise run test:md-bus`**; verify illegal accesses and
+- [x] **Step 2: Run `mise run test:md-z80` and `mise run test:md-bus`**; verify illegal accesses and
   missing waits fail.
-- [ ] **Step 3: Implement the Z80 address decoder and shared-bus arbitration** without allowing a
+- [x] **Step 3: Implement the Z80 address decoder and shared-bus arbitration** without allowing a
   Z80 window access to recursively run a second coroutine or skip a DMA event.
-- [ ] **Step 4: Run both checks and `mise run test:md-interrupt`**; verify exact event ordering.
-- [ ] **Step 5: Commit** the Z80 map and arbitration change.
+- [x] **Step 4: Run both checks and `mise run test:md-interrupt`**; verify exact event ordering.
+- [x] **Step 5: Commit** the Z80 map and arbitration with the shared runtime.
 
 ### Task 3: Implement SN76489 register behavior and tone/noise generation
 
 **Files:**
-- Create: `consoles/md/src/sound/sn76489.c`, `consoles/md/src/sound/sound.h`
+- Modify: `consoles/md/src/sound/sn76489.c`, `consoles/md/src/sound/sound.h`
 - Modify: `consoles/md/src/console/bus.c`, `consoles/md/src/z80/z80bus.c`,
   `consoles/md/src/console/md_internal.h`, `consoles/md/tests/unit/sound_check.c`,
   `consoles/md/tests/rom/{mdtest.py,cases.py,run.py,testcart.c}`
@@ -154,7 +158,7 @@ BlastEm candidate.
 ### Task 4: Implement YM2612 ports, busy state, timers, IRQ, and DAC
 
 **Files:**
-- Create: `consoles/md/src/sound/ym2612.c`
+- Modify: `consoles/md/src/sound/ym2612.c`
 - Modify: `consoles/md/src/console/bus.c`, `consoles/md/src/z80/z80bus.c`,
   `consoles/md/src/console/dispatch.c`, `consoles/md/src/console/md_internal.h`,
   `consoles/md/tests/unit/sound_check.c`, `consoles/md/tests/rom/{cases.py,run.py,testcart.c}`

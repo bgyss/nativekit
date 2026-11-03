@@ -9,9 +9,11 @@ The two documents it builds on are:
 - **Spec (approved):** `docs/superpowers/specs/2026-11-01-nativemd-design.md`
 - **Stage 0 plan (completed):** `docs/superpowers/plans/2026-11-01-nativemd-stage0-kit.md`
 
-**Current state (2026-11-03):** Stages 0 and 1 are complete for their stated scopes, and Stage 2
-bus/VDP work is implemented on the `nativemd` branch. BlastEm remains a candidate oracle, not a
-hardware qualification result. Stage 3 is next; its plan is
+**Current state (2026-11-03):** Stages 0-2 are complete for their stated scopes. Stage 3 Tasks 1-2
+add the native Z80 coroutine, memory map, serial bank window, bus arbitration, and a synthetic
+Z80 bank-window fixture; the MD unit and ROM checks pass. The PSG and YM code currently routes and
+stores port writes, but synthesis, timers, mixing, and audio output remain open. BlastEm remains a
+candidate oracle, not a hardware qualification result. Continue with Task 3 in
 `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
 
 Read the spec first, then this handoff, then the stage 0 plan.
@@ -52,7 +54,7 @@ Success, from the spec:
 Stages 0 and 1 are complete for their recorded scopes. Stage 1 evidence and limitations are in
 `docs/superpowers/plans/2026-11-01-nativemd-stage1-oracle.md` and its SDD ledger; Stage 2
 implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage2-bus-vdp.md`.
-Continue with the Stage 3 Z80 and sound plan above.
+Continue with Task 3 of the Stage 3 Z80 and sound plan above.
 
 1. From the repository root, use the `nativemd` branch.
 2. `nix develop`. Run everything inside it, and use the mise tasks.
@@ -60,11 +62,9 @@ Continue with the Stage 3 Z80 and sound plan above.
    asar 1.91 and the patched bsnes oracle, which the SNES checks need.
 4. Ensure the candidate MD tools are present with `mise run tools:md`; `mise run test:md-*`
    covers their synthetic fixtures and survey logic.
-5. Write and review the Stage 2 plan before implementation, then work through it in order. The
-   plan recommends **subagent-driven** execution
-   (`superpowers:subagent-driven-development`): a fresh implementer per task, a fresh reviewer
-   per task, and a whole-branch review at the end. Keep each stage ordered and give later stages
-   their own plans after the previous stage has landed.
+5. Follow the Stage 3 plan task by task. Preserve the separate C-routine Z80 model and candidate
+   trace boundary; do not turn the sound port baseline into a synthesis or qualification claim.
+   Keep later stages ordered and give them their own plans after Stage 3 lands.
 
 ### Stage 0 tasks (the plan has the code and the tests for each)
 
