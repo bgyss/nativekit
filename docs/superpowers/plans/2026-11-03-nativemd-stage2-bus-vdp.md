@@ -80,7 +80,7 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 
 **Files:**
 - Create: `consoles/md/CMakeLists.txt`, `include/nmd/{machine.h,cart.h,nmd.h}`,
-  `src/front/md_console.c`, `src/front/md_console.h`
+  `src/front/md_console.c`, `src/front/md_console.h`, `src/console/bus.c`
 - Create: `tests/unit/console_check.c`
 - Modify: root `CMakeLists.txt`, `mise.toml`, `consoles/md/tests/CMakeLists.txt`
 
@@ -104,28 +104,30 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 - `md_console` is the only `nk_console` table. `nmd_main()` delegates to `nk_main()`; no
   console-specific concept is added to `kit/`. Its name is `nativemd` and its settings prefix is
   `NMD`.
+- `src/console/bus.c` initially defines `nk_fatal` with the required `nativemd: ` prefix and exit
+  status 70; Task 2 extends it with the actual bus map.
 - The `nmd` target folds in `nk_coro`, `nk_resample`, `nk_dispatch`, `nk_front`, `nk_input`,
   `nk_app`, the selected `nk_render`, and `NK_HOST_OBJECTS`, following the SNES target's CMake
   wiring. It links host frameworks/libraries selected by the generic `NK_HOST` option.
 
-- [ ] Run `cmake -S . -B build/md-stage2-red -DNK_CONSOLES="snes;md"` before the target exists;
+- [x] Run `cmake -S . -B build/md-stage2-red -DNK_CONSOLES="snes;md"` before the target exists;
   confirm it fails with `nativekit: no console md`.
-- [ ] Create the minimal `nmd_cart`, `machine.h`, and `nmd_console` shell, then add `md` to the
+- [x] Create the minimal `nmd_cart`, `machine.h`, and `nmd_console` shell, then add `md` to the
   default console list after the target builds.
-- [ ] Add `console_check.c` as a linked consumer of `nmd_main`; confirm the test fails before the
+- [x] Add `console_check.c` as a linked consumer of `nmd_main`; confirm the test fails before the
   library symbol is supplied and passes after the target is wired.
-- [ ] Verify `nmd_main` links to the kit's `nk_main` and the console shell compiles with zero
+- [x] Verify `nmd_main` links to the kit's `nk_main` and the console shell compiles with zero
   warnings in null and macOS configurations.
-- [ ] Run the Stage 0 gate and commit.
+- [x] Run the Stage 0 gate and commit.
 
 ### Task 2: Implement the 68000 bus and base memory map
 
 **Files:**
-- Create: `src/console/bus.c`
 - Create: `src/console/md_internal.h`
 - Create: `tests/rom/{testcart.c,mdtest.py,cases.py,run.py,KNOWN}`
 - Create: `tests/unit/bus_check.c`
 - Modify: `include/nmd/machine.h`, `include/nmd/cart.h`, `mise.toml`
+- Modify: `src/console/bus.c` with the map, timing, and access functions
 
 **Interfaces:**
 - `rd8/rd16/wr8/wr16` address the 24-bit 68000 space; words are big-endian and byte accesses use
