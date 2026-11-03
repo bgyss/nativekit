@@ -288,7 +288,7 @@ static uint64_t timer_next_delta(uint64_t numerator, uint64_t *fraction)
     uint64_t remainder = numerator % YM_TIMER_CLOCK_DENOMINATOR;
 
     *fraction += remainder;
-    if (*fraction >= YM_TIMER_CLOCK_DENOMINATOR) {
+    if (*fraction > YM_TIMER_CLOCK_DENOMINATOR) {
         *fraction -= YM_TIMER_CLOCK_DENOMINATOR;
         whole++;
     }
@@ -674,13 +674,16 @@ static int32_t operator_modulation(unsigned operator_index)
 static int16_t clip_channel_output(int32_t output)
 {
     if (output > 0x1FE0)
-        output = 0x1FE0;
-    else if (output < -0x1FF0)
-        output = -0x1FF0;
+        return 0x1FE0;
+    if (output < -0x1FF0)
+        return -0x1FF0;
     if (output >= 0)
         output &= ~0x1F;
-    else
+    else {
         output = -(((-output + 0x1F) & ~0x1F));
+        if (output < -0x1FF0)
+            output = -0x1FF0;
+    }
     return (int16_t)output;
 }
 
@@ -692,7 +695,8 @@ static void update_channel_output(unsigned channel_index)
     unsigned op;
 
     if (channel->algorithm < 4u) {
-        output = ym_operators[base + 3u].output;
+        channel->output = (int16_t)(ym_operators[base + 3u].output & ~0x1F);
+        return;
     } else if (channel->algorithm == 4u) {
         output = (ym_operators[base + 3u].output & ~0x1F) +
                  (ym_operators[base + 2u].output & ~0x1F);
@@ -995,6 +999,10 @@ static void register_write(unsigned bank, uint8_t address, uint8_t value,
             keyon_write(value);
         } else if (address == 0x2Bu) {
             md_ym.dac_enabled = (uint8_t)((value & 0x80u) != 0);
+            if (md_ym.dac_enabled) {
+                md_ym.dac_sample = (int16_t)(((int)md_ym.dac_data - 0x80) * 64);
+                ym_channels[5].output = md_ym.dac_sample;
+            }
         } else if (address == 0x2Au) {
             md_ym.dac_data = value;
             if (md_ym.dac_enabled) {

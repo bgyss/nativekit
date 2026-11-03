@@ -24,6 +24,7 @@ static int z80_started;
 static int z80_reset_requested;
 static int z80_power_reset_requested;
 static unsigned z80_bus_call_depth;
+static int z80_vint_pending;
 
 static const nmd_z80_routine *find_routine(uint16_t addr)
 {
@@ -43,9 +44,56 @@ static const nmd_z80_routine *find_routine(uint16_t addr)
     return NULL;
 }
 
+static uint16_t z80_vint_vector(void)
+{
+    uint16_t vector_address;
+
+    switch (nmd_z80.im & 3u) {
+    case 0:
+    case 1:
+        return 0x0038u;
+    case 2:
+        vector_address = (uint16_t)(((uint16_t)nmd_z80.i << 8) | 0x00FFu);
+        return (uint16_t)(zrd(vector_address) |
+            ((uint16_t)zrd((uint16_t)(vector_address + 1u)) << 8));
+    default:
+        nk_fatal("invalid Z80 interrupt mode %u", nmd_z80.im);
+    }
+}
+
+static void deliver_vint(void)
+{
+    uint16_t vector;
+    uint16_t saved_pc;
+    uint8_t saved_iff1, saved_iff2;
+    const nmd_z80_routine *routine;
+
+    if (!z80_vint_pending || !nmd_z80.iff1 || z80_bus_call_depth ||
+        md_z80_busreq || md_z80_reset)
+        return;
+
+    z80_vint_pending = 0;
+    saved_pc = nmd_z80.pc;
+    saved_iff1 = nmd_z80.iff1;
+    saved_iff2 = nmd_z80.iff2;
+    nmd_z80.iff1 = 0;
+    nmd_z80.iff2 = 0;
+    vector = z80_vint_vector();
+    routine = find_routine(vector);
+    if (!routine || !routine->abi)
+        nk_fatal("Z80 VINT vector $%04X has no C routine", vector);
+    nmd_z80.pc = vector;
+    routine->abi();
+    nmd_z80.pc = saved_pc;
+    nmd_z80.iff1 = saved_iff1;
+    nmd_z80.iff2 = saved_iff2;
+}
+
 static void reset_registers(void)
 {
     nmd_z80.pc = 0;
+    nmd_z80.i = 0;
+    nmd_z80.r = 0;
     nmd_z80.iff1 = 0;
     nmd_z80.iff2 = 0;
     nmd_z80.im = 0;
@@ -73,6 +121,7 @@ static void z80_tstate(void)
             yield_to_main();
             continue;
         }
+        deliver_vint();
         if (z80_cycles >= z80_target) {
             yield_to_main();
             continue;
@@ -80,8 +129,6 @@ static void z80_tstate(void)
         break;
     }
     z80_cycles++;
-    if (z80_cycles >= z80_target)
-        yield_to_main();
 }
 
 static void z80_main(void *arg)
@@ -161,6 +208,7 @@ void md_z80_power(const nmd_cart *cart)
     z80_reset_requested = 0;
     z80_power_reset_requested = 0;
     z80_bus_call_depth = 0;
+    z80_vint_pending = 0;
     if (!z80_co)
         z80_co = coro_new(z80_main, NULL, MD_Z80_COROUTINE_STACK);
 }
@@ -216,6 +264,21 @@ void md_z80_sync_to(uint64_t master_clock)
     }
 }
 
+uint64_t md_z80_next_event(void)
+{
+    if (!z80_co || z80_in_coroutine || md_z80_reset || md_z80_busreq ||
+        !active_cart || !active_cart->z80_routine_count)
+        return UINT64_MAX;
+    if (z80_cycles >= UINT64_MAX / MD_MASTER_CLOCKS_PER_Z80_TSTATE - 1u)
+        return UINT64_MAX;
+    return (z80_cycles + 1u) * MD_MASTER_CLOCKS_PER_Z80_TSTATE;
+}
+
+void md_z80_request_vint(void)
+{
+    z80_vint_pending = 1;
+}
+
 uint64_t md_z80_cycle_count(void)
 {
     return z80_cycles;
@@ -244,6 +307,8 @@ void md_z80_bus_access_end(void)
             port_longjmp(z80_restart_buffer);
         if (md_z80_busreq)
             yield_to_main();
+        else
+            deliver_vint();
     }
 }
 

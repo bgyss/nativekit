@@ -34,10 +34,10 @@ comma-separated case names after the task separator, for example:
 mise run test:md-rom -- --only render_sprite_basic,render_interlace2
 ```
 
-The runner rejects unknown names and reports only the selected cases.
-`rom/KNOWN` lists four reviewed candidate differences: TAS handling and the
-candidate's faster memory-DMA slot cadence. The listed cases remain visible in
-the full run so changes to either side are detected.
+The runner rejects unknown names and reports only the selected cases. Stage 2
+added four reviewed candidate differences: TAS handling and the candidate's
+faster memory-DMA slot cadence. The listed cases remain visible in the full run
+so changes to either side are detected.
 
 ## Stage 3 sound vectors
 
@@ -45,11 +45,16 @@ the full run so changes to either side are detected.
 key-on/off envelopes, channel 3 special frequencies with LFO and envelope key
 scaling, stereo pan, PSG tones/noise, and combined PSG/YM output. The runner
 captures raw source streams for each chip before BlastEm's host audio filter/
-resampler. The mixed vector uses those streams as the expected input to the
-shared sample-rate converter and saturating s16 sum. `test:md-rom` also plants
-a one-sample change to prove the PCM comparator reports the first differing
-sample and channel. A unit impulse vector pins the PSG/YM source-clock start
-alignment through the resampler. Focus a case with, for example:
+resampler. Raw FM and mixed PCM compare sample-for-sample. The approved PSG
+tone/noise and YM DAC vectors keep their bounded phase/error tolerance. The
+mixed vector uses raw chip streams as the expected input to the shared
+sample-rate converter and saturating s16 sum. `audio_compare_check.py` plants
+one-unit changes at both stream edges and a larger interior change to prove the
+exact comparator reports the first differing sample and channel. Unit checks
+pin data-only volume continuation, tone-3 noise-edge switching across a frame,
+and PSG/YM source-clock alignment. `rom/KNOWN` records six individually
+reviewed candidate differences, including the two PSG protocol cases where
+BlastEm shares the hardware divergence. Focus a case with, for example:
 
 ```sh
 mise run test:md-rom -- --only sound_ym_algorithm_0

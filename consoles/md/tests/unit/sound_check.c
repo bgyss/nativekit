@@ -126,6 +126,26 @@ static void test_ym_timer_b_status(void)
     assert((md_ym_read(0, period) & 0x02u) == 0);
 }
 
+static void test_ym_timer_b_integral_reload_deadline(void)
+{
+    const uint64_t expected_deadline = 19329543u;
+    unsigned reload;
+
+    reset_psg();
+    write_ym_register(0, 0x26, 131, 0); /* Ten 36 ms Timer B periods are integral. */
+    write_ym_register(0, 0x27, 0x0A, 0); /* Run Timer B and expose overflow. */
+
+    for (reload = 0; reload < 9u; reload++)
+        md_advance_to(md_ym_next_event());
+
+    assert(md_ym_next_event() == expected_deadline);
+    md_advance_to(expected_deadline - 1u);
+    write_ym_register(0, 0x27, 0x2A, expected_deadline - 1u); /* Clear sticky flag. */
+    assert((md_ym_read(0, expected_deadline - 1u) & 0x02u) == 0);
+    md_advance_to(expected_deadline);
+    assert(md_ym_read(0, expected_deadline) & 0x02u);
+}
+
 static void test_ym_dac_samples(void)
 {
     int16_t samples[2];
@@ -141,6 +161,24 @@ static void test_ym_dac_samples(void)
     md_ym_advance_to(1975);
     assert(md_ym_take_samples(samples, 1) == 1);
     assert(samples[0] == -8192);
+}
+
+static void test_ym_dac_enable_uses_latched_data(void)
+{
+    int16_t samples[1];
+
+    reset_psg();
+    write_ym_register(0, 0x2A, 0xFF, 0); /* Preload while DAC output is disabled. */
+    write_ym_register(0, 0x2B, 0x80, 0);
+    md_ym_advance_to(967);
+    assert(md_ym_take_samples(samples, 1) == 1);
+    assert(samples[0] == 8128);
+
+    write_ym_register(0, 0x2B, 0x00, 967);
+    write_ym_register(0, 0x2B, 0x80, 967); /* Re-enable without another data write. */
+    md_ym_advance_to(1975);
+    assert(md_ym_take_samples(samples, 1) == 1);
+    assert(samples[0] == 8128);
 }
 
 static void setup_fm_channel(unsigned channel, unsigned algorithm, uint64_t clock)
@@ -515,6 +553,38 @@ static void test_sound_queue_full_wrap_and_empty(void)
     assert(md_sound_audio_take(full, 1) == 0);
 }
 
+static void reset_audio_queue_from_take_hook(void)
+{
+    md_sound_audio_take_test_hook = NULL;
+    md_sound_reset(NMD_NTSC);
+    md_psg_write(0x90, 0);
+    md_psg_write(0x84, 0);
+    md_psg_write(0x12, 0);
+    md_sound_advance_to(64u * 1008u); /* The real-time producer drops during handoff. */
+}
+
+static void test_sound_reset_during_audio_drain(void)
+{
+    int16_t samples[16u * 2u];
+    int frames;
+
+    md_sound_reset(NMD_NTSC);
+    md_psg_write(0x90, 0);
+    md_psg_write(0x84, 0);
+    md_psg_write(0x12, 0);
+    md_sound_advance_to(64u * 1008u);
+    assert(md_sound_audio_queued() > 16);
+
+    md_sound_audio_take_test_hook = reset_audio_queue_from_take_hook;
+    frames = md_sound_audio_take(samples, 16);
+    assert(frames == 0); /* The drain snapshot belongs to the previous power epoch. */
+    assert(md_sound_audio_queued() == 0);
+
+    md_sound_advance_to(2u * 64u * 1008u);
+    frames = md_sound_audio_take(samples, 16);
+    assert(frames > 0);
+}
+
 static void test_sound_long_advance_drains_chip_rings(void)
 {
     md_sound_reset(NMD_NTSC);
@@ -542,7 +612,18 @@ static void test_psg_latch_data(void)
 
     md_psg_write(0x90, 0); /* Attenuation writes are single-byte transfers. */
     md_psg_write(0x3F, 0);
-    assert(md_psg.attenuation[0] == 0);
+    assert(md_psg.attenuation[0] == 15); /* Data-only continuation mutes the latched channel. */
+}
+
+static void test_psg_latch_continuation_across_frame(void)
+{
+    const uint64_t frame_clock = 3420u * 262u;
+
+    reset_psg();
+    md_psg_write(0x90, frame_clock - 20u); /* Select channel 0 volume before VBlank. */
+    md_psg_advance_to(frame_clock + 1u);
+    md_psg_write(0x3F, frame_clock + 1u); /* The latch persists into the next frame. */
+    assert(md_psg.attenuation[0] == 15);
 }
 
 static void test_psg_period_zero(void)
@@ -588,6 +669,32 @@ static void test_psg_noise_modes_and_tone3_clock(void)
     assert(md_psg.noise_use_tone);
     md_psg_advance_to(240u * 12u);
     assert(md_psg.noise_shift_count == 3);
+
+    reset_psg();
+    md_psg_write(0xC4, 0); /* Tone 3 has a four-sample period. */
+    md_psg_write(0x00, 0);
+    md_psg_write(0xE0, 0); /* Start the independent fixed noise divider. */
+    md_psg_advance_to(7u * 240u + 1u); /* Eight tone ticks; next tick raises tone 3. */
+    periodic_shifts = md_psg.noise_shift_count;
+    md_psg_write(0xE3, 7u * 240u + 1u); /* Switch to tone-3 clock while out of phase. */
+    md_psg_advance_to(8u * 240u + 1u);
+    assert(md_psg.noise_shift_count == periodic_shifts + 1u);
+
+    reset_psg();
+    md_psg_write(0xC4, 0);
+    md_psg_write(0x00, 0);
+    md_psg_write(0xE0, 0);
+    md_psg_advance_to(3420u * 262u + 1u);
+    for (periodic_shifts = 0; periodic_shifts < 8u; periodic_shifts++) {
+        if (!md_psg.tone_output[2] && md_psg.tone_counter[2] == 1u)
+            break;
+        md_psg_advance_to(md_psg.next_tick_clock + 1u);
+    }
+    assert(!md_psg.tone_output[2] && md_psg.tone_counter[2] == 1u);
+    periodic_shifts = md_psg.noise_shift_count;
+    md_psg_write(0xE3, md_psg.master_clock); /* Switch one source tick before a rising edge. */
+    md_psg_advance_to(md_psg.next_tick_clock + 1u);
+    assert(md_psg.noise_shift_count == periodic_shifts + 1u);
 }
 
 static void test_psg_attenuation(void)
@@ -626,7 +733,9 @@ int main(void)
     test_ym_timer_a();
     test_ym_timer_pal_period();
     test_ym_timer_b_status();
+    test_ym_timer_b_integral_reload_deadline();
     test_ym_dac_samples();
+    test_ym_dac_enable_uses_latched_data();
     test_ym_algorithm_0();
     test_ym_algorithm_1();
     test_ym_algorithm_2();
@@ -643,8 +752,10 @@ int main(void)
     test_sound_determinism_and_mix();
     test_sound_mixer_source_phase_alignment();
     test_sound_queue_full_wrap_and_empty();
+    test_sound_reset_during_audio_drain();
     test_sound_long_advance_drains_chip_rings();
     test_psg_latch_data();
+    test_psg_latch_continuation_across_frame();
     test_psg_period_zero();
     test_psg_noise_modes_and_tone3_clock();
     test_psg_attenuation();

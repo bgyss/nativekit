@@ -27,6 +27,9 @@ void md_sound_reset(nmd_region region);
 void md_sound_advance_to(uint64_t master_clock);
 int md_sound_audio_take(int16_t *samples, int max_frames);
 int md_sound_audio_queued(void);
+#ifdef NMD_TESTING
+extern void (*md_sound_audio_take_test_hook)(void);
+#endif
 
 void md_ym_reset(nmd_region region);
 uint8_t md_ym_read(uint8_t port, uint64_t clock);

@@ -285,9 +285,16 @@ static void md_write8(uint32_t addr, uint8_t value, int z80_access)
         return;
     }
 
-    if (addr == 0xA06000u || addr == 0xA06001u ||
-        (addr >= 0xA10000u && addr <= 0xA1001Fu))
-        return; /* mapped writes; chip state belongs to later stages */
+    if (addr == 0xA06000u) {
+        if (!md_z80_busack)
+            nk_fatal("68000 bank-register write at $%06X without BUSREQ acknowledgement",
+                     (unsigned)addr);
+        md_z80_bank_serial_write(value);
+        return;
+    }
+
+    if (addr == 0xA06001u || (addr >= 0xA10000u && addr <= 0xA1001Fu))
+        return; /* the low data lane and unimplemented peripheral writes are open */
 
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_port(addr);
@@ -342,9 +349,16 @@ static void md_write16(uint32_t addr, uint16_t value)
         return;
     }
 
-    if (addr == 0xA06000u ||
-        (addr >= 0xA10000u && addr <= 0xA1001Eu))
-        return; /* mapped writes; chip state belongs to later stages */
+    if (addr == 0xA06000u) {
+        if (!md_z80_busack)
+            nk_fatal("68000 bank-register write at $%06X without BUSREQ acknowledgement",
+                     (unsigned)addr);
+        md_z80_bank_serial_write((uint8_t)(value >> 8));
+        return;
+    }
+
+    if (addr >= 0xA10000u && addr <= 0xA1001Eu)
+        return; /* unimplemented peripheral writes are open */
 
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_word_port(addr);

@@ -35,11 +35,12 @@ target_link_libraries(render_check PRIVATE nmd)
 set_target_properties(render_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
 add_executable(z80_check unit/z80_check.c)
-target_include_directories(z80_check PRIVATE ../src/console)
+target_include_directories(z80_check PRIVATE ../src/console ../src/sound)
 target_link_libraries(z80_check PRIVATE nmd)
 set_target_properties(z80_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
 add_executable(sound_check unit/sound_check.c)
 target_include_directories(sound_check PRIVATE ../src/sound ../src/console)
+target_compile_definitions(sound_check PRIVATE NMD_TESTING)
 target_link_libraries(sound_check PRIVATE nmd)
 set_target_properties(sound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)

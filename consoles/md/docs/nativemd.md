@@ -1,44 +1,46 @@
 # nativemd
 
 `nmd` is nativekit's Sega Mega Drive / Genesis console library. A game supplies
-its reconstructed C and makes the original machine accesses through the public
-`rd8`, `rd16`, `wr8`, and `wr16` calls. The library models access widths, bus
-time, device stalls, and VDP events; it is not a general-purpose 68000
-instruction emulator.
+reconstructed C and makes every 68000 bus access through `rd8`, `rd16`, `wr8`,
+and `wr16`. The model preserves access order, width, master-clock timing, and
+device stalls; it is not a general-purpose 68000 instruction emulator.
 
-## Stage 2 scope
+## Stage 3 scope
 
-Stage 2 covers the base 68000 memory map, shared master-clock scheduling,
-VDP ports and FIFO, VBlank/HBlank interrupts, and Mode 5 VDP output. The
-renderer supports H32/H40, V28/V30, planes A and B, window, scrolling,
-linked sprites, priority, shadow/highlight, and doubled-height interlace mode.
-Display disable, sprite overflow/collision, and odd-field status are modeled.
-Memory-to-VDP DMA, VRAM fill, and VRAM copy are modeled with bus stalls.
+Stage 3 implements the base 68000 and Z80 routine models, shared bus scheduling,
+Z80 BUSREQ/reset and bank-window arbitration, VINT dispatch and return, Mode 5
+VDP output and DMA, H/V interrupts, PSG tone/noise, and YM2612 ports, timers,
+DAC, FM operators, envelopes, algorithms, LFO, channel 3 special frequencies,
+and stereo pan. The 68000 and Z80 share the serial bank register. Controller
+protocol and peripheral work belong to Stage 4.
 
-Z80 instruction execution, YM2612 and SN76489 sound, controller behavior,
-TMSS, SRAM, cartridge mappers, Sega CD, 32X, and SVP are outside this stage.
-Their ports or storage may be decoded where the bus contract requires it, but
-that does not mean those devices are implemented.
+The sound pipeline resamples the two chip streams to `nk_console.audio_hz`,
+adds their already-scaled signed samples with s16 saturation, and queues stereo
+frames in a bounded SPSC ring. `audio_take` drains frames for the host callback;
+`audio_queued` reports the current queue depth. If the host falls behind, the
+producer drops new output frames rather than waiting. Source phase alignment,
+reset-safe drain handoff, wrap behavior, and full/empty handling have named
+unit checks.
 
 ## Build and verify
 
-Run from the repository root inside the configured development environment:
+Run from the repository root inside `nix develop`:
 
 ```sh
 mise run build:null
-mise run test:md-bus
-mise run test:md-vdp
-mise run test:md-dma
-mise run test:md-interrupt
-mise run test:md-render
+mise run build:macos
+mise run tools:md
+mise run test:md-sound
 mise run test:md-rom
 ```
 
-`mise run test:md-rom` builds the local vasm and pinned BlastEm tools, then
-compares shared synthetic cartridges with `nmd`. Focus selected fixtures with
-`mise run test:md-rom -- --only CASE,...`; names are listed in
-`consoles/md/tests/rom/cases.py`. The four candidate-specific differences are
-documented in `consoles/md/tests/rom/KNOWN`.
+The focused checks are `test:md-console`, `test:md-z80`, `test:md-bus`,
+`test:md-interrupt`, `test:md-vdp`, `test:md-dma`, and `test:md-render`.
+`test:md-rom` checks the 56 synthetic cases, exact raw FM and mixed PCM, and
+the mixed audio stream. Six individually reviewed candidate differences remain
+in `consoles/md/tests/rom/KNOWN`. Run `test:md-oracle-smoke` and `test:md-trace`
+when changing the pinned candidate hooks or trace ABI.
 
-BlastEm is a candidate comparison target, not hardware qualification. Keep
-claims tied to the checked cases and their documented limitations.
+BlastEm and its generated traces are exploratory comparison evidence; they do
+not qualify hardware accuracy or title compatibility. Stage 4 and Linux
+verification remain open.

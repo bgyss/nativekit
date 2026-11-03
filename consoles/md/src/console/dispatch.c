@@ -120,9 +120,11 @@ static uint64_t next_event_clock(void)
     uint64_t next_vdp = md_vdp_next_event();
     uint64_t next_dma = md_dma_next_event();
     uint64_t next_ym = md_ym_next_event();
+    uint64_t next_z80 = md_z80_next_event();
     uint64_t next_irq = irq_event_count ? irq_events[0].clock : MD_NEVER;
     uint64_t next = next_vdp < next_dma ? next_vdp : next_dma;
     next = next < next_ym ? next : next_ym;
+    next = next < next_z80 ? next : next_z80;
     return next < next_irq ? next : next_irq;
 }
 

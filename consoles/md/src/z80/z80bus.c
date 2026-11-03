@@ -20,6 +20,11 @@ void md_z80_bus_reset(void)
     z80_bank = 0;
 }
 
+void md_z80_bank_serial_write(uint8_t value)
+{
+    z80_bank = (uint16_t)(((z80_bank >> 1) | ((uint16_t)(value & 1u) << 8)) & 0x01FFu);
+}
+
 static int bank_bus_ready(void *ctx)
 {
     (void)ctx;
@@ -68,7 +73,7 @@ void zwr(uint16_t addr, uint8_t value)
     } else if (addr >= 0x7F10u && addr <= 0x7F17u) {
         md_psg_write(value, md_clock);
     } else if (addr == 0x6000u) {
-        z80_bank = (uint16_t)(((z80_bank >> 1) | ((uint16_t)(value & 1u) << 8)) & 0x01FFu);
+        md_z80_bank_serial_write(value);
     } else if (addr >= 0x8000u) {
         uint32_t mapped;
         (void)nmd_z80_wait_until(bank_bus_ready, NULL);

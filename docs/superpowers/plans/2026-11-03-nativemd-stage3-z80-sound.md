@@ -270,14 +270,32 @@ BlastEm candidate.
   `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`
 - Modify: root `mise.toml` and the MD test runner wiring
 
-- [ ] Ensure every Stage 3 requirement has a named unit or synthetic-ROM case, and every case either
+- [x] Ensure every Stage 3 requirement has a named unit or synthetic-ROM case, and every case either
   matches the candidate or has an individually reviewed `KNOWN` reason.
-- [ ] Run `mise run tools:md`, `mise run test:md-oracle-smoke`, `mise run test:md-rom`, the MD unit
+- [x] Run `mise run tools:md`, `mise run test:md-oracle-smoke`, `mise run test:md-rom`, the MD unit
   checks, and the Stage 0 gates. Record toolchain-limited failures and sample/log paths without
   including user ROM paths.
-- [ ] Request a fresh whole-branch review; resolve Critical/Important findings before Stage 3 is
+- [x] Request a fresh whole-branch review; resolve Critical/Important findings before Stage 3 is
   complete. Do not record the Stage 4 golden master here.
-- [ ] Commit the reviewed Stage 3 result. Stage 4 requires its own plan.
+- [x] Commit the reviewed Stage 3 result. Stage 4 requires its own plan.
+
+Task 7 gate summary (2026-11-03):
+- All 56 synthetic MD cases either match or have one of six individually reviewed `KNOWN` reasons.
+  Raw FM and mixed PCM compare sample-for-sample; approved PSG tone/noise and YM DAC vectors retain
+  their documented bounded tolerance.
+- All eight MD unit tasks, `tools:md`, oracle smoke, trace/ABI, toolchain, feature, and survey checks
+  pass. The fresh review of `8c6b4f5..a096c63` plus pending Task 7 changes found two Critical and
+  six Important issues; every finding was fixed test-first, and the functional gates pass after the
+  fixes.
+- The nine-target build matrix has eight passes. `build:win` is toolchain-limited because the Nix
+  MinGW installation lacks `libmcfgthread.a`; the iOS device build passes despite CoreSimulator
+  service warnings.
+- SNES preservation: 0/2393 golden runs differ; 0/1164 unlisted ROM differences (56 documented
+  known differences); golden timing is 22.0 s CPU against the 23.07 s limit.
+- `mise run test` completes in 458.48 s: the consumer and all script checks pass except four
+  host-dependent checks. The macOS pointer test traps in Launch Services; Metal, GL, and Vulkan
+  overlay tests cannot open a renderer (`vkCreateInstance` returns -9 for Vulkan). The complete
+  check output is retained in the plan's ignored SDD workspace.
 
 ## Source References
 
@@ -288,6 +306,12 @@ BlastEm candidate.
   YM2612 operator/register layout, envelopes/algorithms, and PSG programming.
 - Sega, [IC specifications](https://gendev.spritesmind.net/files/md/tech/Sega%20IC%20specifications%20A4.pdf):
   NTSC/PAL chip-clock signals used to derive rational master-clock conversions.
+- Texas Instruments, [SN76489AN data sheet](https://map.grauw.nl/resources/sound/texas_instruments_sn76489an.pdf):
+  tone/noise registers, continuation bytes, and tone-3 noise-clock selection.
+- Zilog, [Z80 CPU User Manual](https://www.zilog.com/docs/z80/um0080.pdf): RESET state and interrupt
+  modes.
+- Nuked-MD, [YM7101 die reconstruction](https://github.com/nukeykt/Nuked-MD/blob/main/vdp.c):
+  an independent reference for the tone-3 noise edge; no implementation code is copied.
 - Zilog, [Z80 CPU User Manual](https://www.zilog.com/docs/z80/um0080.pdf): Z80 machine cycles,
   interrupt modes, and memory/I/O access timing.
 - Texas Instruments, [SN76489AN data sheet](https://map.grauw.nl/resources/sound/texas_instruments_sn76489an.pdf):

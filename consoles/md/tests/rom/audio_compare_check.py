@@ -25,13 +25,18 @@ def main():
         native_path.write_bytes(native_bytes)
         candidate_path.write_bytes(native_bytes)
         assert rom_run._compare_audio(native_path, candidate_path, 44100) is None
+
+        edge_changed = list(samples)
+        edge_changed[0] += 1
+        edge_changed[-1] -= 1
+        candidate_path.write_bytes(struct.pack("=" + "h" * len(edge_changed), *edge_changed))
+        edge_difference = rom_run._compare_audio(native_path, candidate_path, 44100)
+        assert edge_difference and "sample 0 channel 0" in edge_difference, edge_difference
+        assert rom_run._compare_audio(native_path, candidate_path, 44100,
+                                      allow_tolerance=True) is None
+
         candidate_path.write_bytes(changed_bytes)
-        old_limit = rom_run.AUDIO_PHASE_LIMIT
-        rom_run.AUDIO_PHASE_LIMIT = 0
-        try:
-            difference = rom_run._compare_audio(native_path, candidate_path, 44100)
-        finally:
-            rom_run.AUDIO_PHASE_LIMIT = old_limit
+        difference = rom_run._compare_audio(native_path, candidate_path, 44100)
         assert difference and "sample 17 channel 1" in difference, difference
 
     print("audio_compare_check: ok")

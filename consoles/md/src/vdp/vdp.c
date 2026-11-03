@@ -372,8 +372,10 @@ void md_vdp_advance(uint64_t to_clock)
             if (line == active_lines) {
                 vblank_count++;
                 vint_flag = 1;
-                if (registers[1] & 0x20)
+                if (registers[1] & 0x20) {
                     md_irq_request(6);
+                    md_z80_request_vint();
+                }
                 fifo_drain_all();
             }
 

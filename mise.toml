@@ -99,7 +99,7 @@ run = "cmake -S . -B build/null-vulkan -DNK_CONSOLES=\"snes;md\" -DNK_RENDER=vul
 run = "cmake -S . -B build/x86 -DNK_CONSOLES=\"snes;md\" -DCMAKE_OSX_ARCHITECTURES=x86_64 -DNK_TESTS=ON && cmake --build build/x86 -j8"
 
 [tasks."build:ios"]
-run = "unset LIBRARY_PATH CC CXX MACOSX_DEPLOYMENT_TARGET; PATH=/usr/bin:$PATH cmake -S . -B build/ios -G Xcode -UCMAKE_C_COMPILER -UCMAKE_CXX_COMPILER -UCMAKE_ASM_COMPILER -UCMAKE_OBJC_COMPILER -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DNK_CONSOLES=\"snes;md\" -DNK_HOST=ios -DNK_EXAMPLES=ON && cmake --build build/ios -- -quiet CODE_SIGNING_ALLOWED=NO"
+run = "unset LIBRARY_PATH CC CXX MACOSX_DEPLOYMENT_TARGET; PATH=/usr/bin:$PATH cmake -S . -B build/ios -G Xcode -UCMAKE_C_COMPILER -UCMAKE_CXX_COMPILER -UCMAKE_ASM_COMPILER -UCMAKE_OBJC_COMPILER -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DNK_CONSOLES=\"snes;md\" -DNK_HOST=ios -DNK_EXAMPLES=ON && /usr/bin/xcodebuild -project \"$PWD/build/ios/nativekit.xcodeproj\" -scheme ALL_BUILD -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath \"$PWD/build/ios-derived\" CODE_SIGNING_ALLOWED=NO -quiet"
 
 [tasks."build:none"]
 description = "No host (the app supplies host.h's functions): the library alone"

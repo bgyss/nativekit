@@ -212,6 +212,30 @@ def _z80_psg_noise_case():
     ), (0xE0, 0xE4, 0xF0), 0xA5)
 
 
+def _psg_data_only_volume_case():
+    return Case("sound_psg_data_only_volume", (
+        Operation(WRITE, 1, 0xC00011, 0x90),  # Channel 0, volume latch, full level.
+        Operation(WRITE, 1, 0xC00011, 0x3F),  # Continuation updates volume to mute.
+        Operation(WRITE, 1, 0xC00011, 0x81),  # Tone 0, divisor 1.
+        Operation(WRITE, 1, 0xC00011, 0x00),
+    ), capture_audio=True, capture_frames=1)
+
+
+def _psg_tone3_noise_switch_case():
+    operations = [
+        Operation(WRITE, 1, 0xC00011, 0xC4),  # Tone 3 divider 4.
+        Operation(WRITE, 1, 0xC00011, 0x00),
+        Operation(WRITE, 1, 0xC00011, 0xE0),  # Fixed noise source.
+    ]
+    operations.extend(Operation(READ, 1, 0xE00000) for _ in range(57))
+    operations.extend((
+        Operation(WRITE, 1, 0xC00011, 0xE3),  # Select tone-3 noise clock mid-period.
+        Operation(WRITE, 1, 0xC00011, 0xF0),  # Make noise audible.
+    ))
+    return Case("sound_psg_tone3_noise_switch", tuple(operations),
+                capture_audio=True, capture_frames=1)
+
+
 def _ym_write_register(bank, address, value):
     port = 0xA04000 + (bank * 2)
     return (Operation(WRITE, 1, port, address),
@@ -385,6 +409,7 @@ def all_cases():
         Operation(WRITE, 1, 0xFF0010, 0x00),
         Operation(READ, 1, 0xFF0010),
     )), _z80_bank_window_case(), _z80_psg_tone_case(), _z80_psg_noise_case(),
+    _psg_data_only_volume_case(), _psg_tone3_noise_switch_case(),
     *_ym_sound_cases(), Case("tas_write", (
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),

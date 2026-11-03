@@ -21,6 +21,7 @@ fatal_cases = {
     "z80-without-busreq": "without BUSREQ",
     "z80-word": "word access to 8-bit Z80 RAM",
     "ym-without-busreq": "without BUSREQ acknowledgement",
+    "bank-without-busreq": "bank-register write at $A06000 without BUSREQ acknowledgement",
     "vdp-word-read-0a": "prohibited VDP word read",
     "vdp-word-read-d-0a": "prohibited VDP word read",
     "vdp-byte-read-0a": "VDP read state is not implemented",

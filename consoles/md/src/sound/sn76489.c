@@ -91,17 +91,26 @@ static void sample_push(int16_t sample)
 
 static void psg_tick(void)
 {
+    int tone3_rising = 0;
     unsigned channel;
 
     for (channel = 0; channel < 3; channel++) {
+        uint8_t old_output = md_psg.tone_output[channel];
         if (md_psg.tone_counter[channel])
             md_psg.tone_counter[channel]--;
         if (!md_psg.tone_counter[channel]) {
             md_psg.tone_counter[channel] = md_psg.tone_period[channel];
             md_psg.tone_output[channel] ^= 1u;
         }
+        if (channel == 2u && !old_output && md_psg.tone_output[channel])
+            tone3_rising = 1;
     }
-    noise_tick();
+    if (md_psg.noise_use_tone) {
+        if (tone3_rising)
+            noise_shift();
+    } else {
+        noise_tick();
+    }
     md_psg.sample = current_sample();
     sample_push(md_psg.sample);
     md_psg.sample_count++;
@@ -152,8 +161,6 @@ void md_psg_write(uint8_t value, uint64_t clock)
         } else if (channel < 3u) {
             md_psg.tone_period[channel] = (uint16_t)((md_psg.tone_period[channel] & 0x03F0u) |
                                                      data);
-            if (channel == 2u && md_psg.noise_use_tone)
-                md_psg.noise_period = md_psg.tone_period[2];
         } else {
             md_psg.noise_control = data & 7u;
             md_psg.noise_use_tone = (uint8_t)((data & 3u) == 3u);
@@ -161,11 +168,17 @@ void md_psg_write(uint8_t value, uint64_t clock)
                 (uint16_t)(16u << (md_psg.noise_control & 3u));
             md_psg.noise_lfsr = 0x8000u;
         }
-    } else if (!md_psg.latched_volume && md_psg.latched_channel < 3u) {
+    } else if (md_psg.latched_volume) {
+        md_psg.attenuation[md_psg.latched_channel] = value & 0x0Fu;
+    } else if (md_psg.latched_channel < 3u) {
         channel = md_psg.latched_channel;
         md_psg.tone_period[channel] = (uint16_t)((md_psg.tone_period[channel] & 0x000Fu) |
                                                  ((uint16_t)(value & 0x3Fu) << 4));
-        if (channel == 2u && md_psg.noise_use_tone)
-            md_psg.noise_period = md_psg.tone_period[2];
+    } else {
+        md_psg.noise_control = value & 7u;
+        md_psg.noise_use_tone = (uint8_t)((md_psg.noise_control & 3u) == 3u);
+        md_psg.noise_period = md_psg.noise_use_tone ? md_psg.tone_period[2] :
+            (uint16_t)(16u << (md_psg.noise_control & 3u));
+        md_psg.noise_lfsr = 0x8000u;
     }
 }

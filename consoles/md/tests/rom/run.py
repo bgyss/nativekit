@@ -357,7 +357,7 @@ def _compare_picture(native_path, candidate_path):
 
 
 def _compare_audio(native_path, candidate_path, sample_rate, chip="PSG",
-                   ignore_start_frames=0):
+                   ignore_start_frames=0, allow_tolerance=False):
     native = native_path.read_bytes()
     candidate = candidate_path.read_bytes()
     if len(native) != len(candidate):
@@ -367,6 +367,16 @@ def _compare_audio(native_path, candidate_path, sample_rate, chip="PSG",
     native_samples = struct.unpack("=" + "h" * (len(native) // 2), native)
     candidate_samples = struct.unpack("=" + "h" * (len(candidate) // 2), candidate)
     frame_count = len(native_samples) // 2
+    if not allow_tolerance:
+        for frame in range(max(0, ignore_start_frames), frame_count):
+            for channel in range(2):
+                native_sample = native_samples[frame * 2 + channel]
+                candidate_sample = candidate_samples[frame * 2 + channel]
+                if native_sample != candidate_sample:
+                    return (f"{chip} sample {frame} channel {channel} at {sample_rate:g} Hz: "
+                            f"native {native_sample}, candidate {candidate_sample}; exact PCM")
+        return None
+
     # The source resamplers have different startup latency. Register writes
     # are paired separately; allow only a short output-phase shift and small
     # filter-edge differences in the PCM stream.
@@ -544,12 +554,16 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         if case.capture_audio:
             difference = _compare_audio(native_psg,
                                         oracle_out / psg_stream["file"], psg_rate,
-                                        chip="PSG")
+                                        chip="PSG",
+                                        allow_tolerance=(case.name in {
+                                            "sound_psg_tone", "sound_psg_noise"}))
             if difference:
                 return difference
         if case.capture_ym_audio:
             difference = _compare_audio(native_ym, oracle_out / ym_source_streams["ym2612"]["file"],
-                                        ym_rate, chip="YM2612")
+                                        ym_rate, chip="YM2612",
+                                        ignore_start_frames=16 if case.name == "sound_ym_dac" else 0,
+                                        allow_tolerance=(case.name == "sound_ym_dac"))
             if difference:
                 return difference
         if case.capture_mixed_audio:

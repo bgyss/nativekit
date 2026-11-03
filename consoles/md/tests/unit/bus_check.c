@@ -41,6 +41,10 @@ static int fail_if_fatal_mode_returns(const char *mode)
         wr16(0xA11100, 0x0000);
         (void)rd8(0xA04000);
     }
+    else if (!strcmp(mode, "bank-without-busreq")) {
+        wr16(0xA11100, 0x0000);
+        wr8(0xA06000, 1);
+    }
     else if (!strcmp(mode, "vdp-word-read-0a"))
         (void)rd16(0xC0000A);
     else if (!strcmp(mode, "vdp-word-read-d-0a"))

@@ -7,6 +7,7 @@
 #include <nmd/z80.h>
 
 #include "md_internal.h"
+#include "sound.h"
 
 static const uint8_t rom[0x400] = { 0 };
 static uint8_t dma_rom[0x400];
@@ -25,6 +26,20 @@ static int boundary_start_access;
 static uint8_t dma_bank_value;
 static unsigned dma_busy_when_bank_read;
 static unsigned dma_bank_done;
+static uint8_t m68k_bank_value;
+static uint64_t z80_write_clocks[8];
+static unsigned z80_write_clock_count;
+static uint64_t dma_bank_read_clock;
+static unsigned dma_bank_trace_count;
+static unsigned z80_vint_started;
+static unsigned z80_vint_count;
+static unsigned z80_vint_resumed;
+static uint8_t z80_vint_iff1_at_entry;
+static uint8_t z80_vint_iff2_at_entry;
+static uint16_t z80_vint_pc_at_entry;
+static int z80_vint_enable_on_start;
+static int z80_vint_mode_on_start;
+static int z80_vint_continue;
 
 static void vdp_register_write(unsigned reg, uint8_t value);
 
@@ -100,6 +115,61 @@ static void dma_bank_entry(void)
     nmd_z80_wait_until(never, NULL);
 }
 
+static void m68k_bank_entry(void)
+{
+    m68k_bank_value = zrd(0x8000);
+    nmd_z80_wait_until(never, NULL);
+}
+
+static void clocked_write_entry(void)
+{
+    unsigned i;
+    for (i = 0; i < 5u; i++)
+        zwr(0x7F11, (uint8_t)(0x90u + i));
+    nmd_z80_wait_until(never, NULL);
+}
+
+static void z80_vint_main_entry(void)
+{
+    z80_vint_started++;
+    nmd_z80.im = (uint8_t)z80_vint_mode_on_start;
+    nmd_z80.i = 0x12;
+    nmd_z80.iff1 = (uint8_t)z80_vint_enable_on_start;
+    nmd_z80.iff2 = (uint8_t)z80_vint_enable_on_start;
+    nmd_z80.pc = 0x0010;
+    (void)nmd_z80_wait_until(ready_flag, &z80_vint_continue);
+    z80_vint_resumed++;
+    nmd_z80_wait_until(never, NULL);
+}
+
+static void z80_vint_handler(void)
+{
+    z80_vint_count++;
+    z80_vint_iff1_at_entry = nmd_z80.iff1;
+    z80_vint_iff2_at_entry = nmd_z80.iff2;
+    z80_vint_pc_at_entry = nmd_z80.pc;
+}
+
+static void record_z80_write_clock(uint64_t clock, uint8_t operation,
+                                   uint8_t width, uint32_t addr, uint32_t value)
+{
+    (void)value;
+    if (operation == MD_Z80_TRACE_WRITE && width == 1 && addr == 0x7F11u) {
+        assert(z80_write_clock_count < sizeof z80_write_clocks / sizeof z80_write_clocks[0]);
+        z80_write_clocks[z80_write_clock_count++] = clock;
+    }
+}
+
+static void record_dma_bank_read(uint64_t clock, uint8_t operation,
+                                 uint8_t width, uint32_t addr, uint32_t value)
+{
+    (void)value;
+    if (operation == MD_Z80_TRACE_READ && width == 1 && addr == 0x8000u) {
+        dma_bank_read_clock = clock;
+        dma_bank_trace_count++;
+    }
+}
+
 static void unmapped_entry(void)
 {
     (void)zrd(0x2000);
@@ -124,6 +194,17 @@ static const nmd_z80_routine boundary_routines[] = {
 };
 static const nmd_z80_routine dma_bank_routines[] = {
     { 0x0000, dma_bank_entry, "dma_bank_entry" },
+};
+static const nmd_z80_routine m68k_bank_routines[] = {
+    { 0x0000, m68k_bank_entry, "m68k_bank_entry" },
+};
+static const nmd_z80_routine clocked_write_routines[] = {
+    { 0x0000, clocked_write_entry, "clocked_write_entry" },
+};
+static const nmd_z80_routine z80_vint_routines[] = {
+    { 0x0000, z80_vint_main_entry, "z80_vint_main_entry" },
+    { 0x0020, z80_vint_handler, "z80_vint_im2_handler" },
+    { 0x0038, z80_vint_handler, "z80_vint_handler" },
 };
 static const nmd_z80_routine unmapped_routines[] = {
     { 0x0000, unmapped_entry, "unmapped_entry" },
@@ -163,6 +244,33 @@ static nmd_cart dma_bank_cart = {
     .rom_size = sizeof dma_rom,
     .z80_routines = dma_bank_routines,
     .z80_routine_count = sizeof dma_bank_routines / sizeof dma_bank_routines[0],
+};
+
+static nmd_cart m68k_bank_cart = {
+    .title = "68000 Z80 bank-register check",
+    .region = NMD_NTSC,
+    .rom = rom,
+    .rom_size = sizeof rom,
+    .z80_routines = m68k_bank_routines,
+    .z80_routine_count = sizeof m68k_bank_routines / sizeof m68k_bank_routines[0],
+};
+
+static nmd_cart clocked_write_cart = {
+    .title = "Z80 coarse/fine clock check",
+    .region = NMD_NTSC,
+    .rom = rom,
+    .rom_size = sizeof rom,
+    .z80_routines = clocked_write_routines,
+    .z80_routine_count = sizeof clocked_write_routines / sizeof clocked_write_routines[0],
+};
+
+static nmd_cart z80_vint_cart = {
+    .title = "Z80 VINT check",
+    .region = NMD_NTSC,
+    .rom = rom,
+    .rom_size = sizeof rom,
+    .z80_routines = z80_vint_routines,
+    .z80_routine_count = sizeof z80_vint_routines / sizeof z80_vint_routines[0],
 };
 
 static nmd_cart unmapped_cart = {
@@ -214,7 +322,7 @@ static void test_z80_memory_map_and_bank_window(void)
 
     assert(map_ram_before == 0);
     assert(map_ram_after == 0xA5);
-    assert(map_ym_status == 0);
+    assert(map_ym_status & 0x80u); /* The data write's busy window is still active. */
     assert(bank_window_value == 0xC3); /* Nine bits select $E00000. */
     assert(rd8(0xE00001) == 0x44); /* $8001 maps to $E00001. */
     wr16(0xA11200, 0x0000);
@@ -224,7 +332,8 @@ static void test_z80_memory_map_and_bank_window(void)
     }
     wr8(0xA04000, 0x22);
     wr8(0xA04001, 0x55);
-    assert(rd8(0xA04000) == map_ym_status); /* Both CPUs share YM status. */
+    assert((rd8(0xA04000) & 0x7Fu) == (map_ym_status & 0x7Fu));
+    /* Both CPUs see the same sticky status bits; the busy bit is time-dependent. */
     wr16(0xA11100, 0x0000);
 }
 
@@ -282,12 +391,14 @@ static void vdp_register_write(unsigned reg, uint8_t value)
     wr16(0xC00004, (uint16_t)(0x8000u | (reg << 8) | value));
 }
 
-static void test_z80_bank_window_waits_for_dma(void)
+static uint64_t run_z80_bank_window_dma_case(int stepwise)
 {
     unsigned i;
 
     memset(dma_rom, 0, sizeof dma_rom);
     dma_rom[0] = 0x5A;
+    dma_bank_done = 0;
+    dma_bank_trace_count = 0;
     nmd_power(&dma_bank_cart);
     vdp_register_write(1, 0x44); /* Display on; DMA temporarily disabled. */
     vdp_register_write(12, 0);
@@ -303,14 +414,134 @@ static void test_z80_bank_window_waits_for_dma(void)
     md_dma_start(md_clock); /* Hold the 68000 bus across the Z80 bank read. */
     assert(md_dma_bus_owned());
 
+    md_z80_bus_trace_hook = record_dma_bank_read;
     wr16(0xA11200, 0x0100);
     wr16(0xA11100, 0x0000);
-    for (i = 0; i < 2000 && !dma_bank_done; i++)
-        md_advance_to(md_clock + 15);
+    if (stepwise) {
+        for (i = 0; i < 2000 && !dma_bank_done; i++)
+            md_advance_to(md_clock + 15);
+    } else {
+        md_advance_to(md_clock + 2000);
+    }
+    md_z80_bus_trace_hook = NULL;
 
     assert(dma_bank_done == 1);
     assert(dma_busy_when_bank_read == 0);
     assert(dma_bank_value == 0x5A);
+    assert(dma_bank_trace_count == 1u);
+    return dma_bank_read_clock;
+}
+
+static void test_z80_bank_window_waits_for_dma(void)
+{
+    uint64_t coarse_clock = run_z80_bank_window_dma_case(0);
+    uint64_t fine_clock = run_z80_bank_window_dma_case(1);
+
+    assert(coarse_clock == fine_clock);
+}
+
+static void test_68000_programs_z80_bank_register(void)
+{
+    const uint16_t bank = 0x01C0;
+    unsigned bit;
+
+    m68k_bank_value = 0;
+    nmd_power(&m68k_bank_cart);
+    wr8(0xE00000, 0xA5); /* Bank $1C0 reaches this work-RAM byte. */
+    for (bit = 0; bit < 9u; bit++) {
+        uint8_t value = (uint8_t)((bank >> bit) & 1u);
+        if (bit & 1u)
+            wr8(0xA06000, value);
+        else
+            wr16(0xA06000, (uint16_t)value << 8);
+    }
+    wr16(0xA11200, 0x0100);
+    wr16(0xA11100, 0x0000);
+    md_advance_to(md_clock + 1000u);
+    assert(m68k_bank_value == 0xA5);
+}
+
+static int capture_z80_write_clocks(int stepwise, uint64_t *clocks, int16_t *pcm)
+{
+    uint64_t start;
+    unsigned i;
+    const uint64_t end_offset = 70000u;
+
+    z80_write_clock_count = 0;
+    md_z80_bus_trace_hook = record_z80_write_clock;
+    nmd_power(&clocked_write_cart);
+    wr16(0xA11200, 0x0100);
+    wr16(0xA11100, 0x0000);
+    start = md_clock;
+    if (stepwise) {
+        for (i = 1; i <= 1000u; i++)
+            md_advance_to(start + i);
+        for (i = 1015u; i < end_offset; i += 15u)
+            md_advance_to(start + i);
+        md_advance_to(start + end_offset);
+    } else {
+        md_advance_to(start + end_offset);
+    }
+    md_z80_bus_trace_hook = NULL;
+    assert(z80_write_clock_count == 5u);
+    memcpy(clocks, z80_write_clocks, sizeof z80_write_clocks[0] * 5u);
+    return md_sound_audio_take(pcm, 256);
+}
+
+static void test_z80_bus_timestamps_ignore_caller_step_size(void)
+{
+    uint64_t coarse[5], fine[5];
+    int16_t coarse_pcm[512], fine_pcm[512];
+    int coarse_frames, fine_frames;
+    unsigned i;
+
+    coarse_frames = capture_z80_write_clocks(0, coarse, coarse_pcm);
+    fine_frames = capture_z80_write_clocks(1, fine, fine_pcm);
+    for (i = 0; i < 5u; i++)
+        assert(coarse[i] == fine[i]);
+    assert(coarse_frames > 0 && coarse_frames == fine_frames);
+    assert(memcmp(coarse_pcm, fine_pcm,
+                  (size_t)coarse_frames * 2u * sizeof coarse_pcm[0]) == 0);
+}
+
+static void test_z80_vint_mask_busreq_and_return(void)
+{
+    z80_vint_mode_on_start = 1;
+    z80_vint_enable_on_start = 0;
+    z80_vint_started = z80_vint_count = z80_vint_resumed = 0;
+    z80_vint_continue = 0;
+    nmd_power(&z80_vint_cart);
+    md_vdp_set_register(1, 0x20); /* Enable VDP VINT. */
+    wr16(0xA11200, 0x0100);
+    wr16(0xA11100, 0x0000);
+    assert(z80_vint_started == 1);
+    md_advance_to(md_vdp_next_vblank_clock());
+    assert(z80_vint_count == 0); /* IFF1 masks the first VINT. */
+
+    z80_vint_enable_on_start = 1;
+    z80_vint_mode_on_start = 2;
+    z80_vint_started = z80_vint_count = z80_vint_resumed = 0;
+    z80_vint_continue = 0;
+    nmd_power(&z80_vint_cart);
+    md_vdp_set_register(1, 0x20);
+    wr8(0xA012FF, 0x20); /* IM2 vector at I:$FF points to the registered $0020 routine. */
+    wr8(0xA01300, 0x00);
+    wr16(0xA11200, 0x0100);
+    assert(z80_vint_started == 0); /* BUSREQ still holds the Z80. */
+    md_advance_to(md_vdp_next_vblank_clock());
+    assert(z80_vint_count == 0); /* The VINT waits while BUSREQ owns the bus. */
+
+    wr16(0xA11100, 0x0000);
+    md_advance_to(md_clock + 100u); /* IM2 vector reads consume Z80 bus cycles. */
+    assert(z80_vint_started == 1);
+    assert(z80_vint_count == 1);
+    assert(z80_vint_iff1_at_entry == 0 && z80_vint_iff2_at_entry == 0);
+    assert(z80_vint_pc_at_entry == 0x0020);
+    assert(nmd_z80.pc == 0x0010 && nmd_z80.iff1 && nmd_z80.iff2);
+
+    z80_vint_continue = 1;
+    md_advance_to(md_clock + 15u);
+    assert(z80_vint_resumed == 1); /* The interrupted coroutine continues. */
 }
 
 static void test_reset_busreq_and_resume(void)
@@ -343,9 +574,12 @@ static void test_reset_busreq_and_resume(void)
     assert(nmd_z80.b == 0x99 && nmd_z80.c == 0x11);
     assert(nmd_z80.pc == 0x0010 && restart_count == 1);
 
+    nmd_z80.i = 0x42;
+    nmd_z80.r = 0x99;
     wr16(0xA11200, 0x0000); /* Assert RESET during the running routine. */
     md_advance_to(md_clock + 100);
     assert(nmd_z80.pc == 0 && nmd_z80.iff1 == 0 && nmd_z80.iff2 == 0);
+    assert(nmd_z80.i == 0 && nmd_z80.r == 0);
     wr16(0xA11200, 0x0100);
     md_advance_to(md_clock + 300);
     assert(entry_count == 2 && nmd_z80.a == 0x42);
@@ -387,5 +621,8 @@ int main(int argc, char **argv)
     test_z80_memory_map_and_bank_window();
     test_busreq_acknowledges_at_z80_bus_boundary();
     test_z80_bank_window_waits_for_dma();
+    test_68000_programs_z80_bank_register();
+    test_z80_bus_timestamps_ignore_caller_step_size();
+    test_z80_vint_mask_busreq_and_return();
     return 0;
 }

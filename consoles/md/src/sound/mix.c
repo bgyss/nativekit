@@ -12,6 +12,9 @@
 #define MD_SOUND_PENDING_CAPACITY 8192u
 #define MD_SOUND_MIX_BLOCK 2048
 #define MD_SOUND_ADVANCE_CHUNK_CLOCKS (MD_SOUND_MIX_BLOCK * 240u)
+#define MD_AUDIO_READER_IDLE 0u
+#define MD_AUDIO_READER_ACTIVE 1u
+#define MD_AUDIO_RESET_PENDING 2u
 
 struct md_sound_mixer {
     Resampler *ym;
@@ -28,6 +31,10 @@ static md_sound_mixer *active_mixer;
 static int16_t audio_ring[MD_SOUND_QUEUE_CAPACITY * 2u];
 static atomic_uint audio_read;
 static atomic_uint audio_write;
+static atomic_uint audio_reader_state;
+#ifdef NMD_TESTING
+void (*md_sound_audio_take_test_hook)(void);
+#endif
 static uint64_t sound_clock;
 
 static int16_t float_to_s16(float sample)
@@ -187,6 +194,10 @@ int md_sound_mixer_take(md_sound_mixer *mixer, int16_t *samples,
 
 void md_sound_reset(nmd_region region)
 {
+    unsigned reader_state = atomic_exchange_explicit(&audio_reader_state,
+        MD_AUDIO_RESET_PENDING, memory_order_acq_rel);
+    uint32_t write;
+
     md_ym_reset(region);
     md_psg_reset(region);
     md_sound_mixer_destroy(active_mixer);
@@ -194,9 +205,12 @@ void md_sound_reset(nmd_region region)
                                          MD_SOUND_OUTPUT_RATE);
     if (!active_mixer)
         nk_fatal("cannot create sound resamplers");
-    memset(audio_ring, 0, sizeof audio_ring);
-    atomic_store_explicit(&audio_read, 0, memory_order_relaxed);
-    atomic_store_explicit(&audio_write, 0, memory_order_relaxed);
+    if (reader_state == MD_AUDIO_READER_IDLE) {
+        write = atomic_load_explicit(&audio_write, memory_order_acquire);
+        atomic_store_explicit(&audio_read, write, memory_order_release);
+        atomic_store_explicit(&audio_reader_state, MD_AUDIO_READER_IDLE,
+                              memory_order_release);
+    }
     sound_clock = 0;
 }
 
@@ -205,6 +219,10 @@ static void queue_output(const int16_t *samples, int frames)
     uint32_t write = atomic_load_explicit(&audio_write, memory_order_relaxed);
     uint32_t read = atomic_load_explicit(&audio_read, memory_order_acquire);
     int i;
+
+    if (atomic_load_explicit(&audio_reader_state, memory_order_acquire) ==
+        MD_AUDIO_RESET_PENDING)
+        return; /* Let a drain that crossed reset retire before reusing ring slots. */
 
     for (i = 0; i < frames; i++) {
         if (write - read >= MD_SOUND_QUEUE_CAPACITY)
@@ -265,12 +283,20 @@ int md_sound_audio_take(int16_t *samples, int max_frames)
 {
     uint32_t read;
     uint32_t write;
+    unsigned expected = MD_AUDIO_READER_IDLE;
     int frames = 0;
 
     if (max_frames < 0 || (max_frames && !samples))
         nk_fatal("invalid console audio drain buffer");
+    if (!atomic_compare_exchange_strong_explicit(&audio_reader_state, &expected,
+            MD_AUDIO_READER_ACTIVE, memory_order_acq_rel, memory_order_acquire))
+        return 0;
     read = atomic_load_explicit(&audio_read, memory_order_relaxed);
     write = atomic_load_explicit(&audio_write, memory_order_acquire);
+#ifdef NMD_TESTING
+    if (md_sound_audio_take_test_hook)
+        md_sound_audio_take_test_hook();
+#endif
     while (read != write && frames < max_frames) {
         uint32_t index = read % MD_SOUND_QUEUE_CAPACITY;
         samples[frames * 2] = audio_ring[index * 2u];
@@ -279,11 +305,25 @@ int md_sound_audio_take(int16_t *samples, int max_frames)
         frames++;
     }
     atomic_store_explicit(&audio_read, read, memory_order_release);
+    expected = MD_AUDIO_READER_ACTIVE;
+    if (!atomic_compare_exchange_strong_explicit(&audio_reader_state, &expected,
+            MD_AUDIO_READER_IDLE, memory_order_acq_rel, memory_order_acquire)) {
+        uint32_t reset_read = atomic_load_explicit(&audio_write, memory_order_acquire);
+        atomic_store_explicit(&audio_read, reset_read, memory_order_release);
+        if (frames)
+            memset(samples, 0, (size_t)frames * 2u * sizeof *samples);
+        atomic_store_explicit(&audio_reader_state, MD_AUDIO_READER_IDLE,
+                              memory_order_release);
+        return 0;
+    }
     return frames;
 }
 
 int md_sound_audio_queued(void)
 {
+    if (atomic_load_explicit(&audio_reader_state, memory_order_acquire) ==
+        MD_AUDIO_RESET_PENDING)
+        return 0;
     uint32_t write = atomic_load_explicit(&audio_write, memory_order_acquire);
     uint32_t read = atomic_load_explicit(&audio_read, memory_order_acquire);
     return (int)(write - read);

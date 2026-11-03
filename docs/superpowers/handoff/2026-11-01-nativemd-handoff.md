@@ -9,17 +9,21 @@ The two documents it builds on are:
 - **Spec (approved):** `docs/superpowers/specs/2026-11-01-nativemd-design.md`
 - **Stage 0 plan (completed):** `docs/superpowers/plans/2026-11-01-nativemd-stage0-kit.md`
 
-**Current state (2026-11-03):** Stages 0-2 and Stage 3 Tasks 1-6 are complete for their stated
-scopes. Stage 3 now includes the native Z80 coroutine, memory map, serial bank window, bus
-arbitration, PSG tone/noise, YM2612 ports/timers/DAC, six-channel FM operators and envelopes, and a
-bounded chip mixer feeding the console audio queue. Raw source streams from both chips are compared
-before BlastEm's host audio filtering. All 54 MD ROM cases pass or remain individually documented
-candidate differences; four known differences remain. YM vectors cover all eight algorithms,
-envelope key-on/off, channel 3 special frequencies/LFO and envelope key scaling, stereo pan, and DAC;
-the mixed PSG/YM vector covers the sample mixer.
-Task 7's full Stage 3 gates and whole-branch review remain open. BlastEm remains a candidate oracle,
-not a hardware qualification result. Continue with Task 7 in
-`docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
+**Current state (2026-11-03):** Stages 0-2 and Stage 3 Tasks 1-7 are complete for their stated
+scopes. Stage 3 includes the native Z80 coroutine, memory map, serial bank window, shared-bus
+arbitration, VINT dispatch, PSG tone/noise, YM2612 ports/timers/DAC/FM, and a bounded stereo mixer
+with reset-safe host draining. All 56 MD ROM cases either match or have an individually reviewed
+`KNOWN` reason; six candidate differences remain. Raw FM and mixed audio compare sample-for-sample;
+the explicitly approved PSG tone/noise and YM DAC vectors retain bounded phase/error tolerances.
+All eight MD unit tasks, oracle smoke, trace ABI, toolchain, feature, survey, and ROM checks pass.
+
+The Stage 0 preservation gates pass for golden comparison (0/2393), SNES ROM comparison
+(0/1164 unlisted differences; 56 documented known), and timing (22.0 s CPU against the 23.07 s
+limit). Eight of the nine build targets pass; the Windows cross-build is limited by the Nix MinGW
+installation missing `libmcfgthread.a`. The consumer passes and the full `mise run test` completes,
+with four host-dependent checks unable to run: the macOS pointer test traps in Launch Services and
+the Metal, GL, and Vulkan overlay tests cannot open a renderer. BlastEm remains a candidate oracle,
+not a hardware qualification result. Continue by creating a separate Stage 4 plan.
 
 Read the spec first, then this handoff, then the stage 0 plan.
 
@@ -56,10 +60,10 @@ Success, from the spec:
 
 ## 2. Where to start
 
-Stages 0 and 1 are complete for their recorded scopes. Stage 1 evidence and limitations are in
+Stages 0-3 are complete for their recorded scopes. Stage 1 evidence and limitations are in
 `docs/superpowers/plans/2026-11-01-nativemd-stage1-oracle.md` and its SDD ledger; Stage 2
-implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage2-bus-vdp.md`.
-Continue with Task 7 of the Stage 3 Z80 and sound plan above.
+implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage2-bus-vdp.md`;
+Stage 3 implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
 
 1. From the repository root, use the `nativemd` branch.
 2. `nix develop`. Run everything inside it, and use the mise tasks.
@@ -67,9 +71,8 @@ Continue with Task 7 of the Stage 3 Z80 and sound plan above.
    asar 1.91 and the patched bsnes oracle, which the SNES checks need.
 4. Ensure the candidate MD tools are present with `mise run tools:md`; `mise run test:md-*`
    covers their synthetic fixtures and survey logic.
-5. Follow the Stage 3 plan task by task. Preserve the separate C-routine Z80 model and candidate
-   trace boundary; do not turn the sound port baseline into a synthesis or qualification claim.
-   Keep later stages ordered and give them their own plans after Stage 3 lands.
+5. Start Stage 4 with its own plan. Preserve the separate C-routine Z80 model and candidate trace
+   boundary; BlastEm comparisons remain exploratory evidence, not hardware qualification.
 
 ### Stage 0 tasks (the plan has the code and the tests for each)
 
@@ -147,9 +150,12 @@ after the previous stage has landed, because each one depends on what the previo
   The bank window costs its real time and stalls the 68000.
 - The SN76489, YM2612, and the bounded audio mixer live in `src/sound/`. The YM2612 models ports,
   timers, busy status, DAC, FM operators/envelopes, algorithms, pan, LFO, and channel 3
-  special-frequency key scaling. Synthetic vectors compare raw per-chip source samples and the
-  mixed stream before BlastEm's host audio filtering. Task 7 still needs the full Stage 3 gate run
-  and whole-branch review; resampling uses `kit/include/nk/resample.h`.
+  special-frequency key scaling. The PSG applies data-only writes to the latched register and clocks
+  tone-driven noise from tone 3 rising edges. Synthetic vectors compare raw FM and mixed PCM exactly
+  before BlastEm's host audio filtering; six individually reviewed candidate differences stay in
+  `consoles/md/tests/rom/KNOWN`. The bounded ring keeps its indices monotonic across reset and makes
+  the host drain discard a previous audio generation. Stage 3's gate evidence and limitations are
+  recorded in its plan and SDD ledger; resampling uses `kit/include/nk/resample.h`.
 
 ### Stage 4: pads, cost profiles, the full comparison, the golden master, and 1.0
 - Pads: 3- and 6-button with TH timing, plus the version register and TMSS (`src/io/`).
