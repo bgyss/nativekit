@@ -200,7 +200,7 @@ static void test_hint_reload_and_hv_counter(void)
     assert(rd8(0xC00008) == (uint8_t)(hv32 >> 8));
     hv32 = md_vdp_hv_counter();
     assert(rd8(0xC00009) == (uint8_t)hv32);
-    md_vdp_set_register(12, 1);
+    md_vdp_set_register(12, 0x81);
     hv40 = md_vdp_hv_counter();
     assert((hv40 & 0xFFu) == 10);
     assert((hv40 >> 8) <= 0x9F);

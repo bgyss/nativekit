@@ -132,7 +132,7 @@ static void test_status_and_hblank(nmd_cart *cart)
     status = rd16(NMD_VDP_CONTROL);
     assert((status & 0x0004) != 0); /* H32 horizontal blank */
     nmd_power(cart);
-    md_vdp_set_register(12, 1);    /* H40 display extends horizontal active scan */
+    md_vdp_set_register(12, 0x81); /* H40 display extends horizontal active scan */
     md_advance_to(3000);
     status = rd16(NMD_VDP_CONTROL);
     assert((status & 0x0004) == 0);

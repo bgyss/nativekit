@@ -46,7 +46,7 @@ def _memory_dma_case(name, write_code, read_code, display=0x14, h40=False, words
         operations.append(_vdp_reg(0, 0x04))  # Select Mode 5 before the display starts.
     operations.extend([
         _vdp_reg(1, display),
-        _vdp_reg(12, int(h40)),
+        _vdp_reg(12, 0x81 if h40 else 0),
         _vdp_reg(15, 2),
         _vdp_reg(19, words & 0xFF),
         _vdp_reg(20, (words >> 8) & 0xFF),
@@ -79,7 +79,7 @@ def _render_scene(name, tile_colors, plane_a_rows=None, plane_b_row=None,
         _vdp_reg(4, 0x03),
         _vdp_reg(7, 0),
         _vdp_reg(11, mode11),
-        _vdp_reg(12, int(h40)),
+        _vdp_reg(12, 0x81 if h40 else 0),
         _vdp_reg(13, 0x2E),
         _vdp_reg(15, 2),
         _vdp_reg(16, plane_size),

@@ -76,7 +76,7 @@ static void test_active_display_dma_wait(nmd_cart *cart, int h40)
 
     nmd_power(cart);
     reg_write(1, 0x54); /* Display and DMA enabled; start in H32 active scan. */
-    reg_write(12, (uint8_t)(h40 != 0));
+    reg_write(12, h40 ? 0x81 : 0);
     reg_write(15, 2);
     reg_write(19, 2);
     reg_write(20, 0);

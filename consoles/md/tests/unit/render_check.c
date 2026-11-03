@@ -1,4 +1,4 @@
-/* Mode 5 plane A converts a tile's four bitplanes through CRAM to ARGB. */
+/* Mode 5 plane A converts packed tile pixels through CRAM to ARGB. */
 #include <assert.h>
 #include <stdint.h>
 
@@ -57,7 +57,7 @@ static void test_picture_dimensions(nmd_cart *cart)
     nmd_power(cart);
     (void)md_vdp_picture(&width, &height);
     assert(width == 256 && height == 224);
-    md_vdp_set_register(12, 1);
+    md_vdp_set_register(12, 0x81);
     (void)md_vdp_picture(&width, &height);
     assert(width == 320 && height == 224);
 
@@ -66,7 +66,7 @@ static void test_picture_dimensions(nmd_cart *cart)
     md_vdp_set_register(1, 0x08);
     (void)md_vdp_picture(&width, &height);
     assert(width == 256 && height == 240);
-    md_vdp_set_register(12, 1);
+    md_vdp_set_register(12, 0x81);
     (void)md_vdp_picture(&width, &height);
     assert(width == 320 && height == 240);
 }
