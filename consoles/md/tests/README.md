@@ -38,3 +38,16 @@ The runner rejects unknown names and reports only the selected cases.
 `rom/KNOWN` lists four reviewed candidate differences: TAS handling and the
 candidate's faster memory-DMA slot cadence. The listed cases remain visible in
 the full run so changes to either side are detected.
+
+## Stage 3 sound vectors
+
+`rom/cases.py` covers YM2612 ports, timers, DAC, all eight FM algorithms,
+key-on/off envelopes, channel 3 special frequencies with LFO and envelope key
+scaling, and stereo pan.
+The runner compares a raw YM source stream captured after the chip's channel
+mix and before BlastEm's host audio filter/resampler. This keeps chip behavior
+separate from host playback processing. Focus a case with, for example:
+
+```sh
+mise run test:md-rom -- --only sound_ym_algorithm_0
+```

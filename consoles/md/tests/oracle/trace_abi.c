@@ -44,6 +44,9 @@ uint64_t nmd_trace_capabilities(void)
 #ifdef NMD_TRACE_HAS_VDP_HINT_LINE
     capabilities |= NMD_TRACE_CAP_VDP_HINT_LINE;
 #endif
+#ifdef NMD_TRACE_HAS_CHIP_AUDIO_SOURCE
+    capabilities |= NMD_TRACE_CAP_CHIP_AUDIO_SOURCE;
+#endif
     return capabilities;
 }
 
@@ -74,6 +77,12 @@ void nmd_trace_audio_emit(uint8_t device, int16_t left, int16_t right)
 {
     if (audio_receiver && (device == NMD_TRACE_YM2612 || device == NMD_TRACE_PSG))
         audio_receiver(audio_receiver_user, device, left, right);
+}
+
+void nmd_trace_audio_source_emit(uint8_t device, int16_t left, int16_t right)
+{
+    if (audio_receiver && device == NMD_TRACE_YM2612)
+        audio_receiver(audio_receiver_user, NMD_TRACE_YM2612_SOURCE, left, right);
 }
 
 void nmd_trace_reset(void)

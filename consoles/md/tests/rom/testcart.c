@@ -399,7 +399,7 @@ static int write_ym_samples(const char *path, double output_rate, unsigned frame
                             uint64_t master_clock)
 {
     Resampler *resampler = NULL;
-    int16_t *mono = NULL, *stereo = NULL, *pcm = NULL;
+    int16_t *stereo = NULL, *pcm = NULL;
     float *output = NULL;
     FILE *file = NULL;
     uint64_t source_count;
@@ -414,27 +414,18 @@ static int write_ym_samples(const char *path, double output_rate, unsigned frame
     if (source_count > INT_MAX)
         return 0;
     source_frames = (int)source_count;
-    mono = (int16_t *)malloc((size_t)source_frames * sizeof *mono);
     stereo = (int16_t *)malloc((size_t)source_frames * 2u * sizeof *stereo);
     output = (float *)malloc((size_t)frames * 2u * sizeof *output);
     pcm = (int16_t *)malloc((size_t)frames * 2u * sizeof *pcm);
-    if (!mono || !stereo || !output || !pcm) {
+    if (!stereo || !output || !pcm) {
         fprintf(stderr, "testcart: cannot allocate YM2612 conversion buffers\n");
         valid = 0;
         goto done;
     }
-    if (md_ym_take_samples(mono, source_frames) != source_frames) {
+    if (md_ym_take_stereo_samples(stereo, source_frames) != source_frames) {
         fprintf(stderr, "testcart: YM2612 source sample count changed while draining\n");
         valid = 0;
         goto done;
-    }
-    for (i = 0; i < source_count; i++) {
-        int32_t channel = mono[i];
-        int32_t offset = channel >= 0 ? 112 : -112;
-        /* Recreate BlastEm's default zero-offset contribution for the other five channels. */
-        int16_t mixed = (int16_t)(5 * 73 + ((channel + offset) * 79) / 120);
-        stereo[i * 2u] = mixed;
-        stereo[i * 2u + 1u] = mixed;
     }
 
     resampler = resample_new(md_ym_source_rate(), output_rate);
@@ -482,10 +473,42 @@ done:
         fclose(file);
     if (resampler)
         resample_free(resampler);
-    free(mono);
     free(stereo);
     free(output);
     free(pcm);
+    return valid;
+}
+
+static int write_ym_source_samples(const char *path, unsigned frames,
+                                   uint64_t render_clock)
+{
+    int16_t *samples;
+    FILE *file;
+    int valid = 1;
+
+    if (!path || !frames || frames > INT_MAX / 2u)
+        return 0;
+    md_ym_advance_to(render_clock);
+    if (md_ym.sample_count < frames)
+        return 0;
+    samples = (int16_t *)malloc((size_t)frames * 2u * sizeof *samples);
+    if (!samples)
+        return 0;
+    if (md_ym_take_stereo_samples(samples, (int)frames) != (int)frames) {
+        free(samples);
+        return 0;
+    }
+    file = fopen(path, "wb");
+    if (!file) {
+        free(samples);
+        return 0;
+    }
+    if (fwrite(samples, sizeof *samples, (size_t)frames * 2u, file) !=
+        (size_t)frames * 2u)
+        valid = 0;
+    if (fclose(file))
+        valid = 0;
+    free(samples);
     return valid;
 }
 
@@ -558,11 +581,13 @@ int main(int argc, char **argv)
     const char *rom_path = NULL, *steps_path = NULL, *picture_path = NULL;
     const char *psg_path = NULL, *psg_event_path = NULL;
     const char *ym_path = NULL, *ym_event_path = NULL;
+    const char *ym_source_path = NULL;
     const char *region = "U";
     unsigned frames = 2;
     unsigned psg_frames = 0;
     double psg_rate = 0;
     unsigned ym_frames = 0;
+    unsigned ym_source_frames = 0;
     double ym_rate = 0;
     uint8_t *rom, *steps;
     size_t rom_size, steps_size;
@@ -586,6 +611,10 @@ int main(int argc, char **argv)
             ym_path = argv[++i];
         else if (!strcmp(argv[i], "--ym-events") && i + 1 < argc)
             ym_event_path = argv[++i];
+        else if (!strcmp(argv[i], "--ym-source-out") && i + 1 < argc)
+            ym_source_path = argv[++i];
+        else if (!strcmp(argv[i], "--ym-source-frames") && i + 1 < argc)
+            ym_source_frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--ym-rate") && i + 1 < argc)
             ym_rate = strtod(argv[++i], NULL);
         else if (!strcmp(argv[i], "--ym-frames") && i + 1 < argc)
@@ -619,8 +648,12 @@ int main(int argc, char **argv)
         fprintf(stderr, "testcart: --ym-out requires --ym-rate and --ym-frames\n");
         return 2;
     }
-    if (ym_event_path && !ym_path) {
-        fprintf(stderr, "testcart: --ym-events requires --ym-out\n");
+    if (ym_event_path && !ym_path && !ym_source_path) {
+        fprintf(stderr, "testcart: --ym-events requires YM audio output\n");
+        return 2;
+    }
+    if (ym_source_path && (!ym_source_frames || !ym_event_path)) {
+        fprintf(stderr, "testcart: --ym-source-out requires --ym-source-frames and --ym-events\n");
         return 2;
     }
 
@@ -682,7 +715,8 @@ int main(int argc, char **argv)
         result = 2;
     }
     if (!result && (picture_path || (psg_path && !psg_event_path) ||
-                    (ym_path && !ym_event_path))) {
+                    (ym_path && !ym_event_path) ||
+                    (ym_source_path && !ym_event_path))) {
         unsigned frame;
         if (!frames || frames > 4) {
             fprintf(stderr, "testcart: frame count must be in 1-4\n");
@@ -704,6 +738,14 @@ int main(int argc, char **argv)
         uint64_t render_clock = end_clock + 64u * 1008u;
         if (!write_ym_samples(ym_path, ym_rate, ym_frames, render_clock)) {
             fprintf(stderr, "testcart: cannot write YM2612 samples %s\n", ym_path);
+            result = 2;
+        }
+    }
+    if (!result && ym_source_path) {
+        uint64_t render_clock = ((uint64_t)ym_source_frames + 64u) * 1008u;
+        if (!write_ym_source_samples(ym_source_path, ym_source_frames, render_clock)) {
+            fprintf(stderr, "testcart: cannot write YM2612 source samples %s\n",
+                    ym_source_path);
             result = 2;
         }
     }

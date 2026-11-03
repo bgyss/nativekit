@@ -19,6 +19,8 @@ TRACE_CHIP_AUDIO = 1 << 7
 TRACE_VDP_DMA_FILL = 1 << 8
 TRACE_VDP_DMA_COPY = 1 << 9
 TRACE_VDP_HINT_LINE = 1 << 10
+TRACE_CHIP_AUDIO_SOURCE = 1 << 11
+YM2612_SOURCE = 6
 
 
 def parse_sram_window(value):
@@ -144,6 +146,7 @@ def main():
     frame_sizes = []
     audio = bytearray()
     chip_audio = {YM2612: bytearray(), PSG: bytearray()}
+    chip_audio_source = {YM2612_SOURCE: bytearray()}
     error = []
     queried = set()
     advertised = {}
@@ -153,6 +156,7 @@ def main():
     trace_file = None
     emit_error = None
     audio_stream_counts = {}
+    audio_source_stream_counts = {}
 
     if args.trace:
         try:
@@ -209,6 +213,9 @@ def main():
             trace_capability_names.append("ym2612_port_write")
         if actual_capabilities & TRACE_CHIP_AUDIO and not args.feature_only:
             trace_capability_names.append("chip_audio")
+        if actual_capabilities & TRACE_CHIP_AUDIO_SOURCE and not args.feature_only:
+            trace_capability_names.append("ym2612_source_samples")
+        if actual_capabilities & (TRACE_CHIP_AUDIO | TRACE_CHIP_AUDIO_SOURCE) and not args.feature_only:
             try:
                 register_chip_audio = core.nmd_trace_audio_register
             except AttributeError as exc:
@@ -217,7 +224,9 @@ def main():
 
             @audio_cb_type
             def on_chip_audio(user, device, left, right):
-                stream = chip_audio.get(device)
+                stream = chip_audio_source.get(device)
+                if stream is None:
+                    stream = chip_audio.get(device)
                 if stream is None:
                     trace_error.append(f"unsupported chip audio device {device}")
                     return
@@ -353,6 +362,13 @@ def main():
                 raise RuntimeError(f"{filename} has {len(samples) // 4} frames; mixed audio has {len(audio) // 4}")
             (args.out / filename).write_bytes(samples)
             audio_stream_counts[device] = len(samples) // 4
+    if (args.trace and not args.feature_only and
+            actual_capabilities & TRACE_CHIP_AUDIO_SOURCE):
+        source_samples = chip_audio_source[YM2612_SOURCE]
+        if not source_samples:
+            raise RuntimeError("core advertises YM2612 source samples but emitted none")
+        (args.out / "ym2612-source.raw").write_bytes(source_samples)
+        audio_source_stream_counts[YM2612_SOURCE] = len(source_samples) // 4
     button_names = {value: name for name, value in buttons.items()}
     recorded_input = {str(frame): {str(port + 1): [button_names[button] for button in sorted(values)]
                                    for port, values in sorted(ports.items())}
@@ -390,6 +406,14 @@ def main():
                 "format": "s16-native-endian-stereo",
                 "sample_rate": info.timing.sample_rate,
                 "chip_processing": "resampled source contribution before final mix and DC blocker",
+            }
+        if audio_source_stream_counts:
+            manifest["audio_source_streams"] = {
+                "ym2612": {"file": "ym2612-source.raw",
+                           "frames": audio_source_stream_counts[YM2612_SOURCE]},
+                "format": "s16-native-endian-stereo",
+                "sample_rate": info.timing.sample_rate,
+                "chip_processing": "YM2612 source sample after channel mix, before host audio filtering",
             }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 

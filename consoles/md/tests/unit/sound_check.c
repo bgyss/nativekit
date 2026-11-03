@@ -133,14 +133,233 @@ static void test_ym_dac_samples(void)
     reset_psg();
     write_ym_register(0, 0x2B, 0x80, 0);
     write_ym_register(0, 0x2A, 0xFF, 0);
-    md_ym_advance_to(1);
+    md_ym_advance_to(967); /* First sample follows 24 operator slots. */
     assert(md_ym_take_samples(samples, 1) == 1);
     assert(samples[0] == 8128);
 
-    write_ym_register(0, 0x2A, 0x00, 1);
-    md_ym_advance_to(1009);
+    write_ym_register(0, 0x2A, 0x00, 967);
+    md_ym_advance_to(1975);
     assert(md_ym_take_samples(samples, 1) == 1);
     assert(samples[0] == -8192);
+}
+
+static void setup_fm_channel(unsigned channel, unsigned algorithm, uint64_t clock)
+{
+    static const uint8_t operator_offsets[4] = { 0, 4, 8, 12 };
+    unsigned bank = channel / 3u;
+    unsigned local = channel % 3u;
+    unsigned slot;
+
+    for (slot = 0; slot < 4; slot++) {
+        uint8_t reg = (uint8_t)(0x30u + local + operator_offsets[slot]);
+        write_ym_register(bank, reg, 0x01, clock); /* MUL=1, no detune. */
+        write_ym_register(bank, (uint8_t)(reg + 0x10u), 0x00, clock); /* TL=0. */
+        write_ym_register(bank, (uint8_t)(reg + 0x20u), 0x1F, clock); /* Fast attack. */
+        write_ym_register(bank, (uint8_t)(reg + 0x30u), 0x00, clock); /* D1R=0. */
+        write_ym_register(bank, (uint8_t)(reg + 0x40u), 0x00, clock); /* D2R=0. */
+        write_ym_register(bank, (uint8_t)(reg + 0x50u), 0x0F, clock); /* SL=0, RR=15. */
+        write_ym_register(bank, (uint8_t)(reg + 0x60u), 0x00, clock); /* SSG-EG off. */
+    }
+    write_ym_register(bank, (uint8_t)(0xA4u + local), 0x22, clock);
+    write_ym_register(bank, (uint8_t)(0xA0u + local), 0x69, clock);
+    write_ym_register(bank, (uint8_t)(0xB0u + local), (uint8_t)algorithm, clock);
+    write_ym_register(bank, (uint8_t)(0xB4u + local), 0xC0, clock); /* Both outputs. */
+    write_ym_register(0, 0x28, (uint8_t)(0xF0u | channel), clock);
+}
+
+static void assert_ym_algorithm_audible(unsigned algorithm)
+{
+    int16_t samples[32];
+    unsigned audible = 0;
+    unsigned i;
+
+    reset_psg();
+    setup_fm_channel(0, algorithm, 0);
+    md_advance_to(32u * 1008u + 1u);
+    assert(md_ym_take_samples(samples, 32) == 32);
+    for (i = 0; i < 32; i++)
+        if (samples[i] != 0)
+            audible++;
+    assert(audible > 8);
+}
+
+static void test_ym_algorithm_0(void)
+{
+    assert_ym_algorithm_audible(0);
+}
+
+static void test_ym_algorithm_1(void)
+{
+    assert_ym_algorithm_audible(1);
+}
+
+static void test_ym_algorithm_2(void)
+{
+    assert_ym_algorithm_audible(2);
+}
+
+static void test_ym_algorithm_3(void)
+{
+    assert_ym_algorithm_audible(3);
+}
+
+static void test_ym_algorithm_4(void)
+{
+    assert_ym_algorithm_audible(4);
+}
+
+static void test_ym_algorithm_5(void)
+{
+    assert_ym_algorithm_audible(5);
+}
+
+static void test_ym_algorithm_6(void)
+{
+    assert_ym_algorithm_audible(6);
+}
+
+static void test_ym_algorithm_7(void)
+{
+    assert_ym_algorithm_audible(7);
+}
+
+static void test_ym_envelope_key_on_off(void)
+{
+    int16_t attack[32], release[128];
+    int attack_peak = 0;
+    int release_peak = 0;
+    unsigned i;
+    uint64_t key_off_clock = 32u * 1008u + 1u;
+
+    reset_psg();
+    setup_fm_channel(0, 7, 0);
+    md_advance_to(key_off_clock);
+    assert(md_ym_take_samples(attack, 32) == 32);
+    for (i = 0; i < 32; i++) {
+        int value = attack[i] < 0 ? -attack[i] : attack[i];
+        if (value > attack_peak)
+            attack_peak = value;
+    }
+    write_ym_register(0, 0x28, 0x00, key_off_clock);
+    md_advance_to(key_off_clock + 128u * 1008u);
+    assert(md_ym_take_samples(release, 128) == 128);
+    for (i = 96; i < 128; i++) {
+        int value = release[i] < 0 ? -release[i] : release[i];
+        if (value > release_peak)
+            release_peak = value;
+    }
+    assert(attack_peak > 0);
+    assert(release_peak < attack_peak);
+}
+
+static void test_ym_channel3_and_lfo(void)
+{
+    int16_t normal[128], special_lfo[128];
+    unsigned i;
+    int differs = 0;
+
+    reset_psg();
+    setup_fm_channel(2, 7, 0);
+    md_advance_to(128u * 1008u + 1u);
+    assert(md_ym_take_samples(normal, 128) == 128);
+
+    reset_psg();
+    setup_fm_channel(2, 7, 0);
+    write_ym_register(0, 0x27, 0x40, 0); /* Channel 3 special frequencies. */
+    write_ym_register(0, 0xA8, 0x58, 0);
+    write_ym_register(0, 0xAC, 0x18, 0);
+    write_ym_register(0, 0xA9, 0x70, 0);
+    write_ym_register(0, 0xAD, 0x20, 0);
+    write_ym_register(0, 0xAA, 0x88, 0);
+    write_ym_register(0, 0xAE, 0x28, 0);
+    write_ym_register(0, 0x22, 0x0F, 0); /* Enable fastest LFO. */
+    write_ym_register(0, 0xB6, 0xF7, 0); /* Full AMS/FMS and both outputs. */
+    md_advance_to(128u * 1008u + 1u);
+    assert(md_ym_take_samples(special_lfo, 128) == 128);
+
+    for (i = 0; i < 128; i++)
+        differs |= normal[i] != special_lfo[i];
+    assert(differs);
+}
+
+static void render_channel3_special_envelope(uint8_t base_block_fnum_high,
+                                             int16_t samples[128])
+{
+    static const uint8_t operator_offsets[4] = { 0, 4, 8, 12 };
+    unsigned slot;
+
+    reset_psg();
+    write_ym_register(0, 0x27, 0x40, 0); /* Channel 3 special frequencies. */
+    for (slot = 0; slot < 4; slot++) {
+        uint8_t reg = (uint8_t)(0x32u + operator_offsets[slot]);
+        write_ym_register(0, reg, 0x01, 0); /* MUL=1. */
+        write_ym_register(0, (uint8_t)(reg + 0x10u), slot == 1u ? 0 : 0x7F, 0);
+        write_ym_register(0, (uint8_t)(reg + 0x20u), 0x15, 0); /* RS=0 bits, AR=21. */
+        write_ym_register(0, (uint8_t)(reg + 0x30u), 0, 0);
+        write_ym_register(0, (uint8_t)(reg + 0x40u), 0, 0);
+        write_ym_register(0, (uint8_t)(reg + 0x50u), 0x0F, 0);
+        write_ym_register(0, (uint8_t)(reg + 0x60u), 0, 0);
+    }
+    write_ym_register(0, 0xA6, base_block_fnum_high, 0);
+    write_ym_register(0, 0xA2, 0x69, 0);
+    write_ym_register(0, 0xB2, 7, 0); /* All unmuted operators are carriers. */
+    write_ym_register(0, 0xB6, 0xC0, 0);
+    write_ym_register(0, 0xAC, 0x00, 0);
+    write_ym_register(0, 0xA8, 0x58, 0); /* Special OP3: block 0. */
+    write_ym_register(0, 0xAD, 0x38, 0);
+    write_ym_register(0, 0xA9, 0x70, 0); /* Special OP2: block 7. */
+    write_ym_register(0, 0xAE, 0x08, 0);
+    write_ym_register(0, 0xAA, 0x88, 0); /* Special OP1: block 1. */
+    write_ym_register(0, 0x28, 0xF2, 0); /* Key on channel 3. */
+    md_ym_advance_to(128u * 1008u + 1u);
+    assert(md_ym_take_samples(samples, 128) == 128);
+}
+
+static void test_ym_channel3_special_envelope_key_scaling(void)
+{
+    int16_t block4[128], block7[128];
+    unsigned i;
+
+    render_channel3_special_envelope(0x24, block4);
+    render_channel3_special_envelope(0x3C, block7);
+    for (i = 0; i < 128; i++)
+        assert(block4[i] == block7[i]);
+}
+
+static void test_ym_stereo_pan(void)
+{
+    int16_t left_only[32u * 2u];
+    int16_t right_only[32u * 2u];
+    int32_t left_energy = 0;
+    int32_t left_leakage = 0;
+    int32_t right_energy = 0;
+    int32_t right_leakage = 0;
+    unsigned i;
+
+    reset_psg();
+    setup_fm_channel(0, 7, 0);
+    write_ym_register(0, 0xB4, 0x80, 0);
+    md_advance_to(32u * 1008u + 1u);
+    assert(md_ym_take_stereo_samples(left_only, 32) == 32);
+
+    reset_psg();
+    setup_fm_channel(0, 7, 0);
+    write_ym_register(0, 0xB4, 0x40, 0);
+    md_advance_to(32u * 1008u + 1u);
+    assert(md_ym_take_stereo_samples(right_only, 32) == 32);
+
+    for (i = 0; i < 32; i++) {
+        int32_t left = left_only[i * 2u];
+        int32_t right = left_only[i * 2u + 1u];
+        int32_t panned_right = right_only[i * 2u + 1u];
+        int32_t panned_left = right_only[i * 2u];
+        left_energy += left < 0 ? -left : left;
+        left_leakage += right < 0 ? -right : right;
+        right_energy += panned_right < 0 ? -panned_right : panned_right;
+        right_leakage += panned_left < 0 ? -panned_left : panned_left;
+    }
+    assert(left_energy > left_leakage);
+    assert(right_energy > right_leakage);
 }
 
 static void test_psg_latch_data(void)
@@ -243,6 +462,18 @@ int main(void)
     test_ym_timer_pal_period();
     test_ym_timer_b_status();
     test_ym_dac_samples();
+    test_ym_algorithm_0();
+    test_ym_algorithm_1();
+    test_ym_algorithm_2();
+    test_ym_algorithm_3();
+    test_ym_algorithm_4();
+    test_ym_algorithm_5();
+    test_ym_algorithm_6();
+    test_ym_algorithm_7();
+    test_ym_envelope_key_on_off();
+    test_ym_channel3_and_lfo();
+    test_ym_channel3_special_envelope_key_scaling();
+    test_ym_stereo_pan();
     test_psg_latch_data();
     test_psg_period_zero();
     test_psg_noise_modes_and_tone3_clock();

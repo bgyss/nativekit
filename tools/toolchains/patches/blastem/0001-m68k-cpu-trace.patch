@@ -2,7 +2,7 @@ diff --git a/Makefile b/Makefile
 index 17ec8e7..834cb77 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -263,6 +263,19 @@ endif
+@@ -263,6 +263,20 @@ endif
  #core, but the two are independent. NEW_Z80 can be set on its own to pair the
  #JIT 68K with the generated Z80, which is useful for narrowing down which core
  #a timing difference comes from.
@@ -18,6 +18,7 @@ index 17ec8e7..834cb77 100644
 +CFLAGS+=-DNMD_TRACE_HAS_VDP_DMA_FILL
 +CFLAGS+=-DNMD_TRACE_HAS_VDP_DMA_COPY
 +CFLAGS+=-DNMD_TRACE_HAS_VDP_HINT_LINE
++CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO_SOURCE
 +endif
  ifdef NEW_CORE
  NEW_Z80:=1
@@ -451,6 +452,12 @@ index c2973d1..c4332a7 100644
  
  //#define DO_DEBUG_PRINT
  #ifdef DO_DEBUG_PRINT
+@@ -499,1 +500,4 @@ void ym_output_sample(ym2612_context *context)
+-	render_put_stereo_sample(context->audio, left, right);
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++	nmd_trace_audio_source_emit(NMD_TRACE_YM2612, left, right);
++#endif
++	render_put_stereo_sample(context->audio, left, right);
 @@ -702,6 +703,8 @@ void ym_data_write(ym2612_context * context, uint8_t value)
  	}
  	uint8_t buffer[3] = {context->selected_part, context->selected_reg, value};

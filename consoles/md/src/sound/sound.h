@@ -12,6 +12,7 @@ void md_ym_write(uint8_t port, uint8_t value, uint64_t clock);
 void md_ym_advance_to(uint64_t master_clock);
 uint64_t md_ym_next_event(void);
 int md_ym_take_samples(int16_t *samples, int max_samples);
+int md_ym_take_stereo_samples(int16_t *samples, int max_frames);
 double md_ym_source_rate(void);
 
 typedef struct md_ym_state {

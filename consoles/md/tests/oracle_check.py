@@ -257,8 +257,16 @@ released:
     with (out / "bus.trace").open("rb") as f:
         events = list(read_trace(f))
     bus_manifest = json.loads((out / "manifest.json").read_text())
-    if bus_manifest.get("trace_capabilities") != ["m68k_cpu_access", "z80_cpu_access", "vdp_port", "vdp_68k_dma_source", "vdp_dma_fill", "vdp_dma_copy", "vdp_hint_lines", "psg_write", "ym2612_write", "ym2612_port_write", "chip_audio"] or bus_manifest.get("trace_events") != len(events):
+    if bus_manifest.get("trace_capabilities") != ["m68k_cpu_access", "z80_cpu_access", "vdp_port", "vdp_68k_dma_source", "vdp_dma_fill", "vdp_dma_copy", "vdp_hint_lines", "psg_write", "ym2612_write", "ym2612_port_write", "chip_audio", "ym2612_source_samples"] or bus_manifest.get("trace_events") != len(events):
         sys.exit("oracle_check: trace coverage metadata mismatch")
+    ym_source = bus_manifest.get("audio_source_streams", {})
+    ym_source_data = ym_source.get("ym2612", {})
+    ym_source_path = out / ym_source_data.get("file", "")
+    if (ym_source.get("format") != "s16-native-endian-stereo" or
+            ym_source.get("sample_rate", 0) <= 0 or ym_source_data.get("frames", 0) <= 0 or
+            not ym_source_path.is_file() or
+            ym_source_path.stat().st_size != ym_source_data["frames"] * 4):
+        sys.exit("oracle_check: raw YM source-sample stream metadata mismatch")
     if not any(e.device == M68K and e.operation == WRITE and e.address == 0xFF0000 and e.value == 0x1234
                for e in events):
         sys.exit("oracle_check: missing work-RAM write event")
@@ -595,7 +603,7 @@ released:
     if survey_manifest.get("trace_scope") != "survey-feature-filter-v1":
         sys.exit("oracle_check: feature-only trace scope missing")
     if any((survey_out / filename).exists() for filename in
-           ("frame_000001.ppm", "audio.raw", "ym2612.raw", "psg.raw")):
+           ("frame_000001.ppm", "audio.raw", "ym2612.raw", "psg.raw", "ym2612-source.raw")):
         sys.exit("oracle_check: feature-only run wrote full media captures")
     with (survey_out / "bus.trace").open("rb") as f:
         survey_events = list(read_trace(f))

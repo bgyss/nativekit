@@ -444,13 +444,14 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         manifest = json.loads((oracle_out / "manifest.json").read_text())
         audio_streams = manifest.get("audio_streams", {})
         psg_stream = audio_streams.get("psg") if case.capture_audio else None
-        ym_stream = audio_streams.get("ym2612") if case.capture_ym_audio else None
+        ym_source_streams = manifest.get("audio_source_streams", {})
+        ym_stream = ym_source_streams.get("ym2612") if case.capture_ym_audio else None
         psg_rate = audio_streams.get("sample_rate")
-        ym_rate = audio_streams.get("sample_rate")
+        ym_rate = ym_source_streams.get("sample_rate")
         if case.capture_audio and (not psg_stream or not psg_rate):
             return "candidate did not export a PSG sample stream"
         if case.capture_ym_audio and (not ym_stream or not ym_rate):
-            return "candidate did not export a YM2612 sample stream"
+            return "candidate did not export raw YM2612 source samples"
         psg_events_path = None
         if case.capture_audio:
             psg_writes = _candidate_psg_writes(oracle_out / "bus.trace")
@@ -490,9 +491,8 @@ def run_one(case, assembler, z80_assembler, core, testcart):
                                    "--psg-events", str(psg_events_path)))
         native_ym = base / "native-ym.raw"
         if case.capture_ym_audio:
-            native_command.extend(("--ym-out", str(native_ym),
-                                   "--ym-rate", str(ym_rate),
-                                   "--ym-frames", str(ym_stream["frames"]),
+            native_command.extend(("--ym-source-out", str(native_ym),
+                                   "--ym-source-frames", str(ym_stream["frames"]),
                                    "--ym-events", str(ym_events_path)))
         if case.render or (case.capture_audio and not psg_events_path) or (
                 case.capture_ym_audio and not ym_events_path):
@@ -531,9 +531,8 @@ def run_one(case, assembler, z80_assembler, core, testcart):
             if difference:
                 return difference
         if case.capture_ym_audio:
-            # The DAC case writes at the first VBlank, leaving later audio frames to test its level.
-            difference = _compare_audio(native_ym, oracle_out / ym_stream["file"], ym_rate,
-                                        chip="YM2612 DAC", ignore_start_frames=16)
+            difference = _compare_audio(native_ym, oracle_out / ym_source_streams["ym2612"]["file"],
+                                        ym_rate, chip="YM2612")
             if difference:
                 return difference
         if case.render:

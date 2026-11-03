@@ -240,8 +240,55 @@ def _ym_bus_release():
     return ()
 
 
+def _ym_fm_channel_ops(channel, algorithm, attack=31, decay=0, sustain_rate=0,
+                       release=15, channel3_special=False, lfo=False, pan=0xC0,
+                       key_scale_register=0):
+    operator_offsets = (0, 4, 8, 12)
+    bank = channel // 3
+    local = channel % 3
+    operations = []
+
+    if channel3_special:
+        operations.extend(_ym_write_register(0, 0x27, 0x40))
+    if lfo:
+        operations.extend(_ym_write_register(0, 0x22, 0x0F))
+
+    for offset in operator_offsets:
+        reg = 0x30 + local + offset
+        operations.extend(_ym_write_register(bank, reg, 0x01))
+        operations.extend(_ym_write_register(bank, reg + 0x10, 0x00))
+        operations.extend(_ym_write_register(
+            bank, reg + 0x20, ((key_scale_register & 3) << 6) | (attack & 0x1F)))
+        operations.extend(_ym_write_register(bank, reg + 0x30, decay & 0x1F))
+        operations.extend(_ym_write_register(bank, reg + 0x40, sustain_rate & 0x1F))
+        operations.extend(_ym_write_register(bank, reg + 0x50, release & 0xFF))
+        operations.extend(_ym_write_register(bank, reg + 0x60, 0x00))
+
+    operations.extend(_ym_write_register(bank, 0xA4 + local, 0x22))
+    operations.extend(_ym_write_register(bank, 0xA0 + local, 0x69))
+    operations.extend(_ym_write_register(bank, 0xB0 + local, algorithm & 0x3F))
+    operations.extend(_ym_write_register(bank, 0xB4 + local, 0xF7 if lfo else pan))
+
+    if channel3_special:
+        for register, value in ((0xAC, 0x00), (0xA8, 0x58), (0xAD, 0x38),
+                                (0xA9, 0x70), (0xAE, 0x08), (0xAA, 0x88)):
+            operations.extend(_ym_write_register(0, register, value))
+    operations.extend(_ym_write_register(0, 0x28, 0xF0 | channel))
+    return operations
+
+
+def _ym_algorithm_case(algorithm):
+    operations = [
+        *_ym_bus_request(),
+        Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+        *_ym_fm_channel_ops(0, algorithm),
+    ]
+    return Case(f"sound_ym_algorithm_{algorithm}", tuple(operations),
+                capture_ym_audio=True, capture_frames=2)
+
+
 def _ym_sound_cases():
-    return [
+    cases = [
         Case("sound_ym_ports", (
             *_ym_bus_request(),
             *_ym_write_register(0, 0x30, 0xA5),
@@ -265,6 +312,32 @@ def _ym_sound_cases():
             *_ym_bus_release(),
         ), capture_ym_audio=True, capture_frames=2),
     ]
+    cases.extend(_ym_algorithm_case(algorithm) for algorithm in range(8))
+    envelope_operations = [
+        *_ym_bus_request(),
+        *_ym_fm_channel_ops(0, 7, attack=28, decay=12, sustain_rate=4, release=10),
+        Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+        *_ym_write_register(0, 0x28, 0x00),
+    ]
+    cases.append(Case("sound_ym_envelope_key_on_off", tuple(envelope_operations),
+                      capture_ym_audio=True, capture_frames=3))
+    channel3_operations = [
+        *_ym_bus_request(),
+        Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+        *_ym_fm_channel_ops(2, 7, attack=3, channel3_special=True, lfo=True,
+                            key_scale_register=0),
+    ]
+    cases.append(Case("sound_ym_channel3_lfo", tuple(channel3_operations),
+                      capture_ym_audio=True, capture_frames=4))
+    pan_operations = [
+        *_ym_bus_request(),
+        Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+        *_ym_fm_channel_ops(0, 7, pan=0x80),
+        *_ym_fm_channel_ops(1, 7, pan=0x40),
+    ]
+    cases.append(Case("sound_ym_pan", tuple(pan_operations),
+                      capture_ym_audio=True, capture_frames=2))
+    return cases
 
 
 def all_cases():

@@ -18,13 +18,13 @@ with tempfile.TemporaryDirectory() as temp:
     features = ["NMD_TRACE_HAS_VDP_PORT", "NMD_TRACE_HAS_PSG_WRITE", "NMD_TRACE_HAS_YM_WRITE",
                 "NMD_TRACE_HAS_YM_PORT", "NMD_TRACE_HAS_Z80_CPU", "NMD_TRACE_HAS_VDP_DMA_68K",
                 "NMD_TRACE_HAS_CHIP_AUDIO", "NMD_TRACE_HAS_VDP_DMA_FILL", "NMD_TRACE_HAS_VDP_DMA_COPY",
-                "NMD_TRACE_HAS_VDP_HINT_LINE"]
+                "NMD_TRACE_HAS_VDP_HINT_LINE", "NMD_TRACE_HAS_CHIP_AUDIO_SOURCE"]
     subprocess.run(["cc", "-std=c11", "-fPIC", "-dynamiclib" if sys.platform == "darwin" else "-shared",
                     *["-D" + feature for feature in features], str(root / "oracle/trace_abi.c"),
                     "-o", str(instrumented)], check=True, capture_output=True)
     instrumented_sink = c.CDLL(str(instrumented))
     instrumented_sink.nmd_trace_capabilities.restype = c.c_uint64
-    assert instrumented_sink.nmd_trace_capabilities() == 0x7ff
+    assert instrumented_sink.nmd_trace_capabilities() == 0xfff
     audio_callback_type = c.CFUNCTYPE(None, c.c_void_p, c.c_uint8, c.c_int16, c.c_int16)
     audio_events = []
 
@@ -36,11 +36,16 @@ with tempfile.TemporaryDirectory() as temp:
     instrumented_sink.nmd_trace_audio_register.restype = c.c_int
     instrumented_sink.nmd_trace_audio_active.restype = c.c_int
     instrumented_sink.nmd_trace_audio_emit.argtypes = [c.c_uint8, c.c_int16, c.c_int16]
+    instrumented_sink.nmd_trace_audio_source_emit.argtypes = [c.c_uint8, c.c_int16, c.c_int16]
     assert instrumented_sink.nmd_trace_audio_register(1, receive_audio, None) == 0
     assert instrumented_sink.nmd_trace_audio_register(2, receive_audio, None) == 1
     assert instrumented_sink.nmd_trace_audio_active() == 1
     instrumented_sink.nmd_trace_audio_emit(5, 123, -456)
     assert audio_events == [(5, 123, -456)]
+    instrumented_sink.nmd_trace_audio_source_emit(4, 321, -654)
+    assert audio_events == [(5, 123, -456), (6, 321, -654)]
+    instrumented_sink.nmd_trace_audio_source_emit(5, 111, -222)
+    assert len(audio_events) == 2
     callback_type = c.CFUNCTYPE(None, c.c_void_p, c.c_uint64, c.c_uint8, c.c_uint8, c.c_uint8,
                                c.c_uint32, c.c_uint32)
     events = []

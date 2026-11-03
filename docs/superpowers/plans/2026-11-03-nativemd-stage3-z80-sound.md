@@ -198,7 +198,11 @@ BlastEm candidate.
 
 **Files:**
 - Modify: `consoles/md/src/sound/ym2612.c`, `consoles/md/src/sound/sound.h`,
-  `consoles/md/tests/unit/sound_check.c`, `consoles/md/tests/rom/cases.py`
+  `consoles/md/tests/unit/sound_check.c`, `consoles/md/tests/rom/cases.py`,
+  `consoles/md/tests/rom/run.py`, `consoles/md/tests/rom/testcart.c`,
+  `consoles/md/tests/oracle/run.py`, `consoles/md/tests/oracle/trace_abi.{h,c}`,
+  `consoles/md/tests/oracle_check.py`, `consoles/md/tests/trace_abi_check.py`,
+  `tools/toolchains/patches/blastem/0001-m68k-cpu-trace.patch`
 
 **Interfaces:**
 - The six channels have four operators each. Model frequency/block, detune/multiple, total level,
@@ -207,17 +211,19 @@ BlastEm candidate.
 - `md_ym_advance_to(uint64_t)` advances the YM chip at the region's chip clock and emits samples in
   deterministic order. Use fixed integer tables/state where the reference hardware is discrete.
 
-- [ ] **Step 1: Add `test_ym_algorithm_0` through `test_ym_algorithm_7`,
-  `test_ym_envelope_key_on_off`, and `test_ym_channel3_and_lfo`**, plus sample vectors for operator
-  routing, frequency/block, envelope stages, pan, and DAC/FM channel-six selection.
-- [ ] **Step 2: Compare oracle chip streams for those vectors** and retain the first differing
-  sample/index as failure output.
-- [ ] **Step 3: Implement operator phase, attenuation/envelope, feedback, and channel connection
+- [x] **Step 1: Add `test_ym_algorithm_0` through `test_ym_algorithm_7`,
+  `test_ym_envelope_key_on_off`, and `test_ym_channel3_and_lfo`**, plus named pan and DAC/FM
+  channel-six vectors for operator routing, frequency/block, envelope stages, and channel 3
+  supplementary-frequency envelope key scaling.
+- [x] **Step 2: Compare raw oracle YM source samples for those vectors** and retain the first
+  differing sample/index as failure output. Capture the channel-mixed source stream before
+  BlastEm's host audio filtering so the native chip samples are compared at the same boundary.
+- [x] **Step 3: Implement operator phase, attenuation/envelope, feedback, and channel connection
   state** from Sega's Genesis Sound Software Manual; keep register writes and sample generation on
   the shared scheduler.
-- [ ] **Step 4: Run the sound unit suite and full per-chip oracle vectors**; list only individually
+- [x] **Step 4: Run the sound unit suite and full per-chip oracle vectors**; list only individually
   reviewed candidate differences in `rom/KNOWN`.
-- [ ] **Step 5: Commit** the FM synthesis engine with its vectors.
+- [x] **Step 5: Commit** the FM synthesis engine with its vectors.
 
 ### Task 6: Mix chip samples and feed `nk_console` audio
 
