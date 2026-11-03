@@ -9,6 +9,11 @@ The two documents it builds on are:
 - **Spec (approved):** `docs/superpowers/specs/2026-11-01-nativemd-design.md`
 - **Stage 0 plan (completed):** `docs/superpowers/plans/2026-11-01-nativemd-stage0-kit.md`
 
+**Current state (2026-11-03):** Stages 0 and 1 are complete for their stated scopes, and Stage 2
+bus/VDP work is implemented on the `nativemd` branch. BlastEm remains a candidate oracle, not a
+hardware qualification result. Stage 3 is next; its plan is
+`docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
+
 Read the spec first, then this handoff, then the stage 0 plan.
 
 ---
@@ -44,10 +49,10 @@ Success, from the spec:
 
 ## 2. Where to start
 
-**Stages 0 and 1 are complete for the exploratory tooling scope.** BlastEm remains an
-unqualified candidate oracle; Stage 1 evidence and limitations are recorded in
-`docs/superpowers/plans/2026-11-01-nativemd-stage1-oracle.md` and its SDD ledger. Continue with
-Stage 2 after the Stage 1 follow-up is committed.
+Stages 0 and 1 are complete for their recorded scopes. Stage 1 evidence and limitations are in
+`docs/superpowers/plans/2026-11-01-nativemd-stage1-oracle.md` and its SDD ledger; Stage 2
+implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage2-bus-vdp.md`.
+Continue with the Stage 3 Z80 and sound plan above.
 
 1. From the repository root, use the `nativemd` branch.
 2. `nix develop`. Run everything inside it, and use the mise tasks.
@@ -131,6 +136,7 @@ after the previous stage has landed, because each one depends on what the previo
   68000 interpreter that runs a table of steps, plus `cases.py`, `run.py` and `KNOWN`.
 
 ### Stage 3: the Z80 side and sound
+- Plan: `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
 - The Z80 runs on its own coroutine (`kit/include/nk/coro.h`), with its own routine table,
   through `zrd`/`zwr`. BUSREQ and RESET from the 68000 suspend and restart it at exact clocks.
   The bank window costs its real time and stalls the 68000.
