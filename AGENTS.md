@@ -12,7 +12,7 @@ From the repository root:
 - `mise run tools` and `mise run tools:md`: build pinned SNES tools and candidate Mega Drive tools, respectively.
 - `mise run build:null`, `mise run build:macos`, and `mise run build`: build headless, macOS Metal, and the macOS-oriented matrix. iOS needs Xcode and its SDK; Linux is untested.
 - `mise run test:kit`, `mise run test`, and `mise run test:rom`: run kit checks, the full scripted checks with consumer integration, and SNES reference comparisons. Prepare required builds and tools first.
-- `mise run test:md-console`, `mise run test:md-z80`, `mise run test:md-bus`, `mise run test:md-interrupt`, `mise run test:md-vdp`, `mise run test:md-dma`, and `mise run test:md-render`: check console, Z80, bus, VDP/DMA, scheduler, interrupt, and render paths. `mise run test:md-rom` compares shared synthetic cases with the candidate core.
+- `mise run test:md-console`, `mise run test:md-z80`, `mise run test:md-sound`, `mise run test:md-bus`, `mise run test:md-interrupt`, `mise run test:md-vdp`, `mise run test:md-dma`, and `mise run test:md-render`: check console, Z80, sound, bus, VDP/DMA, scheduler, interrupt, and render paths. `mise run test:md-rom` compares shared synthetic cases with the candidate core.
 - `mise run test:md-toolchain`, `mise run test:md-oracle-smoke`, `mise run test:md-trace`, `mise run test:md-features`, and `mise run test:md-survey`: check the exploratory toolchain, synthetic capture runner, trace ABI, feature extraction, and survey reporting.
 
 ## Coding Style & Naming Conventions
@@ -25,4 +25,4 @@ Checks are C executables and Python scripts, usually named `*_check.c` or `*_che
 
 ## Commit & Pull Request Guidelines
 
-Use focused, descriptive commit subjects; recent examples include `nativemd: ...` and `Plan: ...`. Pull requests should describe behavior changes and affected contracts, list commands run and skipped validation, link relevant plans or issues, and include screenshots for rendering changes. Preserve upstream attribution and license notices.
+Use focused commit subjects; examples include `nativemd: ...` and `Plan: ...`. Pull requests should describe behavior changes and affected contracts, list commands run and skipped validation, link relevant plans or issues, and include screenshots for rendering changes. Preserve upstream attribution and license notices.

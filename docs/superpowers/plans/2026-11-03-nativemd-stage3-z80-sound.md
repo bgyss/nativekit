@@ -105,8 +105,9 @@ BlastEm candidate.
 
 **Interfaces:**
 - `zrd/zwr` map `$0000-$1FFF` to Z80 RAM, `$4000-$4003` to YM2612, `$6000` to the serial bank
-  register, and `$8000-$FFFF` to the 68000 bank window. `zin/zout` model the Z80 I/O port `$7F` PSG
-  path; unmapped accesses fail with `nativemd:`.
+  register, `$7F10-$7F17` to the PSG write path (`$7F11` is canonical), and `$8000-$FFFF` to the
+  68000 bank window. `zout(0x7F, value)` is a native C helper for the same PSG write path. Unmapped
+  accesses fail with `nativemd:`.
 - The bank register shifts the written LSB into address bits A15-A23. Bank-window accesses use the
   68000 memory map and contend for the same 68000 bus as 68000 accesses and DMA.
 - `$A11100` and `$A11200` requests are synchronized with the Z80 coroutine; a 68000 access to Z80
@@ -144,16 +145,19 @@ BlastEm candidate.
   divider or four-bit attenuation. Noise control selects periodic/white feedback and a tone-3 or
   fixed clock source.
 
-- [ ] **Step 1: Add `test_psg_latch_data`, `test_psg_period_zero`, `test_psg_noise_modes`, and
+- [x] **Step 1: Add `test_psg_latch_data`, `test_psg_period_zero`, `test_psg_noise_modes`, and
   `test_psg_attenuation`**, plus `sound_psg_tone` and `sound_psg_noise` ROM cases. Assert latch
   continuation, all channels, mute/volume values, noise reset, and 68000/Z80 event order.
-- [ ] **Step 2: Run `mise run test:md-sound` and focused ROM cases**; ensure a changed latch byte,
+- [x] **Step 2: Run `mise run test:md-sound` and focused ROM cases**; ensure a changed latch byte,
   divisor, or LFSR bit changes the asserted state/output.
-- [ ] **Step 3: Implement the serial PSG register latch, counters, LFSR, and timestamped writes** in
+- [x] **Step 3: Implement the serial PSG register latch, counters, LFSR, and timestamped writes** in
   `sn76489.c` using the TI datasheet and Sega's sound manual.
-- [ ] **Step 4: Run unit and oracle tone/noise cases**; compare per-chip output samples at the
-  candidate stream's declared rate.
-- [ ] **Step 5: Commit** PSG register/tone behavior before mixing it with YM output.
+- [x] **Step 4: Run unit and oracle tone/noise cases**; replay the candidate's timestamped PSG writes
+  into the native model, then compare per-chip output samples at the candidate stream's declared
+  rate. Allow up to eight output frames of resampler phase and require mean/peak PCM error below
+  32/600 s16 units. Do not equate the candidate's Z80 instruction clocks with the instructionless
+  C routine.
+- [x] **Step 5: Commit** PSG register/tone behavior before mixing it with YM output.
 
 ### Task 4: Implement YM2612 ports, busy state, timers, IRQ, and DAC
 

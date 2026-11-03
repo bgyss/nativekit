@@ -8,7 +8,7 @@ target_link_libraries(bus_check PRIVATE nmd)
 set_target_properties(bus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
 add_executable(md_testcart rom/testcart.c)
-target_include_directories(md_testcart PRIVATE ../src/console ../src/vdp)
+target_include_directories(md_testcart PRIVATE ../src/console ../src/vdp ../src/sound ${NK_INCLUDE})
 target_link_libraries(md_testcart PRIVATE nmd)
 set_target_properties(md_testcart PROPERTIES OUTPUT_NAME md_testcart
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
@@ -38,3 +38,8 @@ add_executable(z80_check unit/z80_check.c)
 target_include_directories(z80_check PRIVATE ../src/console)
 target_link_libraries(z80_check PRIVATE nmd)
 set_target_properties(z80_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(sound_check unit/sound_check.c)
+target_include_directories(sound_check PRIVATE ../src/sound)
+target_link_libraries(sound_check PRIVATE nmd)
+set_target_properties(sound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)

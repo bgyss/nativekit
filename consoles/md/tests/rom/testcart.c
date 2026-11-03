@@ -1,13 +1,16 @@
 /* Execute the binary step table built from tests/rom/cases.py on nmd. */
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <nmd/nmd.h>
+#include <nk/resample.h>
 
 #include "md_internal.h"
 #include "render.h"
+#include "sound.h"
 
 #define STEPS_MAGIC "NMDX"
 #define STEPS_RECORD_SIZE 12u
@@ -15,7 +18,9 @@
 enum {
     STEPS_VERSION = 1,
     STEPS_Z80_VERSION = 2,
-    Z80_FIXTURE_BANK_WINDOW = 1
+    Z80_FIXTURE_BANK_WINDOW = 1,
+    Z80_FIXTURE_PSG_TONE = 2,
+    Z80_FIXTURE_PSG_NOISE = 3
 };
 
 enum {
@@ -63,6 +68,11 @@ static uint32_t read_be32(const uint8_t *p)
            (uint32_t)p[2] << 8 | p[3];
 }
 
+static uint64_t read_be64(const uint8_t *p)
+{
+    return (uint64_t)read_be32(p) << 32 | read_be32(p + 4);
+}
+
 static int parse_steps_header(const uint8_t *steps, size_t size, uint16_t *count,
                               uint16_t *fixture_id, uint16_t *z80_entry,
                               size_t *header_size)
@@ -107,19 +117,63 @@ static void z80_bank_window_fixture(void)
         (void)nmd_z80_wait_until(z80_never_ready, NULL);
 }
 
+static void z80_psg_tone_fixture(void)
+{
+    zout(0x7F, 0x90);
+    zout(0x7F, 0x84);
+    zout(0x7F, 0x12);
+    zwr(0x0010, 0x5A);
+    for (;;)
+        (void)nmd_z80_wait_until(z80_never_ready, NULL);
+}
+
+static void z80_psg_noise_fixture(void)
+{
+    zout(0x7F, 0xE0);
+    zout(0x7F, 0xE4);
+    zout(0x7F, 0xF0);
+    zwr(0x0010, 0xA5);
+    for (;;)
+        (void)nmd_z80_wait_until(z80_never_ready, NULL);
+}
+
 static const nmd_z80_routine z80_bank_window_routines[] = {
     { 0x0000, z80_bank_window_fixture, "z80_bank_window_fixture" },
+};
+static const nmd_z80_routine z80_psg_tone_routines[] = {
+    { 0x0000, z80_psg_tone_fixture, "z80_psg_tone_fixture" },
+};
+static const nmd_z80_routine z80_psg_noise_routines[] = {
+    { 0x0000, z80_psg_noise_fixture, "z80_psg_noise_fixture" },
 };
 
 static int set_z80_fixture(nmd_cart *cart, uint16_t fixture_id, uint16_t entry)
 {
+    const nmd_z80_routine *routines;
+    size_t count;
+
     if (!fixture_id)
         return entry == 0;
-    if (fixture_id != Z80_FIXTURE_BANK_WINDOW || entry != 0)
+    if (entry != 0)
         return 0;
-    cart->z80_routines = z80_bank_window_routines;
-    cart->z80_routine_count = sizeof z80_bank_window_routines /
-                              sizeof z80_bank_window_routines[0];
+    switch (fixture_id) {
+    case Z80_FIXTURE_BANK_WINDOW:
+        routines = z80_bank_window_routines;
+        count = sizeof z80_bank_window_routines / sizeof z80_bank_window_routines[0];
+        break;
+    case Z80_FIXTURE_PSG_TONE:
+        routines = z80_psg_tone_routines;
+        count = sizeof z80_psg_tone_routines / sizeof z80_psg_tone_routines[0];
+        break;
+    case Z80_FIXTURE_PSG_NOISE:
+        routines = z80_psg_noise_routines;
+        count = sizeof z80_psg_noise_routines / sizeof z80_psg_noise_routines[0];
+        break;
+    default:
+        return 0;
+    }
+    cart->z80_routines = routines;
+    cart->z80_routine_count = count;
     return 1;
 }
 
@@ -177,6 +231,128 @@ static int write_picture(const char *path)
         valid = 0;
     free(rgb);
     return valid;
+}
+
+static int write_psg_samples(const char *path, double output_rate, unsigned frames)
+{
+    Resampler *resampler = NULL;
+    int16_t *mono = NULL, *stereo = NULL, *pcm = NULL;
+    float *output = NULL;
+    FILE *file = NULL;
+    uint64_t source_count = md_psg.sample_count;
+    int source_frames, pushed, pulled;
+    size_t i;
+    int valid = 1;
+
+    if (!path || !output_rate || !frames || source_count > INT_MAX || frames > INT_MAX / 2u)
+        return 0;
+    source_frames = (int)source_count;
+    mono = (int16_t *)malloc((size_t)source_frames * sizeof *mono);
+    stereo = (int16_t *)malloc((size_t)source_frames * 2u * sizeof *stereo);
+    output = (float *)malloc((size_t)frames * 2u * sizeof *output);
+    pcm = (int16_t *)malloc((size_t)frames * 2u * sizeof *pcm);
+    if (!mono || !stereo || !output || !pcm) {
+        fprintf(stderr, "testcart: cannot allocate PSG conversion buffers\n");
+        valid = 0;
+        goto done;
+    }
+    if (md_psg_take_samples(mono, source_frames) != source_frames) {
+        fprintf(stderr, "testcart: PSG source sample count changed while draining\n");
+        valid = 0;
+        goto done;
+    }
+    for (i = 0; i < source_count; i++) {
+        stereo[i * 2u] = mono[i];
+        stereo[i * 2u + 1u] = mono[i];
+    }
+
+    resampler = resample_new(md_psg_source_rate(), output_rate);
+    if (!resampler) {
+        fprintf(stderr, "testcart: cannot create PSG resampler\n");
+        valid = 0;
+        goto done;
+    }
+    pushed = resample_push(resampler, stereo, source_frames);
+    if (pushed != source_frames) {
+        fprintf(stderr, "testcart: PSG resampler accepted %d of %d source frames\n",
+                pushed, source_frames);
+        valid = 0;
+        goto done;
+    }
+    pulled = resample_pull(resampler, output, (int)frames);
+    if (pulled != (int)frames) {
+        fprintf(stderr, "testcart: PSG resampler produced %d of %u output frames\n",
+                pulled, frames);
+        valid = 0;
+        goto done;
+    }
+    for (i = 0; i < (size_t)frames * 2u; i++) {
+        float sample = output[i];
+        if (sample >= 1.0f)
+            pcm[i] = 0x7FFF;
+        else if (sample <= -1.0f)
+            pcm[i] = (int16_t)-0x8000;
+        else
+            pcm[i] = (int16_t)(sample * 0x7FFF);
+    }
+    file = fopen(path, "wb");
+    if (!file) {
+        valid = 0;
+        goto done;
+    }
+    if (fwrite(pcm, sizeof *pcm, (size_t)frames * 2u, file) != (size_t)frames * 2u)
+        valid = 0;
+    if (fclose(file))
+        valid = 0;
+    file = NULL;
+
+done:
+    if (file)
+        fclose(file);
+    if (resampler)
+        resample_free(resampler);
+    free(mono);
+    free(stereo);
+    free(output);
+    free(pcm);
+    return valid;
+}
+
+static int replay_psg_events(const char *path, nmd_region region)
+{
+    uint8_t *data;
+    size_t size;
+    uint32_t count;
+    uint64_t end_clock, last_clock = 0;
+    uint32_t i;
+
+    data = read_file(path, &size);
+    if (!data)
+        return 0;
+    if (size < 18u || memcmp(data, "NPSG", 4) || read_be16(data + 4) != 1) {
+        free(data);
+        return 0;
+    }
+    count = read_be32(data + 6);
+    end_clock = read_be64(data + 10);
+    if (size != 18u + (size_t)count * 9u) {
+        free(data);
+        return 0;
+    }
+    md_psg_reset(region);
+    for (i = 0; i < count; i++) {
+        const uint8_t *record = data + 18u + (size_t)i * 9u;
+        uint64_t clock = read_be64(record);
+        if (clock < last_clock || clock > end_clock) {
+            free(data);
+            return 0;
+        }
+        md_psg_write(record[8], clock);
+        last_clock = clock;
+    }
+    md_psg_advance_to(end_clock);
+    free(data);
+    return 1;
 }
 
 static int execute_steps(const uint8_t *steps, size_t size)
@@ -241,8 +417,11 @@ static int execute_steps(const uint8_t *steps, size_t size)
 int main(int argc, char **argv)
 {
     const char *rom_path = NULL, *steps_path = NULL, *picture_path = NULL;
+    const char *psg_path = NULL, *psg_event_path = NULL;
     const char *region = "U";
     unsigned frames = 2;
+    unsigned psg_frames = 0;
+    double psg_rate = 0;
     uint8_t *rom, *steps;
     size_t rom_size, steps_size;
     uint16_t step_count, fixture_id, z80_entry;
@@ -257,6 +436,14 @@ int main(int argc, char **argv)
             steps_path = argv[++i];
         else if (!strcmp(argv[i], "--picture-out") && i + 1 < argc)
             picture_path = argv[++i];
+        else if (!strcmp(argv[i], "--psg-out") && i + 1 < argc)
+            psg_path = argv[++i];
+        else if (!strcmp(argv[i], "--psg-events") && i + 1 < argc)
+            psg_event_path = argv[++i];
+        else if (!strcmp(argv[i], "--psg-rate") && i + 1 < argc)
+            psg_rate = strtod(argv[++i], NULL);
+        else if (!strcmp(argv[i], "--psg-frames") && i + 1 < argc)
+            psg_frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--region") && i + 1 < argc)
             region = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc)
@@ -268,6 +455,14 @@ int main(int argc, char **argv)
     }
     if (!rom_path || !steps_path) {
         fprintf(stderr, "testcart: usage: testcart --rom ROM --steps TABLE\n");
+        return 2;
+    }
+    if (psg_path && (!(psg_rate > 0.0) || !psg_frames)) {
+        fprintf(stderr, "testcart: --psg-out requires --psg-rate and --psg-frames\n");
+        return 2;
+    }
+    if (psg_event_path && !psg_path) {
+        fprintf(stderr, "testcart: --psg-events requires --psg-out\n");
         return 2;
     }
 
@@ -320,7 +515,11 @@ int main(int argc, char **argv)
     md_z80_bus_trace_hook = trace_z80;
     md_vdp_trace_hook = trace_vdp;
     result = execute_steps(steps, steps_size);
-    if (!result && picture_path) {
+    if (!result && psg_event_path && !replay_psg_events(psg_event_path, cart.region)) {
+        fprintf(stderr, "testcart: invalid PSG replay event file %s\n", psg_event_path);
+        result = 2;
+    }
+    if (!result && (picture_path || (psg_path && !psg_event_path))) {
         unsigned frame;
         if (!frames || frames > 4) {
             fprintf(stderr, "testcart: frame count must be in 1-4\n");
@@ -328,6 +527,12 @@ int main(int argc, char **argv)
         }
         for (frame = 0; !result && frame < frames; frame++)
             nmd_run_frame();
+    }
+    if (!result && psg_path) {
+        if (!write_psg_samples(psg_path, psg_rate, psg_frames)) {
+            fprintf(stderr, "testcart: cannot write PSG samples %s\n", psg_path);
+            result = 2;
+        }
     }
     if (!result && picture_path) {
         if (!write_picture(picture_path)) {

@@ -40,6 +40,8 @@ uint8_t zrd(uint16_t addr)
         value = md_z80_ram[addr];
     } else if (addr >= 0x4000u && addr <= 0x4003u) {
         value = md_ym_read((uint8_t)(addr - 0x4000u), md_clock);
+    } else if (addr >= 0x7F10u && addr <= 0x7F17u) {
+        nk_fatal("PSG is write-only at Z80 address $%04X", addr);
     } else if (addr == 0x6000u) {
         nk_fatal("Z80 read from write-only bank register at $6000");
     } else if (addr >= 0x8000u) {
@@ -63,6 +65,8 @@ void zwr(uint16_t addr, uint8_t value)
         md_z80_ram[addr] = value;
     } else if (addr >= 0x4000u && addr <= 0x4003u) {
         md_ym_write((uint8_t)(addr - 0x4000u), value, md_clock);
+    } else if (addr >= 0x7F10u && addr <= 0x7F17u) {
+        md_psg_write(value, md_clock);
     } else if (addr == 0x6000u) {
         z80_bank = (uint16_t)(((z80_bank >> 1) | ((uint16_t)(value & 1u) << 8)) & 0x01FFu);
     } else if (addr >= 0x8000u) {
@@ -92,7 +96,7 @@ void zout(uint8_t port, uint8_t value)
     if (port == 0x7Fu) {
         md_psg_write(value, md_clock);
         if (md_z80_bus_trace_hook)
-            md_z80_bus_trace_hook(md_clock, MD_Z80_TRACE_WRITE, 1, port, value);
+            md_z80_bus_trace_hook(md_clock, MD_Z80_TRACE_WRITE, 1, 0x7F11u, value);
         md_z80_bus_access_end();
         return;
     }

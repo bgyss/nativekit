@@ -25,6 +25,7 @@ class Case:
     render: bool = False
     region: str = "U"
     capture_frames: int = 2
+    capture_audio: bool = False
     weave_fields: bool = False
     weave_dimensions: tuple[int, int] = (256, 224)
     z80_fixture_id: int = 0
@@ -163,6 +164,52 @@ def _z80_bank_window_case():
                 rom_data=((0x3FFFFF, 0xC3),))
 
 
+def _z80_psg_case(name, fixture_id, z80_program, writes, result):
+    operations = [
+        Operation(WRITE, 2, 0xA11200, 0x0000),
+        Operation(WRITE, 2, 0xA11100, 0x0100),
+        Operation(WRITE, 2, 0xA11200, 0x0100),
+        Operation(POLL, 2, 0xA11100, 0x0000, compare_mask=0x0100),
+        Operation(WRITE, 2, 0xA11100, 0x0000),
+        *(Operation(READ, 1, 0xE00000) for _ in range(48)),
+        Operation(WRITE, 2, 0xA11100, 0x0100),
+        Operation(POLL, 2, 0xA11100, 0x0000, compare_mask=0x0100),
+        Operation(READ, 1, 0xA00010, result, compare_mask=0x00FF),
+    ]
+    accesses = tuple(Operation(WRITE, 1, 0x7F11, value) for value in writes)
+    return Case(name, tuple(operations), z80_fixture_id=fixture_id,
+                z80_entry=0, z80_program=z80_program, z80_load_index=4,
+                z80_accesses=accesses, capture_audio=True, capture_frames=1)
+
+
+def _z80_psg_tone_case():
+    return _z80_psg_case("sound_psg_tone", 2, (
+        "        ld      a,$90",
+        "        ld      ($7F11),a",
+        "        ld      a,$84",
+        "        ld      ($7F11),a",
+        "        ld      a,$12",
+        "        ld      ($7F11),a",
+        "        ld      a,$5A",
+        "        ld      ($0010),a",
+        "hang:   jr      hang",
+    ), (0x90, 0x84, 0x12), 0x5A)
+
+
+def _z80_psg_noise_case():
+    return _z80_psg_case("sound_psg_noise", 3, (
+        "        ld      a,$E0",
+        "        ld      ($7F11),a",
+        "        ld      a,$E4",
+        "        ld      ($7F11),a",
+        "        ld      a,$F0",
+        "        ld      ($7F11),a",
+        "        ld      a,$A5",
+        "        ld      ($0010),a",
+        "hang:   jr      hang",
+    ), (0xE0, 0xE4, 0xF0), 0xA5)
+
+
 def all_cases():
     return [Case("bus_map", (
         Operation(READ, 2, 0x00004000),
@@ -194,7 +241,7 @@ def all_cases():
         Operation(POLL, 2, 0xA11100, 0x0100, compare_mask=0x0100),
         Operation(WRITE, 1, 0xFF0010, 0x00),
         Operation(READ, 1, 0xFF0010),
-    )), _z80_bank_window_case(), Case("tas_write", (
+    )), _z80_bank_window_case(), _z80_psg_tone_case(), _z80_psg_noise_case(), Case("tas_write", (
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),
         Operation(READ, 1, 0xFF0020),

@@ -74,6 +74,7 @@ static void map_entry(void)
     zwr(0x4000, 0x22);
     zwr(0x4001, 0x55);
     map_ym_status = zrd(0x4000);
+    zwr(0x7F11, 0x9F);
     zout(0x7F, 0x90);
     for (bit = 0; bit <= 8; bit++)
         zwr(0x6000, (uint8_t)((bank >> bit) & 1u));

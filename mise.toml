@@ -28,6 +28,11 @@ description = "Check Z80 reset, BUSREQ, memory map, bank window, and coroutine b
 depends = ["build:null"]
 run = "cmake --build build/null --target z80_check && python3 consoles/md/tests/z80_check.py"
 
+[tasks."test:md-sound"]
+description = "Check PSG register writes, tone dividers, attenuation, and noise"
+depends = ["build:null"]
+run = "cmake --build build/null --target sound_check && build/null/tests/sound_check"
+
 [tasks."test:md-bus"]
 description = "Check the 68000 bus map, byte lanes, timing, and fatal accesses"
 depends = ["build:null"]

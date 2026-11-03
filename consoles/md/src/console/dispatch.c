@@ -150,6 +150,7 @@ void md_advance_to(uint64_t to_clock)
             nk_fatal("a scheduled hardware event precedes the 68000 clock");
 
         md_clock = next;
+        md_psg_advance_to(next);
         if (md_vdp_next_event() == next)
             md_vdp_advance(next);
         if (md_dma_next_event() == next)
@@ -165,6 +166,7 @@ void md_advance_to(uint64_t to_clock)
         md_z80_sync_to(md_clock);
     }
     md_clock = to_clock;
+    md_psg_advance_to(to_clock);
     md_z80_sync_to(md_clock);
 }
 
@@ -222,7 +224,7 @@ void md_timing_reset(const nmd_cart *cart)
     md_vdp_reset(cart);
     md_dma_reset();
     md_ym_reset();
-    md_psg_reset();
+    md_psg_reset(cart ? cart->region : NMD_NTSC);
     md_clock_hook = md_advance_to;
     md_irq_check_hook = md_irq_dispatch_pending;
     md_z80_power(cart);

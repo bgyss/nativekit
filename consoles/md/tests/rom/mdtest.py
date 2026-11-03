@@ -4,7 +4,7 @@ import pathlib
 import struct
 import subprocess
 
-from cases import READ, TAS, WRITE, Operation
+from cases import Operation, READ, TAS, WRITE
 
 
 MAGIC = b"NMDX"

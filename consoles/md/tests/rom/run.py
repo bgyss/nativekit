@@ -2,8 +2,10 @@
 """Compare shared synthetic bus cases on BlastEm and the native C model."""
 import argparse
 import hashlib
+import json
 import os
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,7 +18,11 @@ sys.path.insert(0, str(HERE.parent / "oracle"))
 
 import cases  # noqa: E402
 import mdtest  # noqa: E402
-from trace import M68K, Z80, VDP, DMA, READ, WRITE, read as read_trace  # noqa: E402
+from trace import M68K, Z80, VDP, DMA, PSG, READ, WRITE, read as read_trace  # noqa: E402
+
+PSG_PHASE_LIMIT = 8
+PSG_MEAN_ERROR_LIMIT = 32
+PSG_PEAK_ERROR_LIMIT = 600
 
 
 def _target_addresses(case):
@@ -65,6 +71,13 @@ def _candidate_events(trace_path, addresses):
     z80 = [(event.operation, event.width, event.address, event.value, event.clock)
            for event in trace if event.device == Z80 and event.operation in (READ, WRITE)]
     return bus, vdp, dma, z80
+
+
+def _candidate_psg_writes(trace_path):
+    with trace_path.open("rb") as stream:
+        trace = list(read_trace(stream))
+    return [(event.clock, event.value & 0xFF) for event in trace
+            if event.device == PSG and event.operation == WRITE and event.width == 1]
 
 
 def _event_value_masks(case):
@@ -332,6 +345,43 @@ def _compare_picture(native_path, candidate_path):
     return None
 
 
+def _compare_audio(native_path, candidate_path, sample_rate):
+    native = native_path.read_bytes()
+    candidate = candidate_path.read_bytes()
+    if len(native) != len(candidate):
+        return f"PSG stream lengths: native {len(native)} bytes, candidate {len(candidate)} bytes"
+    if len(native) % 4:
+        return "PSG streams are not complete stereo s16 frames"
+    native_samples = struct.unpack("=" + "h" * (len(native) // 2), native)
+    candidate_samples = struct.unpack("=" + "h" * (len(candidate) // 2), candidate)
+    frame_count = len(native_samples) // 2
+    # The two source resamplers have different startup latency. The PSG writes
+    # are paired separately by clock and value; allow only a short output-phase
+    # shift and small filter-edge differences in the PCM stream.
+    phase_trials = []
+    for phase in range(-PSG_PHASE_LIMIT, PSG_PHASE_LIMIT + 1):
+        first = max(0, -phase)
+        stop = min(frame_count, frame_count - phase)
+        errors = [abs(native_samples[frame * 2 + channel] -
+                      candidate_samples[(frame + phase) * 2 + channel])
+                  for frame in range(first, stop) for channel in range(2)]
+        if errors:
+            phase_trials.append((sum(errors) / len(errors), max(errors), phase, first, stop))
+    mean_error, peak_error, phase, first, stop = min(phase_trials)
+    if mean_error > PSG_MEAN_ERROR_LIMIT or peak_error > PSG_PEAK_ERROR_LIMIT:
+        for frame in range(first, stop):
+            for channel in range(2):
+                native_sample = native_samples[frame * 2 + channel]
+                candidate_sample = candidate_samples[(frame + phase) * 2 + channel]
+                if abs(native_sample - candidate_sample) > PSG_PEAK_ERROR_LIMIT:
+                    return (f"PSG sample {frame} channel {channel} at {sample_rate:g} Hz: "
+                            f"native {native_sample}, candidate {candidate_sample}; "
+                            f"phase {phase}, mean error {mean_error:.1f}")
+        return (f"PSG stream at {sample_rate:g} Hz: phase {phase}, mean error "
+                f"{mean_error:.1f}, peak error {peak_error}")
+    return None
+
+
 def _active_picture(path, width, height):
     frame_width, frame_height, pixels = _read_ppm(path)
     if (frame_width, frame_height) == (width, height):
@@ -369,7 +419,7 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         except RuntimeError as error:
             return str(error)
         oracle_out = base / "oracle"
-        frames = str(case.capture_frames) if case.render else "1"
+        frames = str(case.capture_frames) if case.render or case.capture_audio else "1"
         candidate = subprocess.run([
             sys.executable, str(ROOT / "consoles/md/tests/oracle/run.py"),
             "--core", str(core), "--rom", str(rom), "--frames", frames,
@@ -379,11 +429,38 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         if candidate.returncode:
             return "candidate run failed: " + candidate.stderr.strip()[-500:]
 
+        manifest = json.loads((oracle_out / "manifest.json").read_text())
+        audio_streams = manifest.get("audio_streams", {})
+        psg_stream = audio_streams.get("psg") if case.capture_audio else None
+        psg_rate = audio_streams.get("sample_rate")
+        if case.capture_audio and (not psg_stream or not psg_rate):
+            return "candidate did not export a PSG sample stream"
+        psg_events_path = None
+        if case.capture_audio:
+            psg_writes = _candidate_psg_writes(oracle_out / "bus.trace")
+            if not psg_writes:
+                return "candidate did not trace PSG register writes"
+            master_clock_hz = 53203395 if case.region == "E" else 53693175
+            end_clock = round(psg_stream["frames"] * master_clock_hz / psg_rate)
+            render_clock = end_clock + 64 * 240  # Flush the 32-tap source resampler past the capture window.
+            psg_events_path = base / "psg.events"
+            payload = bytearray(struct.pack(">4sHIQ", b"NPSG", 1, len(psg_writes), render_clock))
+            for clock, value in psg_writes:
+                payload.extend(struct.pack(">QB", clock, value))
+            psg_events_path.write_bytes(payload)
+
         native_picture = base / "native.ppm"
         native_command = [str(testcart), "--rom", str(rom), "--steps", str(steps)]
         native_command.extend(("--region", case.region))
-        if case.render:
+        native_psg = base / "native-psg.raw"
+        if case.capture_audio:
+            native_command.extend(("--psg-out", str(native_psg),
+                                   "--psg-rate", str(psg_rate),
+                                   "--psg-frames", str(psg_stream["frames"]),
+                                   "--psg-events", str(psg_events_path)))
+        if case.render or (case.capture_audio and not psg_events_path):
             native_command.extend(("--frames", frames))
+        if case.render:
             native_command.extend(("--picture-out", str(native_picture)))
         native = subprocess.run(native_command,
                                 capture_output=True, text=True, timeout=30)
@@ -412,6 +489,10 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         difference = _compare_z80(case, native_z80, candidate_z80)
         if difference:
             return difference
+        if case.capture_audio:
+            difference = _compare_audio(native_psg, oracle_out / psg_stream["file"], psg_rate)
+            if difference:
+                return difference
         if case.render:
             frame_path = oracle_out / f"frame_{case.capture_frames:06}.ppm"
             if case.weave_fields:
