@@ -69,6 +69,14 @@ class FeatureCheck(unittest.TestCase):
         self.assertEqual(features["hint_lines"]["status"], "unavailable")
         self.assertEqual(features["sram_access"]["status"], "unavailable")
 
+    def test_vdp_mode_is_unavailable_without_port_trace_capability(self):
+        cases = ([], [control(10, 0, 0x04), control(20, 1, 0x04)])
+        for events in cases:
+            with self.subTest(event_count=len(events)):
+                features = extract_features(manifest(events, ["m68k_cpu_access"]), events)["features"]
+                self.assertEqual(features["vdp_mode"]["status"], "unavailable")
+                self.assertIn("vdp_port", features["vdp_mode"]["reason"])
+
     def test_z80_dac_and_direct_68000_ym_evidence(self):
         events = [
             Event(100, Z80, WRITE, 1, 0x4000, 0x2A),

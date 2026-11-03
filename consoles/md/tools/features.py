@@ -194,6 +194,8 @@ def extract_features(manifest, events):
     if vdp_scope_reason:
         mode_observation = {"status": "unavailable", "evidence": mode_evidence,
                             "reason": vdp_scope_reason}
+    elif "vdp_port" not in capabilities:
+        mode_observation = _observation(capabilities, vdp_cap, mode_evidence)
     elif mode4_write is None and mode5_write is None:
         mode_observation = {"status": "not_observed", "evidence": [],
                             "reason": "mode registers were not written in this bounded run"}

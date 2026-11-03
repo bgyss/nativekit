@@ -101,6 +101,7 @@ class SurveyCheck(unittest.TestCase):
             self.assertNotIn("UNSUPPORTED_MAPPER", markdown)
             self.assertNotIn("../../", markdown)
             self.assertIn("survey-feature-filter-v1", markdown)
+            self.assertIn('"Observed" describes captured evidence, not feature use', markdown)
             self.assertNotIn("FAIL_RUN", markdown)
             self.assertIn("DUPLICATE", markdown)
             self.assertIn("DUPLICATE [2]", markdown)

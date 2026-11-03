@@ -213,6 +213,7 @@ def render_markdown(report):
         f"{report['start_press']['frame']}, one-frame {report['start_press']['button']} snapshot.",
         "- Trace scope: survey-feature-filter-v1; CPU events are filtered to feature ranges, device events are retained.",
         "- VDP mode classification uses the captured M4 and M5 register bits together.",
+        '- "Observed" describes captured evidence, not feature use; boolean `enabled` values show whether a setting was on.',
         "- ROM paths and contents are not included in this report.",
         "",
         "## Run status counts",

@@ -20,6 +20,10 @@ runner; without a valid header window, SRAM use remains `unavailable`. HINT line
 events report VDP pending lines; they do not prove the 68000 accepted or serviced
 each interrupt.
 
+An `observed` status means trace evidence was captured, not that a setting was
+active. For boolean settings, the `enabled` value distinguishes active from
+explicitly disabled.
+
 Feature evidence contains addresses, values, clocks, and register writes from
 the trace. The JSON output does not include input paths or ROM contents.
 
