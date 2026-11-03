@@ -296,13 +296,31 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 **Interfaces:**
 - `mise run test:md-rom` runs all Stage 2 synthetic cases; `run.py --only NAME,...` supports
   focused task tests.
-- `run.py` compares 68000 reads/values/clocks, DMA slots, and Mode 5 frames; `KNOWN` contains only
-  individually reviewed differences with a hardware or candidate limitation.
+- `run.py` compares 68000 access order and values, DMA slots, and Mode 5 frames. Native unit checks
+  pin bus-cycle clocks and the direct VDP microprogram compares relative CPU-to-VDP event offsets;
+  raw absolute timestamps are not comparable because the candidate ROM charges 68000 instruction
+  execution while the native table interpreter charges explicit machine accesses only. `KNOWN`
+  contains only individually reviewed differences with a hardware or candidate limitation.
 
-- [ ] Ensure every Stage 2 requirement above has a named case and every case has a passing native
+- [x] Ensure every Stage 2 requirement above has a named case and every case has a passing native
   result or a reasoned `KNOWN` entry.
-- [ ] Run `mise run tools:md`, `mise run test:md-oracle-smoke`, `mise run test:md-rom`, and the full
+- [x] Run `mise run tools:md`, `mise run test:md-oracle-smoke`, `mise run test:md-rom`, and the full
   Stage 0 gates on the final Stage 2 tree. Inspect logs for warnings and the report for ROM paths.
-- [ ] Request a fresh whole-branch review; resolve all Critical/Important findings before marking
+- [x] Request a fresh whole-branch review; resolve all Critical/Important findings before marking
   Stage 2 complete.
-- [ ] Commit the reviewed Stage 2 result. Stage 3 requires its own plan after this stage lands.
+- [x] Commit the reviewed Stage 2 result. Stage 3 requires its own plan after this stage lands.
+
+**Task 8 validation record (2026-11-03):** The 35 named MD ROM cases have 31 passing comparisons
+and four candidate differences listed in `tests/rom/KNOWN` (TAS and three DMA slot-cadence cases).
+The matrix checks H32/H40 SOVR, sprite collision, and an SOVR clear/reread in one scanline; the
+render unit check also verifies midline collision status. Focused selection runs only the requested
+names and rejects unknown names. The whole-branch review found no Critical or Important findings
+after the counter, port-decode, display-disable, scheduling, and status fixes. SNES golden comparison
+reports 0 of 2393 differences, ROM comparison reports 0 of 1164 unlisted differences with 56
+documented `KNOWN` cases, and the three-run timing floor is 20.6 s CPU (23.07 s limit). The kit,
+consumer, and MD unit checks pass. `mise run test` has four host-render failures: macOS pointer
+trap and Metal/GL/Vulkan overlay-open failures. The aggregate build stops at the missing Vulkan
+SDK; standalone null, macOS, Metal, GL, x86, and no-host builds pass. MinGW linking lacks
+`-lmcfgthread`; the full iOS build is blocked by the stale CoreSimulator and DerivedData access.
+The default oracle-smoke task's Nix compiler cannot link against this Xcode SDK; the same fixture
+passes with the system compiler first in `PATH`. No ROM paths appear in the report.

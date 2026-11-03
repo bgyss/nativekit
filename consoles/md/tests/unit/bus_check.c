@@ -37,6 +37,14 @@ static int fail_if_fatal_mode_returns(const char *mode)
         (void)rd8(0xA00000);
     } else if (!strcmp(mode, "z80-word"))
         (void)rd16(0xA00000);
+    else if (!strcmp(mode, "vdp-word-read-0a"))
+        (void)rd16(0xC0000A);
+    else if (!strcmp(mode, "vdp-word-read-d-0a"))
+        (void)rd16(0xD0000A);
+    else if (!strcmp(mode, "vdp-byte-read-0a"))
+        (void)rd8(0xC0000A);
+    else if (!strcmp(mode, "vdp-byte-read-d-0a"))
+        (void)rd8(0xD0000A);
     else
         return 2;
     return 3;

@@ -26,6 +26,7 @@ class Case:
     region: str = "U"
     capture_frames: int = 2
     weave_fields: bool = False
+    weave_dimensions: tuple[int, int] = (256, 224)
 
 
 def _vdp_reg(index, value):
@@ -71,18 +72,22 @@ def _render_scene(name, tile_colors, plane_a_rows=None, plane_b_row=None,
                   window_row=None, hscroll=(0, 0), vsram=(0, 0),
                   mode11=0, h40=False, v30=False, plane_size=0,
                   window_h=0, window_v=0, region="U", sprite_entries=None,
+                  display=True, background=0, render=True,
+                  vblank_sync=True,
                   shadow_highlight=False, interlace=0, cram_colors=None,
                   extra_operations=(),
                   capture_frames=2, weave_fields=False):
     width_cells = 64 if plane_size & 0x03 == 1 else 32
     operations = [
-        Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+        (Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008)
+         if vblank_sync else
+         Operation(POLL, 2, 0xC00008, 0xE000, compare_mask=0xFF00)),
         _vdp_reg(0, 0x04),
-        _vdp_reg(1, 0x44 | (0x08 if v30 else 0)),
+        _vdp_reg(1, (0x44 if display else 0x04) | (0x08 if v30 else 0)),
         _vdp_reg(2, 0x10),
         _vdp_reg(3, 0x20),
         _vdp_reg(4, 0x03),
-        _vdp_reg(7, 0),
+        _vdp_reg(7, background),
         _vdp_reg(11, mode11),
         _vdp_reg(12, (0x81 if h40 else 0) | ((interlace & 0x03) << 1) |
                  (0x08 if shadow_highlight else 0)),
@@ -115,8 +120,9 @@ def _render_scene(name, tile_colors, plane_a_rows=None, plane_b_row=None,
     if vsram != (0, 0):
         operations.extend(_vdp_write_words(5, 0, vsram))
     operations.extend(extra_operations)
-    return Case(name, tuple(operations), render=True, region=region,
-                capture_frames=capture_frames, weave_fields=weave_fields)
+    return Case(name, tuple(operations), render=render, region=region,
+                capture_frames=capture_frames, weave_fields=weave_fields,
+                weave_dimensions=(320 if h40 else 256, 240 if v30 else 224))
 
 
 def all_cases():
@@ -233,6 +239,8 @@ def all_cases():
     _render_scene("render_h32_v30", {0: 1}, v30=True, region="E"),
     _render_scene("render_h40_v30", {0: 1}, h40=True, v30=True,
                   plane_size=1, region="E"),
+    _render_scene("render_display_disabled", {0: 1},
+                  plane_a_rows={0: [0]}, background=2, display=False),
     _render_scene("render_sprite_basic", {0: 1, 1: 2},
                   sprite_entries=[(0x0080, 0x0000, 0x0001, 0x0080)]),
     _render_scene("render_sprite_clipping", {0: 1, 1: 2},
@@ -263,7 +271,53 @@ def all_cases():
                   shadow_highlight=True, cram_colors=[0x0008, 0x00E0, 0x0E00, 0x0EEE]),
     _render_scene("render_interlace2", {0: 1}, interlace=3, weave_fields=True),
     _render_scene("render_midline_register", {0: 1},
-                  extra_operations=(Operation(POLL, 2, 0xC00008, 0x1000,
-                                              compare_mask=0xF0FF),
+                  extra_operations=(Operation(POLL, 2, 0xC00008, 0x0010,
+                                              compare_mask=0xFFF0),
                                     _vdp_reg(7, 1)),
-                  capture_frames=1)]
+                  capture_frames=1),
+    _render_scene("sprite_overflow_status_h32", {0: 0, 1: 2},
+                  sprite_entries=[(0x0080, index + 1, 0, 0x0080)
+                                  for index in range(16)] +
+                                 [(0x0080, 0, 1, 0x0080)],
+                  render=False,
+                  extra_operations=(Operation(POLL, 2, 0xC00004, 0,
+                                              compare_mask=0x0008),
+                                    Operation(POLL, 2, 0xC00008, 0x0100,
+                                              compare_mask=0xFF00),
+                                    Operation(READ, 2, 0xC00004, 0x0040,
+                                              compare_mask=0x0040))),
+    _render_scene("sprite_overflow_status_reread_h32", {0: 0, 1: 2},
+                  sprite_entries=[(0x0080, index + 1, 0, 0x0080)
+                                  for index in range(16)] +
+                                 [(0x0080, 0, 1, 0x0080)],
+                  render=False,
+                  extra_operations=(Operation(POLL, 2, 0xC00004, 0,
+                                              compare_mask=0x0008),
+                                    Operation(POLL, 2, 0xC00008, 0x0100,
+                                              compare_mask=0xFF00),
+                                    Operation(READ, 2, 0xC00004, 0x0040,
+                                              compare_mask=0x0040),
+                                    Operation(READ, 2, 0xC00004, 0,
+                                              compare_mask=0x0040))),
+    _render_scene("sprite_overflow_status_h40", {0: 0, 1: 2}, h40=True,
+                  plane_size=1,
+                  sprite_entries=[(0x0080, index + 1, 0, 0x0080)
+                                  for index in range(20)] +
+                                 [(0x0080, 0, 1, 0x0080)],
+                  render=False,
+                  extra_operations=(Operation(POLL, 2, 0xC00004, 0,
+                                              compare_mask=0x0008),
+                                    Operation(POLL, 2, 0xC00008, 0x0100,
+                                              compare_mask=0xFF00),
+                                    Operation(READ, 2, 0xC00004, 0x0040,
+                                              compare_mask=0x0040))),
+    _render_scene("sprite_collision_status", {1: 2},
+                  sprite_entries=[(0x0080, 1, 1, 0x0080),
+                                  (0x0080, 0, 1, 0x0080)],
+                  render=False,
+                  extra_operations=(Operation(POLL, 2, 0xC00004, 0,
+                                              compare_mask=0x0008),
+                                    Operation(POLL, 2, 0xC00008, 0x0100,
+                                              compare_mask=0xFF00),
+                                    Operation(READ, 2, 0xC00004, 0x0020,
+                                              compare_mask=0x0020)))]

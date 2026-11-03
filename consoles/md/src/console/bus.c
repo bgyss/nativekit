@@ -139,6 +139,18 @@ static uint32_t md_vdp_port(uint32_t addr)
     return addr & 0x1Fu;
 }
 
+static uint32_t md_vdp_word_port(uint32_t addr)
+{
+    uint32_t port = md_vdp_port(addr);
+    if (port == 0x00u || port == 0x02u)
+        return MD_VDP_DATA_PORT;
+    if (port == 0x04u || port == 0x06u)
+        return MD_VDP_CONTROL_PORT;
+    if (port == 0x08u)
+        return MD_VDP_HV_PORT;
+    return UINT32_MAX;
+}
+
 static uint8_t md_read8(uint32_t addr)
 {
     if (addr <= 0x3FFFFFu)
@@ -164,12 +176,14 @@ static uint8_t md_read8(uint32_t addr)
         nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
-    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x08u)
-        return (uint8_t)(md_vdp_hv_counter() >> 8);
-    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x09u)
-        return (uint8_t)md_vdp_hv_counter();
-    if (md_is_vdp(addr))
+    if (md_is_vdp(addr)) {
+        uint32_t port = md_vdp_port(addr);
+        if (port == 0x08u)
+            return (uint8_t)(md_vdp_hv_counter() >> 8);
+        if (port == 0x09u)
+            return (uint8_t)md_vdp_hv_counter();
         nk_fatal("VDP read state is not implemented at $%06X", (unsigned)addr);
+    }
 
     nk_fatal("unsupported 68000 byte read at $%06X", (unsigned)addr);
 }
@@ -198,8 +212,8 @@ static uint16_t md_read16(uint32_t addr)
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
     if (md_is_vdp(addr)) {
-        uint32_t port = md_vdp_port(addr) & 0x1Du;
-        if (port == MD_VDP_DATA_PORT || port == MD_VDP_CONTROL_PORT || port == MD_VDP_HV_PORT)
+        uint32_t port = md_vdp_word_port(addr);
+        if (port != UINT32_MAX)
             return md_vdp_read16(port, md_clock);
         nk_fatal("prohibited VDP word read at $%06X", (unsigned)addr);
     }
@@ -297,7 +311,7 @@ static void md_write16(uint32_t addr, uint16_t value)
         return; /* mapped writes; chip state belongs to later stages */
 
     if (md_is_vdp(addr)) {
-        uint32_t port = md_vdp_port(addr) & 0x1Du;
+        uint32_t port = md_vdp_word_port(addr);
         if (port == MD_VDP_DATA_PORT || port == MD_VDP_CONTROL_PORT) {
             md_vdp_write16(port, value, md_clock);
             return;

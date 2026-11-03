@@ -12,6 +12,7 @@
 #include "nk/fatal.h"
 
 #define MD_VDP_FIFO_WORDS 4u
+#define MD_VDP_REGISTER_EVENTS 8u
 #define MD_VDP_NEVER UINT64_MAX
 
 typedef struct md_vdp_fifo_entry {
@@ -22,13 +23,21 @@ typedef struct md_vdp_fifo_entry {
     uint16_t value;
 } md_vdp_fifo_entry;
 
+typedef struct md_vdp_register_event {
+    uint64_t clock;
+    uint8_t reg;
+    uint8_t value;
+} md_vdp_register_event;
+
 static uint8_t registers[24];
 static uint8_t vram[0x10000];
 static uint16_t cram[64];
 static uint16_t vsram[40];
 static md_vdp_fifo_entry fifo[MD_VDP_FIFO_WORDS];
+static md_vdp_register_event register_events[MD_VDP_REGISTER_EVENTS];
 static unsigned fifo_head;
 static unsigned fifo_count;
+static unsigned register_event_count;
 static uint64_t next_fifo_clock;
 static unsigned lines_per_frame;
 static unsigned active_lines;
@@ -46,6 +55,8 @@ static uint8_t code;
 static int control_pending;
 static int read_buffer_valid;
 static int vint_flag;
+static int sprite_overflow_flag;
+static int sprite_collision_flag;
 static int vdp_pal;
 
 md_vdp_trace_fn md_vdp_trace_hook;
@@ -156,6 +167,12 @@ static uint16_t vdp_status(void)
         value |= 0x0002;
     if (vint_flag)
         value |= 0x0080;
+    if (sprite_overflow_flag)
+        value |= 0x0040;
+    if (sprite_collision_flag)
+        value |= 0x0020;
+    if (field)
+        value |= 0x0010;
     if (line >= active_lines)
         value |= 0x0008;
     if (hpos >= active_hblank)
@@ -165,12 +182,29 @@ static uint16_t vdp_status(void)
     return value;
 }
 
+static void schedule_register_write(unsigned reg, uint8_t value, uint64_t clock)
+{
+    unsigned index = register_event_count;
+
+    if (reg >= sizeof registers)
+        nk_fatal("VDP register number %u is outside 0-23", reg);
+    if (register_event_count == MD_VDP_REGISTER_EVENTS)
+        nk_fatal("VDP register-write event queue is full");
+    while (index && register_events[index - 1u].clock > clock) {
+        register_events[index] = register_events[index - 1u];
+        index--;
+    }
+    register_events[index].clock = clock;
+    register_events[index].reg = (uint8_t)reg;
+    register_events[index].value = value;
+    register_event_count++;
+}
+
 static void control_write(uint16_t value, uint64_t clock)
 {
     if ((value & 0xC000u) == 0x8000u) {
         control_pending = 0;
-        md_vdp_render_until(clock);
-        md_vdp_set_register((value >> 8) & 0x1Fu, (uint8_t)value);
+        schedule_register_write((value >> 8) & 0x1Fu, (uint8_t)value, clock);
         return;
     }
     if (!control_pending) {
@@ -199,6 +233,7 @@ void md_vdp_reset(const nmd_cart *cart)
     memset(cram, 0, sizeof cram);
     memset(vsram, 0, sizeof vsram);
     memset(fifo, 0, sizeof fifo);
+    memset(register_events, 0, sizeof register_events);
     lines_per_frame = cart && cart->region == NMD_PAL ? 312u : 262u;
     vdp_pal = cart && cart->region == NMD_PAL;
     active_lines = 224;
@@ -211,6 +246,7 @@ void md_vdp_reset(const nmd_cart *cart)
     field = 0;
     fifo_head = 0;
     fifo_count = 0;
+    register_event_count = 0;
     next_fifo_clock = MD_VDP_NEVER;
     address = 0;
     first_control_word = 0;
@@ -219,6 +255,8 @@ void md_vdp_reset(const nmd_cart *cart)
     control_pending = 0;
     read_buffer_valid = 0;
     vint_flag = 0;
+    sprite_overflow_flag = 0;
+    sprite_collision_flag = 0;
     md_vdp_render_reset();
 }
 
@@ -231,6 +269,16 @@ void md_vdp_set_register(unsigned reg, uint8_t value)
     registers[reg] = value;
     if (reg == 1)
         active_lines = (lines_per_frame == 312 && (value & 0x08)) ? 240u : 224u;
+}
+
+void md_vdp_flag_sprite_overflow(void)
+{
+    sprite_overflow_flag = 1;
+}
+
+void md_vdp_flag_sprite_collision(void)
+{
+    sprite_collision_flag = 1;
 }
 
 uint8_t md_vdp_register(unsigned reg)
@@ -288,9 +336,12 @@ void md_vdp_dma_write_byte(uint16_t addr, uint8_t value)
 
 uint64_t md_vdp_next_event(void)
 {
+    uint64_t next = next_line_clock;
     if (fifo_count && line < active_lines && next_fifo_clock < next_line_clock)
-        return next_fifo_clock;
-    return next_line_clock;
+        next = next_fifo_clock;
+    if (register_event_count && register_events[0].clock < next)
+        next = register_events[0].clock;
+    return next;
 }
 
 void md_vdp_advance(uint64_t to_clock)
@@ -304,35 +355,46 @@ void md_vdp_advance(uint64_t to_clock)
             continue;
         }
 
-        md_vdp_render_line(line);
-        line++;
-        next_line_clock += MD_MASTER_CLOCKS_PER_LINE;
-        if (line >= lines_per_frame) {
-            line = 0;
-            frame_count++;
-            hint_counter = 0;
-            if ((registers[12] & 0x06u) != 0)
-                field ^= 1u;
-            else
-                field = 0;
-        }
-
-        if (line == active_lines) {
-            vblank_count++;
-            vint_flag = 1;
-            if (registers[1] & 0x20)
-                md_irq_request(6);
-            fifo_drain_all();
-        }
-
-        if (line < active_lines && (registers[0] & 0x10)) {
-            if (!hint_counter) {
-                hint_count++;
-                md_irq_request(4);
-                hint_counter = registers[10];
-            } else {
-                hint_counter--;
+        if (next_line_clock == next) {
+            md_vdp_render_line(line);
+            line++;
+            next_line_clock += MD_MASTER_CLOCKS_PER_LINE;
+            if (line >= lines_per_frame) {
+                line = 0;
+                frame_count++;
+                hint_counter = 0;
+                if ((registers[12] & 0x06u) != 0)
+                    field ^= 1u;
+                else
+                    field = 0;
             }
+
+            if (line == active_lines) {
+                vblank_count++;
+                vint_flag = 1;
+                if (registers[1] & 0x20)
+                    md_irq_request(6);
+                fifo_drain_all();
+            }
+
+            if (line < active_lines && (registers[0] & 0x10)) {
+                if (!hint_counter) {
+                    hint_count++;
+                    md_irq_request(4);
+                    hint_counter = registers[10];
+                } else {
+                    hint_counter--;
+                }
+            }
+        }
+
+        if (register_event_count && register_events[0].clock == next) {
+            md_vdp_register_event event = register_events[0];
+            unsigned i;
+            for (i = 1; i < register_event_count; i++)
+                register_events[i - 1u] = register_events[i];
+            register_event_count--;
+            md_vdp_set_register(event.reg, event.value);
         }
     }
 }
@@ -391,9 +453,12 @@ uint16_t md_vdp_hv_counter(void)
     uint64_t hpos = md_clock % MD_MASTER_CLOCKS_PER_LINE;
     unsigned h_limit = registers[12] & 0x01 ? 0xA0u : 0x80u;
     unsigned h = (unsigned)(hpos * h_limit / MD_MASTER_CLOCKS_PER_LINE);
+    unsigned v = line;
     if (h >= h_limit)
         h = h_limit - 1;
-    return (uint16_t)((h << 8) | (line & 0xFFu));
+    if (registers[12] & 0x06u)
+        v = (v & 0xFEu) | ((v >> 8) & 1u);
+    return (uint16_t)(((v & 0xFFu) << 8) | (h & 0xFFu));
 }
 
 uint8_t md_vdp_dma_read_copy_byte(uint16_t addr)
@@ -503,9 +568,12 @@ static uint16_t read_status(uint64_t clock)
 {
     uint16_t value;
     md_advance_to(clock + 24u);
+    md_vdp_render_until(md_clock);
     control_pending = 0;
     value = vdp_status();
     vint_flag = 0;
+    sprite_overflow_flag = 0;
+    sprite_collision_flag = 0;
     md_irq_clear(6);
     trace_vdp_port(md_clock, MD_VDP_TRACE_READ, 2, MD_VDP_CONTROL_PORT, value);
     return value;

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Compare shared synthetic bus cases on BlastEm and the native C model."""
+import argparse
+import hashlib
 import os
 import pathlib
-import hashlib
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parents[3]
@@ -73,11 +75,30 @@ def _event_value_masks(case):
 
 def _compare(case, native, candidate):
     masks = _event_value_masks(case)
+    expected_reads = {}
+    expected_read_counts = Counter()
+    for op in case.operations:
+        if op.code == cases.READ and op.compare_mask:
+            key = (READ, op.width, op.addr & 0xFFFFFF)
+            expected_reads.setdefault(key, []).append((op.value, op.compare_mask))
     for index, (native_event, candidate_event) in enumerate(zip(native, candidate)):
         if native_event[:3] != candidate_event[:3]:
             return (f"event {index}: native {native_event[:4]!r}, "
                     f"candidate {candidate_event[:4]!r}")
         mask = masks.get(native_event[:3], (1 << (native_event[1] * 8)) - 1)
+        expected_sequence = expected_reads.get(native_event[:3], ())
+        expected_index = expected_read_counts[native_event[:3]]
+        expected = (expected_sequence[expected_index]
+                    if expected_index < len(expected_sequence) else None)
+        if expected:
+            expected_read_counts[native_event[:3]] += 1
+            expected_value, expected_mask = expected
+            if (native_event[3] & expected_mask) != (expected_value & expected_mask):
+                return (f"native read {index}: {native_event[:4]!r}, expected "
+                        f"0x{expected_value:X} with mask 0x{expected_mask:X}")
+            if (candidate_event[3] & expected_mask) != (expected_value & expected_mask):
+                return (f"candidate read {index}: {candidate_event[:4]!r}, expected "
+                        f"0x{expected_value:X} with mask 0x{expected_mask:X}")
         if (native_event[3] & mask) != (candidate_event[3] & mask):
             return (f"event {index}: native {native_event[:4]!r}, "
                     f"candidate {candidate_event[:4]!r}, mask 0x{mask:X}")
@@ -174,13 +195,42 @@ def _compare_dma(case, native_vdp, native_dma, candidate_vdp, candidate_dma):
 
 
 def _ignore_render_sync_reads(case, bus_events, vdp_events):
-    if not case.render:
+    sync_ports = {
+        (op.addr & 0x1F) & 0x1D
+        for op in case.operations
+        if op.code == cases.POLL and 0xC00000 <= (op.addr & 0xFFFFFF) <= 0xDFFFFF
+    }
+    if not sync_ports:
         return bus_events, vdp_events
-    bus = [event for event in bus_events
-           if not (event[0] == READ and 0xC00000 <= event[2] <= 0xDFFFFF and
-                   ((event[2] & 0x1F) & 0x1D) in (4, 8))]
-    vdp = [event for event in vdp_events
-           if not (event[0] == READ and event[2] in (4, 8))]
+
+    def bus_port(event):
+        address = event[2]
+        if 0xC00000 <= address <= 0xDFFFFF:
+            return (address & 0x1F) & 0x1D
+        return None
+
+    keep_reads = Counter(
+        (op.addr & 0x1F) & 0x1D for op in case.operations
+        if op.code == cases.READ and
+        0xC00000 <= (op.addr & 0xFFFFFF) <= 0xDFFFFF)
+
+    def strip_sync_reads(events, port_for):
+        counts = Counter(event_port for event in events
+                         if event[0] == READ and
+                         (event_port := port_for(event)) in sync_ports)
+        discard = Counter({port: max(0, count - keep_reads[port])
+                           for port, count in counts.items()})
+        filtered = []
+        for event in events:
+            port = port_for(event) if event[0] == READ else None
+            if port in sync_ports and discard[port]:
+                discard[port] -= 1
+            else:
+                filtered.append(event)
+        return filtered
+
+    bus = strip_sync_reads(bus_events, bus_port)
+    vdp = strip_sync_reads(vdp_events, lambda event: event[2])
     return bus, vdp
 
 
@@ -307,8 +357,7 @@ def run_one(case, assembler, core, testcart):
         if case.render:
             frame_path = oracle_out / f"frame_{case.capture_frames:06}.ppm"
             if case.weave_fields:
-                candidate_width = 320 if case.name.endswith("h40") else 256
-                field_height = 240 if case.region == "E" else 224
+                candidate_width, field_height = case.weave_dimensions
                 woven = base / "candidate-woven.ppm"
                 _weave_fields(oracle_out / "frame_000001.ppm", frame_path,
                               candidate_width, field_height, woven)
@@ -331,7 +380,23 @@ def _known_cases():
     return known
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--only", metavar="NAME,...",
+                        help="run only these comma-separated case names")
+    args = parser.parse_args(argv)
+
+    tests = cases.all_cases()
+    if args.only is not None:
+        requested = {name.strip() for name in args.only.split(",") if name.strip()}
+        if not requested:
+            parser.error("--only requires at least one case name")
+        available = {case.name for case in tests}
+        unknown = sorted(requested - available)
+        if unknown:
+            parser.error("unknown case name(s): " + ", ".join(unknown))
+        tests = [case for case in tests if case.name in requested]
+
     extension = "dylib" if sys.platform == "darwin" else "so"
     assembler = pathlib.Path(os.environ.get(
         "NMD_ASSEMBLER", ROOT / "build/toolchains/vasm/vasmm68k_mot"))
@@ -345,7 +410,6 @@ def main():
 
     known = _known_cases()
     failures = fixed = known_differences = 0
-    tests = cases.all_cases()
     for case in tests:
         difference = run_one(case, assembler, core, testcart)
         if case.name in known:

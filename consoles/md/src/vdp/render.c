@@ -17,6 +17,7 @@
 static uint32_t picture[MD_RENDER_MAX_WIDTH * MD_RENDER_MAX_HEIGHT];
 static unsigned rendered_line = MD_RENDER_NO_LINE;
 static unsigned rendered_x;
+static unsigned overflow_reported_line = MD_RENDER_NO_LINE;
 
 static unsigned tile_height(void)
 {
@@ -186,7 +187,8 @@ static int sprite_pixel(uint16_t attributes, unsigned tile, unsigned x, unsigned
     return 1;
 }
 
-static void sprite_line(unsigned raster_y, uint16_t patterns[MD_RENDER_MAX_WIDTH],
+static void sprite_line(unsigned raster_y, unsigned begin, unsigned end,
+                        uint16_t patterns[MD_RENDER_MAX_WIDTH],
                         uint8_t ranks[MD_RENDER_MAX_WIDTH])
 {
     int width, height;
@@ -197,6 +199,7 @@ static void sprite_line(unsigned raster_y, uint16_t patterns[MD_RENDER_MAX_WIDTH
     unsigned index = 0;
     unsigned visited = 0;
     unsigned active = 0;
+    uint8_t occupied[MD_RENDER_MAX_WIDTH] = { 0 };
 
     md_vdp_dimensions(&width, &height);
     (void)height;
@@ -217,8 +220,13 @@ static void sprite_line(unsigned raster_y, uint16_t patterns[MD_RENDER_MAX_WIDTH
 
         if (row >= 0 && (unsigned)row < sprite_height) {
             active++;
-            if (active > max_line_sprites)
+            if (active > max_line_sprites) {
+                if (overflow_reported_line != md_vdp_current_line()) {
+                    md_vdp_flag_sprite_overflow();
+                    overflow_reported_line = md_vdp_current_line();
+                }
                 break;
+            }
             if ((xword & 0x01FFu) != 0u) {
                 unsigned source_y = (attributes & 0x1000u) ?
                                     sprite_height - 1u - (unsigned)row : (unsigned)row;
@@ -240,6 +248,11 @@ static void sprite_line(unsigned raster_y, uint16_t patterns[MD_RENDER_MAX_WIDTH
                     if (screen_x < 0 || screen_x >= width ||
                         !sprite_pixel(attributes, tile, pixel_x, pixel_y, &pattern))
                         continue;
+                    if ((unsigned)screen_x >= begin && (unsigned)screen_x < end) {
+                        if (occupied[screen_x])
+                            md_vdp_flag_sprite_collision();
+                        occupied[screen_x] = 1;
+                    }
                     rank = layer_rank(3u, (pattern & MD_RENDER_PRIORITY) != 0);
                     if (rank > ranks[screen_x]) {
                         patterns[screen_x] = pattern;
@@ -273,6 +286,14 @@ static void render_range(unsigned line, unsigned begin, unsigned end)
         width > MD_RENDER_MAX_WIDTH)
         return;
 
+    if (!(md_vdp_register(1) & 0x40u)) {
+        for (x = begin; x < end; x++) {
+            picture[(size_t)(double_height ? raster_y : line) * (size_t)width + x] =
+                cram_color(md_vdp_register(7) & 0x3Fu, 0);
+        }
+        return;
+    }
+
     for (x = begin; x < end; x++) {
         uint16_t plane_a = in_window(x, raster_y) ? window_pixel(x, raster_y) :
                                                    plane_pixel(0, x, raster_y);
@@ -298,7 +319,7 @@ static void render_range(unsigned line, unsigned begin, unsigned end)
         }
     }
 
-    sprite_line(raster_y, sprite_patterns, ranks);
+    sprite_line(raster_y, begin, end, sprite_patterns, ranks);
     for (x = begin; x < end; x++) {
         uint16_t sprite = sprite_patterns[x];
         if (sprite) {
@@ -327,6 +348,7 @@ void md_vdp_render_reset(void)
         picture[i] = 0xFF000000u;
     rendered_line = MD_RENDER_NO_LINE;
     rendered_x = 0;
+    overflow_reported_line = MD_RENDER_NO_LINE;
 }
 
 void md_vdp_render_line(unsigned line)
@@ -342,6 +364,7 @@ void md_vdp_render_line(unsigned line)
     render_range(line, rendered_x, (unsigned)width);
     rendered_line = MD_RENDER_NO_LINE;
     rendered_x = 0;
+    overflow_reported_line = MD_RENDER_NO_LINE;
 }
 
 void md_vdp_render_until(uint64_t clock)

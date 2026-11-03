@@ -117,6 +117,7 @@ static void test_sprite_over_plane_pixel(nmd_cart *cart)
 static void test_interlace_two_field_output(nmd_cart *cart)
 {
     const uint32_t *picture;
+    uint16_t status;
     int width, height, shot_width, shot_height, xs, ys;
 
     nmd_power(cart);
@@ -146,11 +147,101 @@ static void test_interlace_two_field_output(nmd_cart *cart)
     assert(shot_width == 256 && shot_height == 448 && xs == 1 && ys == 1);
     assert(picture[0] == 0xFF000000u);
     assert(picture[256] == 0xFFFF0000u);
+    status = rd16(NMD_VDP_CONTROL);
+    assert(status & 0x0010u); /* ODD reports the current interlace field. */
 
     nmd_run_frame();
     picture = md_vdp_picture(&width, &height);
     assert(picture[0] == 0xFFFF0000u);
     assert(picture[256] == 0xFFFF0000u);
+    status = rd16(NMD_VDP_CONTROL);
+    assert(!(status & 0x0010u));
+}
+
+static void test_sprite_status_flags(nmd_cart *cart)
+{
+    uint16_t status;
+    unsigned i;
+    int y;
+
+    nmd_power(cart);
+    nmd_wait_vblank();
+    reg_write(0, 0x04);
+    reg_write(1, 0x44);
+    reg_write(5, 0x7F);
+    reg_write(15, 2);
+    control(0x40200000);
+    for (y = 0; y < 8; y++) {
+        wr16(NMD_VDP_DATA, 0x2222);
+        wr16(NMD_VDP_DATA, 0x2222);
+    }
+    control(0x7E000003);
+    for (i = 0; i < 17; i++) {
+        wr16(NMD_VDP_DATA, 0x0080);
+        wr16(NMD_VDP_DATA, (uint16_t)(i < 16 ? i + 1u : 0u));
+        wr16(NMD_VDP_DATA, (uint16_t)(i == 16 ? 1u : 0u));
+        wr16(NMD_VDP_DATA, 0x0080);
+    }
+    nmd_run_frame();
+    status = rd16(NMD_VDP_CONTROL);
+    assert(status & 0x0040u);
+    status = rd16(NMD_VDP_CONTROL);
+    assert(!(status & 0x0040u));
+
+    nmd_power(cart);
+    nmd_wait_vblank();
+    reg_write(0, 0x04);
+    reg_write(1, 0x44);
+    reg_write(5, 0x7F);
+    reg_write(15, 2);
+    control(0x40200000);
+    for (y = 0; y < 8; y++) {
+        wr16(NMD_VDP_DATA, 0x2222);
+        wr16(NMD_VDP_DATA, 0x2222);
+    }
+    control(0x7E000003);
+    wr16(NMD_VDP_DATA, 0x0080);
+    wr16(NMD_VDP_DATA, 1);
+    wr16(NMD_VDP_DATA, 1);
+    wr16(NMD_VDP_DATA, 0x0080);
+    wr16(NMD_VDP_DATA, 0x0080);
+    wr16(NMD_VDP_DATA, 0);
+    wr16(NMD_VDP_DATA, 1);
+    wr16(NMD_VDP_DATA, 0x0080);
+    nmd_run_frame();
+    status = rd16(NMD_VDP_CONTROL);
+    assert(status & 0x0020u);
+}
+
+static void test_sprite_collision_status_midline(nmd_cart *cart)
+{
+    uint16_t status;
+    int y;
+
+    nmd_power(cart);
+    nmd_wait_vblank();
+    reg_write(0, 0x04);
+    reg_write(1, 0x44);
+    reg_write(5, 0x7F);
+    reg_write(15, 2);
+    control(0x40200000);
+    for (y = 0; y < 8; y++) {
+        wr16(NMD_VDP_DATA, 0x2222);
+        wr16(NMD_VDP_DATA, 0x2222);
+    }
+    control(0x7E000003);
+    wr16(NMD_VDP_DATA, 0x0080);
+    wr16(NMD_VDP_DATA, 1);
+    wr16(NMD_VDP_DATA, 1);
+    wr16(NMD_VDP_DATA, 0x0080);
+    wr16(NMD_VDP_DATA, 0x0080);
+    wr16(NMD_VDP_DATA, 0);
+    wr16(NMD_VDP_DATA, 1);
+    wr16(NMD_VDP_DATA, 0x0080);
+
+    md_advance_to(md_vdp_frame_clocks() + 500u);
+    status = rd16(NMD_VDP_CONTROL);
+    assert(status & 0x0020u);
 }
 
 int main(void)
@@ -165,5 +256,7 @@ int main(void)
     test_picture_dimensions(&cart);
     test_sprite_over_plane_pixel(&cart);
     test_interlace_two_field_output(&cart);
+    test_sprite_status_flags(&cart);
+    test_sprite_collision_status_midline(&cart);
     return 0;
 }

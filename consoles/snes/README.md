@@ -179,7 +179,7 @@ SDK; Linux is untested) and `mise run test` runs the checks.
 `NK_HOST` (also `NSHVC_HOST`) picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
 `NK_RENDER` (also `NSHVC_RENDER`) the renderer (`soft`, `metal`, `gl` or `vulkan`). `NK_TESTS` and
 `NK_EXAMPLES` build the tests and the examples; `NSHVC_TESTS` and `NSHVC_EXAMPLES`
-remain aliases. `NK_CONSOLES` selects the consoles and defaults to `snes`. For iOS, add
+remain aliases. `NK_CONSOLES` selects the consoles and defaults to `snes;md`. For iOS, add
 `-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64
 -DNK_HOST=ios`.
 

@@ -193,8 +193,8 @@ static void test_hint_reload_and_hv_counter(void)
     power_region(NMD_NTSC);
     md_advance_to(10ull * MD_MASTER_CLOCKS_PER_LINE + MD_MASTER_CLOCKS_PER_LINE / 2);
     hv32 = md_vdp_hv_counter();
-    assert((hv32 & 0xFFu) == 10);
-    assert((hv32 >> 8) > 0 && (hv32 >> 8) <= 0x7F);
+    assert((hv32 >> 8) == 10);
+    assert((hv32 & 0xFFu) > 0 && (hv32 & 0xFFu) <= 0x7F);
     assert(rd16(0xC00008) == hv32);
     hv32 = md_vdp_hv_counter();
     assert(rd8(0xC00008) == (uint8_t)(hv32 >> 8));
@@ -202,8 +202,8 @@ static void test_hint_reload_and_hv_counter(void)
     assert(rd8(0xC00009) == (uint8_t)hv32);
     md_vdp_set_register(12, 0x81);
     hv40 = md_vdp_hv_counter();
-    assert((hv40 & 0xFFu) == 10);
-    assert((hv40 >> 8) <= 0x9F);
+    assert((hv40 >> 8) == 10);
+    assert((hv40 & 0xFFu) <= 0x9F);
 }
 
 static void test_priority_mask_and_pulse(void)

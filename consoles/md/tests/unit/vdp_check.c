@@ -116,6 +116,14 @@ static void test_status_and_hblank(nmd_cart *cart)
     uint16_t status;
     irq_count = 0;
     nmd_power(cart);
+    md_vdp_flag_sprite_overflow();
+    md_vdp_flag_sprite_collision();
+    status = rd16(NMD_VDP_CONTROL);
+    assert((status & 0x0060u) == 0x0060u);
+    status = rd16(NMD_VDP_CONTROL);
+    assert((status & 0x0060u) == 0);
+
+    nmd_power(cart);
     md_vdp_set_register(1, 0x20);  /* V interrupt enable */
     nmd_wait_vblank();
     status = rd16(NMD_VDP_CONTROL);
@@ -185,6 +193,21 @@ static void test_fifo_stall(nmd_cart *cart)
     md_bus_trace_hook = NULL;
 }
 
+static void test_register_write_is_scheduled(nmd_cart *cart)
+{
+    nmd_power(cart);
+    md_vdp_set_register(0, 0);
+    md_vdp_set_register(10, 0);
+
+    /* The control access completes before its register write reaches the VDP. */
+    md_vdp_write16(MD_VDP_CONTROL_PORT, 0x8010,
+                   MD_MASTER_CLOCKS_PER_LINE - 36u);
+    md_advance_to(MD_MASTER_CLOCKS_PER_LINE);
+    assert(md_vdp_hint_count() == 0);
+    md_advance_to(2u * MD_MASTER_CLOCKS_PER_LINE);
+    assert(md_vdp_hint_count() == 1);
+}
+
 int main(void)
 {
     nmd_cart cart = {
@@ -207,5 +230,6 @@ int main(void)
     test_status_and_hblank(&cart);
     test_port_event_timing(&cart);
     test_fifo_stall(&cart);
+    test_register_write_is_scheduled(&cart);
     return 0;
 }

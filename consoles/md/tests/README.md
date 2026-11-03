@@ -20,3 +20,21 @@ for scheduler and interrupt checks, and `mise run test:md-rom` for shared
 synthetic bus operations on BlastEm and nmd. The interrupt fixture compares
 HINT line and relative-clock deltas because the candidate trace epoch starts
 at a different absolute clock. Candidate-only differences stay in `rom/KNOWN`.
+
+## Stage 2 ROM matrix
+
+`rom/cases.py` defines the named 68000 bus, VDP port, DMA, and Mode 5 render
+cases, including disabled display and sprite status. The runner compares bus
+access order and values, DMA slots, and complete active pictures. The direct
+VDP microprogram also compares relative CPU-to-VDP event clocks; native unit
+checks pin bus-cycle and scheduler timing. To run a focused subset, pass
+comma-separated case names after the task separator, for example:
+
+```sh
+mise run test:md-rom -- --only render_sprite_basic,render_interlace2
+```
+
+The runner rejects unknown names and reports only the selected cases.
+`rom/KNOWN` lists four reviewed candidate differences: TAS handling and the
+candidate's faster memory-DMA slot cadence. The listed cases remain visible in
+the full run so changes to either side are detected.

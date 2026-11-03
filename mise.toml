@@ -49,7 +49,7 @@ depends = ["build:null"]
 run = "cmake --build build/null --target render_check && build/null/tests/render_check"
 
 [tasks."test:md-rom"]
-description = "Compare shared synthetic 68000 bus cases with the candidate core"
+description = "Compare all or selected synthetic 68000 bus and VDP cases with the candidate core"
 depends = ["build:null", "tools:md"]
 run = "python3 consoles/md/tests/rom/run.py"
 

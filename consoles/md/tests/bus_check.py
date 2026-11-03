@@ -20,6 +20,10 @@ fatal_cases = {
     "reserved-read": "unsupported 68000 byte read",
     "z80-without-busreq": "without BUSREQ",
     "z80-word": "word access to 8-bit Z80 RAM",
+    "vdp-word-read-0a": "prohibited VDP word read",
+    "vdp-word-read-d-0a": "prohibited VDP word read",
+    "vdp-byte-read-0a": "VDP read state is not implemented",
+    "vdp-byte-read-d-0a": "VDP read state is not implemented",
 }
 for mode, message in fatal_cases.items():
     result = subprocess.run([str(binary), mode], capture_output=True, text=True)
