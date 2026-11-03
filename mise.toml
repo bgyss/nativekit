@@ -28,6 +28,11 @@ description = "Check the 68000 bus map, byte lanes, timing, and fatal accesses"
 depends = ["build:null"]
 run = "python3 consoles/md/tests/bus_check.py"
 
+[tasks."test:md-interrupt"]
+description = "Check the 68000 clock scheduler, VDP interrupts, and waits"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/interrupt_check.py"
+
 [tasks."test:md-rom"]
 description = "Compare shared synthetic 68000 bus cases with the candidate core"
 depends = ["build:null", "tools:md"]

@@ -51,7 +51,7 @@ static uint32_t md_address(uint32_t addr)
     return addr & MD_ADDRESS_MASK;
 }
 
-static void md_advance_to(uint64_t to_clock)
+static void md_bus_advance_to(uint64_t to_clock)
 {
     if (md_clock_hook)
         md_clock_hook(to_clock);
@@ -64,7 +64,7 @@ static void md_advance_to(uint64_t to_clock)
 
 static void md_bus_cycle_complete(void)
 {
-    md_advance_to(md_clock + MD_BUS_CYCLE_MASTER_CLOCKS);
+    md_bus_advance_to(md_clock + MD_BUS_CYCLE_MASTER_CLOCKS);
 }
 
 static void md_bus_trace(uint8_t operation, uint8_t width, uint32_t addr, uint32_t value)
@@ -140,6 +140,10 @@ static uint8_t md_read8(uint32_t addr)
         nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
+    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x08u)
+        return (uint8_t)(md_vdp_hv_counter() >> 8);
+    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x09u)
+        return (uint8_t)md_vdp_hv_counter();
     if (md_is_vdp(addr))
         nk_fatal("VDP read state is not implemented at $%06X", (unsigned)addr);
 
@@ -169,6 +173,8 @@ static uint16_t md_read16(uint32_t addr)
         nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
+    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x08u)
+        return md_vdp_hv_counter();
     if (md_is_vdp(addr))
         nk_fatal("VDP read state is not implemented at $%06X", (unsigned)addr);
 
@@ -270,6 +276,7 @@ void md_bus_reset(const nmd_cart *cart)
 {
     active_cart = cart;
     memset(&nmd_cpu, 0, sizeof nmd_cpu);
+    nmd_cpu.sr = 0x2700; /* reset starts in supervisor mode with all IRQs masked */
     memset(work_ram, 0, sizeof work_ram);
     memset(md_z80_ram, 0, sizeof md_z80_ram);
     md_clock = 0;
@@ -297,7 +304,7 @@ uint8_t nmd_bus_read8(uint32_t addr)
 {
     uint8_t value;
     addr = md_address(addr);
-    md_advance_to(md_clock);
+    md_bus_advance_to(md_clock);
     value = md_read8(addr);
     md_bus_cycle_complete();
     md_bus_trace(MD_BUS_TRACE_READ, 1, addr, value);
@@ -310,7 +317,7 @@ uint16_t nmd_bus_read16(uint32_t addr)
     uint16_t value;
     addr = md_address(addr);
     md_require_aligned(addr, "word read");
-    md_advance_to(md_clock);
+    md_bus_advance_to(md_clock);
     value = md_read16(addr);
     md_bus_cycle_complete();
     md_bus_trace(MD_BUS_TRACE_READ, 2, addr, value);
@@ -321,7 +328,7 @@ uint16_t nmd_bus_read16(uint32_t addr)
 void nmd_bus_write8(uint32_t addr, uint8_t value)
 {
     addr = md_address(addr);
-    md_advance_to(md_clock);
+    md_bus_advance_to(md_clock);
     md_write8(addr, value);
     md_bus_cycle_complete();
     md_bus_trace(MD_BUS_TRACE_WRITE, 1, addr, value);
@@ -332,7 +339,7 @@ void nmd_bus_write16(uint32_t addr, uint16_t value)
 {
     addr = md_address(addr);
     md_require_aligned(addr, "word write");
-    md_advance_to(md_clock);
+    md_bus_advance_to(md_clock);
     md_write16(addr, value);
     md_bus_cycle_complete();
     md_bus_trace(MD_BUS_TRACE_WRITE, 2, addr, value);

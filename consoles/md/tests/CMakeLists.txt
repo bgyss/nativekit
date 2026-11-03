@@ -12,3 +12,8 @@ target_include_directories(md_testcart PRIVATE ../src/console)
 target_link_libraries(md_testcart PRIVATE nmd)
 set_target_properties(md_testcart PROPERTIES OUTPUT_NAME md_testcart
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(interrupt_check unit/interrupt_check.c)
+target_include_directories(interrupt_check PRIVATE ../src/console)
+target_link_libraries(interrupt_check PRIVATE nmd)
+set_target_properties(interrupt_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)

@@ -14,3 +14,9 @@ author-published archive remains unverified.
 
 The candidate BlastEm traces and generated reports are exploratory evidence;
 they do not qualify hardware accuracy or title compatibility.
+
+Run `mise run test:md-bus` for native bus checks, `mise run test:md-interrupt`
+for scheduler and interrupt checks, and `mise run test:md-rom` for shared
+synthetic bus operations on BlastEm and nmd. The interrupt fixture compares
+HINT line and relative-clock deltas because the candidate trace epoch starts
+at a different absolute clock. Candidate-only differences stay in `rom/KNOWN`.

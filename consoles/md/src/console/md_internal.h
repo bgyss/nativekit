@@ -7,6 +7,8 @@
 #include "nmd/cart.h"
 #include "nmd/machine.h"
 
+#define MD_MASTER_CLOCKS_PER_LINE 3420u
+
 extern uint64_t md_clock;
 extern uint8_t md_z80_ram[0x2000];
 extern uint8_t md_memory_mode;
@@ -30,6 +32,28 @@ extern void (*md_irq_check_hook)(void);
 void md_bus_reset(const nmd_cart *cart);
 void md_irq_defer_begin(void);
 void md_irq_defer_end(void);
+
+void md_timing_reset(const nmd_cart *cart);
+void md_advance_to(uint64_t to_clock);
+/* `level` 2 asserts the EXT interrupt request; 0 releases the input line. */
+void md_ext_irq_at(int level, uint64_t clock);
+void md_irq_request_at(int level, uint64_t clock);
+void md_irq_request(int level);
+void md_irq_dispatch_pending(void);
+extern uint64_t md_irq_taken;
+extern uint64_t md_irq_last_service_clock;
+
+void md_vdp_reset(const nmd_cart *cart);
+void md_vdp_set_register(unsigned reg, uint8_t value);
+void md_vdp_advance(uint64_t to_clock);
+uint64_t md_vdp_next_event(void);
+uint64_t md_vdp_next_vblank_clock(void);
+uint64_t md_vdp_frame_clocks(void);
+uint64_t md_vdp_frame_count(void);
+uint64_t md_vdp_vblank_count(void);
+uint64_t md_vdp_hint_count(void);
+unsigned md_vdp_current_line(void);
+uint16_t md_vdp_hv_counter(void);
 
 uint8_t nmd_bus_read8(uint32_t addr);
 uint16_t nmd_bus_read16(uint32_t addr);

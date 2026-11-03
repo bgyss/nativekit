@@ -170,12 +170,12 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 
 **Files:**
 - Create: `src/console/dispatch.c` and the VDP line-scheduler portion of `src/vdp/vdp.c`
-- Modify: `include/nmd/machine.h`, `include/nmd/cart.h`, `src/console/md_internal.h`,
-  `src/front/md_console.c`,
-  `tests/rom/cases.py`, `tests/unit/interrupt_check.c`
+- Create: `tests/unit/interrupt_check.c`, `tests/interrupt_check.py`
+- Modify: `src/console/md_internal.h`, `src/console/bus.c`, `src/front/md_console.c`,
+  `consoles/md/CMakeLists.txt`, `consoles/md/tests/CMakeLists.txt`, and root `mise.toml`
 
 **Interfaces:**
-- `md_advance_to(uint64_t clock)` steps line timing, refresh, and VDP deadlines in time order;
+- `md_advance_to(uint64_t clock)` steps line timing and VDP deadlines in time order;
   `md_ext_irq_at(int level, uint64_t clock)` is the internal EXT-line input that Stage 4's pads
   will drive.
 - `nmd_wait_until(int (*ready)(void *ctx), void *ctx)` re-runs a device-read predicate while the
@@ -187,13 +187,16 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 - `md_console.run_frame` advances to one VBlank boundary and returns to the kit at the frame's
   region-specific duration.
 
-- [ ] Add cases for NTSC/PAL line/frame boundaries, HINT reload cadence, H/V counter reads, level
+- [x] Add cases for NTSC/PAL line/frame boundaries, HINT reload cadence, H/V counter reads, level
   priority, mask/unmask, STOP/wake, and an external interrupt pulse.
-- [ ] Add boundary cases where HINT or VBlank becomes pending during a bus access and during STOP;
+- [x] Add boundary cases where HINT or VBlank becomes pending during a bus access and during STOP;
   pin that service occurs at the end of the access or at the pending clock in a wait.
-- [ ] Implement a single event scheduler that advances VDP state before reads, writes, and waits;
+- [x] Implement a single event scheduler that advances VDP state before reads, writes, and waits;
   do not derive timestamps independently in the devices.
-- [ ] Run scheduler/interrupt unit cases and oracle trace comparisons; commit.
+- [x] Run scheduler/interrupt unit cases and compare the relative HINT trace with the candidate.
+- [x] Revalidate current nmd builds, kit, consumer, and MD checks; carry forward unchanged SNES
+  Stage 0 evidence and record the existing host-limited subgates.
+- [x] Commit Task 3 as a focused implementation change.
 
 ### Task 4: Implement VDP registers, ports, memory access, and FIFO timing
 

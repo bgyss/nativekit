@@ -1,10 +1,11 @@
 /*
- * md_console.c: the initial nativemd shell. Stage 2 fills in the bus, VDP,
- * picture, and frame scheduler.
+ * md_console.c: the nativekit console adapter. Remaining Stage 2 work fills
+ * in VDP ports, rendering, and variable frame dimensions.
  */
 #include <stdint.h>
 
 #include "nk/nk.h"
+#include "nk/fatal.h"
 #include "nmd/nmd.h"
 #include "md_internal.h"
 #include "md_console.h"
@@ -27,7 +28,7 @@ static void app_name(const void *cart, const char **dir, const char **title)
 static uint64_t frame_ns(void)
 {
     uint64_t mclk = active_cart && active_cart->region == NMD_PAL ? 53203395ull : 53693175ull;
-    uint64_t lines = active_cart && active_cart->region == NMD_PAL ? 313ull : 262ull;
+    uint64_t lines = active_cart && active_cart->region == NMD_PAL ? 312ull : 262ull;
     return 3420ull * lines * 1000000000ull / mclk;
 }
 
@@ -108,9 +109,13 @@ void nmd_power(const nmd_cart *cart)
 {
     active_cart = cart;
     md_bus_reset(cart);
+    md_timing_reset(cart);
 }
 
 void nmd_run_frame(void)
 {
-    /* The master-clock scheduler and VDP are added in Stage 2. */
+    if (!active_cart)
+        nk_fatal("nmd_run_frame before nmd_power");
+    md_advance_to(md_vdp_next_vblank_clock());
+    md_irq_dispatch_pending();
 }
