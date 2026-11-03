@@ -21,6 +21,7 @@ TRACE_VDP_DMA_COPY = 1 << 9
 TRACE_VDP_HINT_LINE = 1 << 10
 TRACE_CHIP_AUDIO_SOURCE = 1 << 11
 YM2612_SOURCE = 6
+PSG_SOURCE = 7
 
 
 def parse_sram_window(value):
@@ -146,7 +147,7 @@ def main():
     frame_sizes = []
     audio = bytearray()
     chip_audio = {YM2612: bytearray(), PSG: bytearray()}
-    chip_audio_source = {YM2612_SOURCE: bytearray()}
+    chip_audio_source = {YM2612_SOURCE: bytearray(), PSG_SOURCE: bytearray()}
     error = []
     queried = set()
     advertised = {}
@@ -214,7 +215,7 @@ def main():
         if actual_capabilities & TRACE_CHIP_AUDIO and not args.feature_only:
             trace_capability_names.append("chip_audio")
         if actual_capabilities & TRACE_CHIP_AUDIO_SOURCE and not args.feature_only:
-            trace_capability_names.append("ym2612_source_samples")
+            trace_capability_names.append("chip_audio_source_samples")
         if actual_capabilities & (TRACE_CHIP_AUDIO | TRACE_CHIP_AUDIO_SOURCE) and not args.feature_only:
             try:
                 register_chip_audio = core.nmd_trace_audio_register
@@ -364,11 +365,13 @@ def main():
             audio_stream_counts[device] = len(samples) // 4
     if (args.trace and not args.feature_only and
             actual_capabilities & TRACE_CHIP_AUDIO_SOURCE):
-        source_samples = chip_audio_source[YM2612_SOURCE]
-        if not source_samples:
-            raise RuntimeError("core advertises YM2612 source samples but emitted none")
-        (args.out / "ym2612-source.raw").write_bytes(source_samples)
-        audio_source_stream_counts[YM2612_SOURCE] = len(source_samples) // 4
+        for device, filename in ((YM2612_SOURCE, "ym2612-source.raw"),
+                                 (PSG_SOURCE, "psg-source.raw")):
+            source_samples = chip_audio_source[device]
+            if not source_samples:
+                raise RuntimeError(f"core advertises raw chip audio but emitted no device {device} samples")
+            (args.out / filename).write_bytes(source_samples)
+            audio_source_stream_counts[device] = len(source_samples) // 4
     button_names = {value: name for name, value in buttons.items()}
     recorded_input = {str(frame): {str(port + 1): [button_names[button] for button in sorted(values)]
                                    for port, values in sorted(ports.items())}
@@ -408,12 +411,18 @@ def main():
                 "chip_processing": "resampled source contribution before final mix and DC blocker",
             }
         if audio_source_stream_counts:
+            master_clock_hz = 53203395 if args.region == "E" else 53693175
             manifest["audio_source_streams"] = {
                 "ym2612": {"file": "ym2612-source.raw",
-                           "frames": audio_source_stream_counts[YM2612_SOURCE]},
+                           "frames": audio_source_stream_counts[YM2612_SOURCE],
+                           "sample_rate": master_clock_hz / 1008.0,
+                           "channels": 2},
+                "psg": {"file": "psg-source.raw",
+                        "frames": audio_source_stream_counts[PSG_SOURCE],
+                        "sample_rate": master_clock_hz / 240.0,
+                        "channels": 2},
                 "format": "s16-native-endian-stereo",
-                "sample_rate": info.timing.sample_rate,
-                "chip_processing": "YM2612 source sample after channel mix, before host audio filtering",
+                "chip_processing": "source sample after chip channel mix, before host audio filtering",
             }
     (args.out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 

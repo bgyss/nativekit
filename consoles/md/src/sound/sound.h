@@ -6,6 +6,28 @@
 
 #include "nmd/cart.h"
 
+#define MD_SOUND_QUEUE_CAPACITY 16384u
+#define MD_SOUND_OUTPUT_RATE 44100.0
+#define MD_SOUND_RESAMPLER_PREROLL 15u
+#define MD_SOUND_YM_START_OFFSET 1u
+
+typedef struct md_sound_mixer md_sound_mixer;
+
+md_sound_mixer *md_sound_mixer_create(double ym_rate, double psg_rate,
+                                      double output_rate);
+void md_sound_mixer_destroy(md_sound_mixer *mixer);
+int md_sound_mixer_push_ym(md_sound_mixer *mixer, const int16_t *samples,
+                           int frames);
+int md_sound_mixer_push_psg(md_sound_mixer *mixer, const int16_t *samples,
+                            int frames);
+int md_sound_mixer_take(md_sound_mixer *mixer, int16_t *samples,
+                        int max_frames);
+
+void md_sound_reset(nmd_region region);
+void md_sound_advance_to(uint64_t master_clock);
+int md_sound_audio_take(int16_t *samples, int max_frames);
+int md_sound_audio_queued(void);
+
 void md_ym_reset(nmd_region region);
 uint8_t md_ym_read(uint8_t port, uint64_t clock);
 void md_ym_write(uint8_t port, uint8_t value, uint64_t clock);

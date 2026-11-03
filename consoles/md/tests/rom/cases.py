@@ -27,6 +27,7 @@ class Case:
     capture_frames: int = 2
     capture_audio: bool = False
     capture_ym_audio: bool = False
+    capture_mixed_audio: bool = False
     weave_fields: bool = False
     weave_dimensions: tuple[int, int] = (256, 224)
     z80_fixture_id: int = 0
@@ -337,6 +338,16 @@ def _ym_sound_cases():
     ]
     cases.append(Case("sound_ym_pan", tuple(pan_operations),
                       capture_ym_audio=True, capture_frames=2))
+    mixed_operations = [
+        *_ym_bus_request(),
+        Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+        *_ym_fm_channel_ops(0, 7),
+        Operation(WRITE, 1, 0xC00011, 0x90),
+        Operation(WRITE, 1, 0xC00011, 0x84),
+        Operation(WRITE, 1, 0xC00011, 0x12),
+    ]
+    cases.append(Case("sound_mixed_psg_ym", tuple(mixed_operations),
+                      capture_mixed_audio=True, capture_frames=2))
     return cases
 
 

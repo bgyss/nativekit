@@ -21,7 +21,7 @@
 #define NMD_TRACE_YM_PORT_Z80_ADDR_TAG UINT32_C(0x40000000)
 #define NMD_TRACE_YM_PORT_M68K_ADDR_TAG UINT32_C(0x80000000)
 enum { NMD_TRACE_M68K = 1, NMD_TRACE_Z80, NMD_TRACE_VDP, NMD_TRACE_YM2612, NMD_TRACE_PSG,
-       NMD_TRACE_YM2612_SOURCE };
+       NMD_TRACE_YM2612_SOURCE, NMD_TRACE_PSG_SOURCE };
 enum { NMD_TRACE_FETCH = 1, NMD_TRACE_READ, NMD_TRACE_WRITE, NMD_TRACE_DMA, NMD_TRACE_IRQ };
 typedef void (*nmd_trace_callback)(void *user, uint64_t clock, uint8_t device,
                                    uint8_t operation, uint8_t width, uint32_t address, uint32_t value);

@@ -61,7 +61,7 @@ run = "cmake --build build/null --target render_check && build/null/tests/render
 [tasks."test:md-rom"]
 description = "Compare all or selected synthetic 68000 bus and VDP cases with the candidate core"
 depends = ["build:null", "tools:md"]
-run = "python3 consoles/md/tests/rom/run.py"
+run = "python3 consoles/md/tests/rom/audio_compare_check.py && python3 consoles/md/tests/rom/run.py"
 
 [tasks."test:md-oracle-smoke"]
 description = "Exercise the exploratory libretro runner with a synthetic cartridge"

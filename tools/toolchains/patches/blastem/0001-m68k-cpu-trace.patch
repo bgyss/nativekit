@@ -467,6 +467,26 @@ index c2973d1..c4332a7 100644
  	dfprintf(debug_file, "write of %X to reg %X in part %d\n", value, context->selected_reg, context->selected_part+1);
  	if (context->selected_reg < 0x30) {
  		//Shared regs
+diff --git a/psg.c b/psg.c
+index b4b9a6d..a2b7480 100644
+--- a/psg.c
++++ b/psg.c
+@@ -6,6 +6,9 @@
+ #include "psg.h"
+ #include "blastem.h"
+ #include "event_log.h"
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++#include "trace_abi.h"
++#endif
+ #include <string.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -173,1 +176,4 @@
+-		render_put_stereo_sample(context->audio, left_accum, right_accum);
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++		nmd_trace_audio_source_emit(NMD_TRACE_PSG, left_accum, right_accum);
++#endif
++		render_put_stereo_sample(context->audio, left_accum, right_accum);
 diff --git a/z80.cpu b/z80.cpu
 index 980e35a..35ef668 100644
 --- a/z80.cpu

@@ -175,7 +175,7 @@ static void assert_ym_algorithm_audible(unsigned algorithm)
 
     reset_psg();
     setup_fm_channel(0, algorithm, 0);
-    md_advance_to(32u * 1008u + 1u);
+    md_ym_advance_to(32u * 1008u + 1u);
     assert(md_ym_take_samples(samples, 32) == 32);
     for (i = 0; i < 32; i++)
         if (samples[i] != 0)
@@ -233,7 +233,7 @@ static void test_ym_envelope_key_on_off(void)
 
     reset_psg();
     setup_fm_channel(0, 7, 0);
-    md_advance_to(key_off_clock);
+    md_ym_advance_to(key_off_clock);
     assert(md_ym_take_samples(attack, 32) == 32);
     for (i = 0; i < 32; i++) {
         int value = attack[i] < 0 ? -attack[i] : attack[i];
@@ -241,7 +241,7 @@ static void test_ym_envelope_key_on_off(void)
             attack_peak = value;
     }
     write_ym_register(0, 0x28, 0x00, key_off_clock);
-    md_advance_to(key_off_clock + 128u * 1008u);
+    md_ym_advance_to(key_off_clock + 128u * 1008u);
     assert(md_ym_take_samples(release, 128) == 128);
     for (i = 96; i < 128; i++) {
         int value = release[i] < 0 ? -release[i] : release[i];
@@ -260,7 +260,7 @@ static void test_ym_channel3_and_lfo(void)
 
     reset_psg();
     setup_fm_channel(2, 7, 0);
-    md_advance_to(128u * 1008u + 1u);
+    md_ym_advance_to(128u * 1008u + 1u);
     assert(md_ym_take_samples(normal, 128) == 128);
 
     reset_psg();
@@ -274,7 +274,7 @@ static void test_ym_channel3_and_lfo(void)
     write_ym_register(0, 0xAE, 0x28, 0);
     write_ym_register(0, 0x22, 0x0F, 0); /* Enable fastest LFO. */
     write_ym_register(0, 0xB6, 0xF7, 0); /* Full AMS/FMS and both outputs. */
-    md_advance_to(128u * 1008u + 1u);
+    md_ym_advance_to(128u * 1008u + 1u);
     assert(md_ym_take_samples(special_lfo, 128) == 128);
 
     for (i = 0; i < 128; i++)
@@ -339,13 +339,13 @@ static void test_ym_stereo_pan(void)
     reset_psg();
     setup_fm_channel(0, 7, 0);
     write_ym_register(0, 0xB4, 0x80, 0);
-    md_advance_to(32u * 1008u + 1u);
+    md_ym_advance_to(32u * 1008u + 1u);
     assert(md_ym_take_stereo_samples(left_only, 32) == 32);
 
     reset_psg();
     setup_fm_channel(0, 7, 0);
     write_ym_register(0, 0xB4, 0x40, 0);
-    md_advance_to(32u * 1008u + 1u);
+    md_ym_advance_to(32u * 1008u + 1u);
     assert(md_ym_take_stereo_samples(right_only, 32) == 32);
 
     for (i = 0; i < 32; i++) {
@@ -360,6 +360,171 @@ static void test_ym_stereo_pan(void)
     }
     assert(left_energy > left_leakage);
     assert(right_energy > right_leakage);
+}
+
+static int render_sound_audio(nmd_region region, int use_psg, int use_ym,
+                              int16_t *samples, int max_frames)
+{
+    uint64_t lines = region == NMD_PAL ? 312u : 262u;
+    uint64_t end_clock = 2u * 3420u * lines;
+
+    md_sound_reset(region);
+    if (use_psg) {
+        md_psg_write(0x90, 0);
+        md_psg_write(0x84, 0);
+        md_psg_write(0x12, 0);
+    }
+    if (use_ym)
+        setup_fm_channel(0, 7, 0);
+    md_sound_advance_to(end_clock);
+    return md_sound_audio_take(samples, max_frames);
+}
+
+static void test_sound_startup_and_counts(void)
+{
+    int16_t samples[2048u * 2u];
+    nmd_region region;
+
+    md_sound_reset(NMD_NTSC);
+    assert(md_sound_audio_queued() == 0);
+    assert(md_sound_audio_take(samples, 1) == 0);
+    md_sound_advance_to(4u * 1008u);
+    assert(md_sound_audio_queued() == 0); /* Both resamplers need startup taps. */
+    md_sound_advance_to(64u * 1008u);
+    assert(md_sound_audio_queued() > 0);
+
+    for (region = NMD_NTSC; region <= NMD_PAL; region++) {
+        uint64_t master_clock_hz = region == NMD_PAL ? 53203395ull : 53693175ull;
+        uint64_t lines = region == NMD_PAL ? 312u : 262u;
+        uint64_t expected = 2u * 3420u * lines * 44100u / master_clock_hz;
+        int count = render_sound_audio(region, 1, 1, samples, 2048);
+
+        assert((uint64_t)count <= expected);
+        assert((uint64_t)count + 64u >= expected);
+    }
+}
+
+static void test_sound_determinism_and_mix(void)
+{
+    int16_t baseline[2048u * 2u], ym[2048u * 2u];
+    int16_t psg[2048u * 2u], both[2048u * 2u];
+    int16_t repeated[2048u * 2u];
+    int baseline_count, ym_count, psg_count, both_count, repeated_count;
+    int i;
+
+    baseline_count = render_sound_audio(NMD_NTSC, 0, 0, baseline, 2048);
+    ym_count = render_sound_audio(NMD_NTSC, 0, 1, ym, 2048);
+    psg_count = render_sound_audio(NMD_NTSC, 1, 0, psg, 2048);
+    both_count = render_sound_audio(NMD_NTSC, 1, 1, both, 2048);
+    repeated_count = render_sound_audio(NMD_NTSC, 1, 1, repeated, 2048);
+    assert(baseline_count == ym_count && ym_count == psg_count && psg_count == both_count);
+    assert(both_count == repeated_count);
+    for (i = 0; i < both_count * 2; i++) {
+        int sum = ym[i] + psg[i] - baseline[i];
+        int16_t expected = (int16_t)(sum > INT16_MAX ? INT16_MAX :
+                                     sum < INT16_MIN ? INT16_MIN : sum);
+        assert(both[i] == expected);
+        assert(repeated[i] == both[i]);
+    }
+}
+
+static int impulse_peak_frame(const int16_t *samples, int frames)
+{
+    int peak = 0;
+    int peak_frame = -1;
+    int frame;
+
+    for (frame = 0; frame < frames; frame++) {
+        int value = samples[frame * 2];
+        int magnitude = value < 0 ? -value : value;
+        if (magnitude > peak) {
+            peak = magnitude;
+            peak_frame = frame;
+        }
+    }
+    return peak_frame;
+}
+
+static void test_sound_mixer_source_phase_alignment(void)
+{
+    static const double master_clock_hz = 53693175.0;
+    int16_t ym_impulse[128u * 2u] = { 0 };
+    int16_t ym_silence[128u * 2u] = { 0 };
+    int16_t psg_impulse[512u * 2u] = { 0 };
+    int16_t psg_silence[512u * 2u] = { 0 };
+    int16_t ym_output[128u * 2u], psg_output[128u * 2u];
+    md_sound_mixer *mixer;
+    int ym_frames, psg_frames;
+    int ym_peak, psg_peak;
+
+    ym_impulse[0] = ym_impulse[1] = 20000;
+    psg_impulse[0] = psg_impulse[1] = 20000;
+    mixer = md_sound_mixer_create(master_clock_hz / 1008.0,
+                                  master_clock_hz / 240.0,
+                                  MD_SOUND_OUTPUT_RATE);
+    assert(mixer);
+    assert(md_sound_mixer_push_ym(mixer, ym_impulse, 128) == 128);
+    assert(md_sound_mixer_push_psg(mixer, psg_silence, 512) == 512);
+    ym_frames = md_sound_mixer_take(mixer, ym_output, 128);
+    ym_peak = impulse_peak_frame(ym_output, ym_frames);
+    md_sound_mixer_destroy(mixer);
+
+    mixer = md_sound_mixer_create(master_clock_hz / 1008.0,
+                                  master_clock_hz / 240.0,
+                                  MD_SOUND_OUTPUT_RATE);
+    assert(mixer);
+    assert(md_sound_mixer_push_ym(mixer, ym_silence, 128) == 128);
+    assert(md_sound_mixer_push_psg(mixer, psg_impulse, 512) == 512);
+    psg_frames = md_sound_mixer_take(mixer, psg_output, 128);
+    psg_peak = impulse_peak_frame(psg_output, psg_frames);
+    md_sound_mixer_destroy(mixer);
+
+    assert(ym_frames > 0 && psg_frames > 0);
+    assert(ym_peak == psg_peak + 1); /* YM's first source frame is at MCLK 966. */
+}
+
+static void test_sound_queue_full_wrap_and_empty(void)
+{
+    static int16_t half[MD_SOUND_QUEUE_CAPACITY];
+    static int16_t full[MD_SOUND_QUEUE_CAPACITY * 2u];
+    uint64_t frame_clocks = 3420u * 262u;
+    uint64_t clock = 0;
+    unsigned i;
+
+    md_sound_reset(NMD_NTSC);
+    md_psg_write(0x90, 0);
+    md_psg_write(0x84, 0);
+    md_psg_write(0x12, 0);
+    setup_fm_channel(0, 7, 0);
+    for (i = 0; i < 40u && md_sound_audio_queued() < MD_SOUND_QUEUE_CAPACITY; i++) {
+        clock += frame_clocks;
+        md_sound_advance_to(clock);
+    }
+    assert(md_sound_audio_queued() == MD_SOUND_QUEUE_CAPACITY);
+    assert(md_sound_audio_take(half, (int)(MD_SOUND_QUEUE_CAPACITY / 2u)) ==
+           (int)(MD_SOUND_QUEUE_CAPACITY / 2u));
+    assert(md_sound_audio_queued() == MD_SOUND_QUEUE_CAPACITY / 2u);
+    for (i = 0; i < 40u && md_sound_audio_queued() < MD_SOUND_QUEUE_CAPACITY; i++) {
+        clock += frame_clocks;
+        md_sound_advance_to(clock);
+    }
+    assert(md_sound_audio_queued() == MD_SOUND_QUEUE_CAPACITY);
+    assert(md_sound_audio_take(full, (int)MD_SOUND_QUEUE_CAPACITY) ==
+           (int)MD_SOUND_QUEUE_CAPACITY);
+    assert(md_sound_audio_queued() == 0);
+    assert(md_sound_audio_take(full, 1) == 0);
+}
+
+static void test_sound_long_advance_drains_chip_rings(void)
+{
+    md_sound_reset(NMD_NTSC);
+    md_psg_write(0x90, 0);
+    md_psg_write(0x84, 0);
+    md_psg_write(0x12, 0);
+    setup_fm_channel(0, 7, 0);
+    md_sound_advance_to(70000u * 240u);
+    assert(md_sound_audio_queued() > 0);
+    assert(md_sound_audio_queued() < MD_SOUND_QUEUE_CAPACITY);
 }
 
 static void test_psg_latch_data(void)
@@ -474,6 +639,11 @@ int main(void)
     test_ym_channel3_and_lfo();
     test_ym_channel3_special_envelope_key_scaling();
     test_ym_stereo_pan();
+    test_sound_startup_and_counts();
+    test_sound_determinism_and_mix();
+    test_sound_mixer_source_phase_alignment();
+    test_sound_queue_full_wrap_and_empty();
+    test_sound_long_advance_drains_chip_rings();
     test_psg_latch_data();
     test_psg_period_zero();
     test_psg_noise_modes_and_tone3_clock();

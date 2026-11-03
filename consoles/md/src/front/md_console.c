@@ -8,6 +8,7 @@
 #include "nk/fatal.h"
 #include "nmd/nmd.h"
 #include "md_internal.h"
+#include "../sound/sound.h"
 #include "md_console.h"
 #include "../vdp/render.h"
 #include "md_present.h"
@@ -68,14 +69,12 @@ static const uint32_t *shot(int *w, int *h, int *xs, int *ys)
 
 static int audio_take(int16_t *lr, int max)
 {
-    (void)lr;
-    (void)max;
-    return 0;
+    return md_sound_audio_take(lr, max);
 }
 
 static int audio_queued(void)
 {
-    return 0;
+    return md_sound_audio_queued();
 }
 
 static void input(int headless, const uint32_t *buttons)
@@ -97,7 +96,7 @@ const nk_console nmd_console = {
     .present = present,
     .shot = shot,
     .picture = picture,
-    .audio_hz = 44100.0,
+    .audio_hz = MD_SOUND_OUTPUT_RATE,
     .audio_take = audio_take,
     .audio_queued = audio_queued,
     .players = 2,

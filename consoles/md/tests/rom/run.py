@@ -23,6 +23,7 @@ from trace import M68K, Z80, VDP, DMA, YM2612, PSG, READ, WRITE, read as read_tr
 AUDIO_PHASE_LIMIT = 8
 AUDIO_MEAN_ERROR_LIMIT = 32
 AUDIO_PEAK_ERROR_LIMIT = 600
+MD_SOUND_OUTPUT_RATE = 44100.0
 
 
 def _target_addresses(case):
@@ -425,13 +426,14 @@ def _weave_fields(first_path, second_path, width, field_height, output_path):
 def run_one(case, assembler, z80_assembler, core, testcart):
     with tempfile.TemporaryDirectory(prefix="nmd-rom-") as temp:
         base = pathlib.Path(temp)
+        capture_psg = case.capture_audio or case.capture_mixed_audio
+        capture_ym = case.capture_ym_audio or case.capture_mixed_audio
         try:
             rom, steps = mdtest.build_case(case, base, assembler, z80_assembler)
         except RuntimeError as error:
             return str(error)
         oracle_out = base / "oracle"
-        frames = (str(case.capture_frames) if case.render or case.capture_audio or
-                  case.capture_ym_audio else "1")
+        frames = (str(case.capture_frames) if case.render or capture_psg or capture_ym else "1")
         candidate = subprocess.run([
             sys.executable, str(ROOT / "consoles/md/tests/oracle/run.py"),
             "--core", str(core), "--rom", str(rom), "--frames", frames,
@@ -442,24 +444,28 @@ def run_one(case, assembler, z80_assembler, core, testcart):
             return "candidate run failed: " + candidate.stderr.strip()[-500:]
 
         manifest = json.loads((oracle_out / "manifest.json").read_text())
-        audio_streams = manifest.get("audio_streams", {})
-        psg_stream = audio_streams.get("psg") if case.capture_audio else None
         ym_source_streams = manifest.get("audio_source_streams", {})
-        ym_stream = ym_source_streams.get("ym2612") if case.capture_ym_audio else None
-        psg_rate = audio_streams.get("sample_rate")
-        ym_rate = ym_source_streams.get("sample_rate")
-        if case.capture_audio and (not psg_stream or not psg_rate):
-            return "candidate did not export a PSG sample stream"
-        if case.capture_ym_audio and (not ym_stream or not ym_rate):
+        ym_stream = ym_source_streams.get("ym2612") if capture_ym else None
+        psg_stream = ym_source_streams.get("psg") if capture_psg else None
+        psg_rate = psg_stream.get("sample_rate") if psg_stream else None
+        ym_rate = ym_stream.get("sample_rate") if ym_stream else None
+        if capture_psg and (not psg_stream or not psg_rate):
+            return "candidate did not export raw PSG source samples"
+        if capture_ym and (not ym_stream or not ym_rate):
             return "candidate did not export raw YM2612 source samples"
+        master_clock_hz = 53203395 if case.region == "E" else 53693175
+        mixed_render_clock = None
+        if case.capture_mixed_audio:
+            ym_end_clock = round(ym_stream["frames"] * master_clock_hz / ym_rate)
+            psg_end_clock = round(psg_stream["frames"] * master_clock_hz / psg_rate)
+            mixed_render_clock = max(ym_end_clock, psg_end_clock) + 64 * 1008
         psg_events_path = None
-        if case.capture_audio:
+        if capture_psg:
             psg_writes = _candidate_psg_writes(oracle_out / "bus.trace")
             if not psg_writes:
                 return "candidate did not trace PSG register writes"
-            master_clock_hz = 53203395 if case.region == "E" else 53693175
             end_clock = round(psg_stream["frames"] * master_clock_hz / psg_rate)
-            render_clock = end_clock + 64 * 240  # Flush the 32-tap source resampler past the capture window.
+            render_clock = mixed_render_clock or end_clock + 64 * 240
             psg_events_path = base / "psg.events"
             payload = bytearray(struct.pack(">4sHIQ", b"NPSG", 1, len(psg_writes), render_clock))
             for clock, value in psg_writes:
@@ -467,13 +473,12 @@ def run_one(case, assembler, z80_assembler, core, testcart):
             psg_events_path.write_bytes(payload)
 
         ym_events_path = None
-        if case.capture_ym_audio:
+        if capture_ym:
             ym_writes = _candidate_ym_writes(oracle_out / "bus.trace")
             if not ym_writes:
                 return "candidate did not trace YM2612 register writes"
-            master_clock_hz = 53203395 if case.region == "E" else 53693175
             end_clock = round(ym_stream["frames"] * master_clock_hz / ym_rate)
-            render_clock = end_clock + 64 * 1008
+            render_clock = mixed_render_clock or end_clock + 64 * 1008
             ym_events_path = base / "ym.events"
             payload = bytearray(struct.pack(">4sHIQ", b"NYM1", 1, len(ym_writes), render_clock))
             for clock, bank, address, value in ym_writes:
@@ -485,17 +490,27 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         native_command.extend(("--region", case.region))
         native_psg = base / "native-psg.raw"
         if case.capture_audio:
-            native_command.extend(("--psg-out", str(native_psg),
-                                   "--psg-rate", str(psg_rate),
-                                   "--psg-frames", str(psg_stream["frames"]),
+            native_command.extend(("--psg-source-out", str(native_psg),
+                                   "--psg-source-frames", str(psg_stream["frames"]),
                                    "--psg-events", str(psg_events_path)))
         native_ym = base / "native-ym.raw"
         if case.capture_ym_audio:
             native_command.extend(("--ym-source-out", str(native_ym),
                                    "--ym-source-frames", str(ym_stream["frames"]),
                                    "--ym-events", str(ym_events_path)))
-        if case.render or (case.capture_audio and not psg_events_path) or (
-                case.capture_ym_audio and not ym_events_path):
+        native_mixed = base / "native-mixed.raw"
+        candidate_mixed = base / "candidate-mixed.raw"
+        if case.capture_mixed_audio:
+            native_command.extend(("--mix-out", str(native_mixed),
+                                   "--mix-reference-out", str(candidate_mixed),
+                                   "--mix-ym-source", str(oracle_out / ym_stream["file"]),
+                                   "--mix-psg-source", str(oracle_out / psg_stream["file"]),
+                                   "--mix-ym-rate", str(ym_rate),
+                                   "--mix-psg-rate", str(psg_rate),
+                                   "--ym-events", str(ym_events_path),
+                                   "--psg-events", str(psg_events_path)))
+        if case.render or (capture_psg and not psg_events_path) or (
+                capture_ym and not ym_events_path):
             native_command.extend(("--frames", frames))
         if case.render:
             native_command.extend(("--picture-out", str(native_picture)))
@@ -527,12 +542,19 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         if difference:
             return difference
         if case.capture_audio:
-            difference = _compare_audio(native_psg, oracle_out / psg_stream["file"], psg_rate)
+            difference = _compare_audio(native_psg,
+                                        oracle_out / psg_stream["file"], psg_rate,
+                                        chip="PSG")
             if difference:
                 return difference
         if case.capture_ym_audio:
             difference = _compare_audio(native_ym, oracle_out / ym_source_streams["ym2612"]["file"],
                                         ym_rate, chip="YM2612")
+            if difference:
+                return difference
+        if case.capture_mixed_audio:
+            difference = _compare_audio(native_mixed, candidate_mixed, MD_SOUND_OUTPUT_RATE,
+                                        chip="Mixed PSG/YM2612")
             if difference:
                 return difference
         if case.render:

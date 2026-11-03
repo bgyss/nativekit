@@ -81,8 +81,16 @@ void nmd_trace_audio_emit(uint8_t device, int16_t left, int16_t right)
 
 void nmd_trace_audio_source_emit(uint8_t device, int16_t left, int16_t right)
 {
-    if (audio_receiver && device == NMD_TRACE_YM2612)
-        audio_receiver(audio_receiver_user, NMD_TRACE_YM2612_SOURCE, left, right);
+    uint8_t source_device;
+
+    if (device == NMD_TRACE_YM2612)
+        source_device = NMD_TRACE_YM2612_SOURCE;
+    else if (device == NMD_TRACE_PSG)
+        source_device = NMD_TRACE_PSG_SOURCE;
+    else
+        return;
+    if (audio_receiver)
+        audio_receiver(audio_receiver_user, source_device, left, right);
 }
 
 void nmd_trace_reset(void)

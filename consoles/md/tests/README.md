@@ -43,10 +43,13 @@ the full run so changes to either side are detected.
 
 `rom/cases.py` covers YM2612 ports, timers, DAC, all eight FM algorithms,
 key-on/off envelopes, channel 3 special frequencies with LFO and envelope key
-scaling, and stereo pan.
-The runner compares a raw YM source stream captured after the chip's channel
-mix and before BlastEm's host audio filter/resampler. This keeps chip behavior
-separate from host playback processing. Focus a case with, for example:
+scaling, stereo pan, PSG tones/noise, and combined PSG/YM output. The runner
+captures raw source streams for each chip before BlastEm's host audio filter/
+resampler. The mixed vector uses those streams as the expected input to the
+shared sample-rate converter and saturating s16 sum. `test:md-rom` also plants
+a one-sample change to prove the PCM comparator reports the first differing
+sample and channel. A unit impulse vector pins the PSG/YM source-clock start
+alignment through the resampler. Focus a case with, for example:
 
 ```sh
 mise run test:md-rom -- --only sound_ym_algorithm_0

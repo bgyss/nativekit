@@ -200,9 +200,10 @@ BlastEm candidate.
 - Modify: `consoles/md/src/sound/ym2612.c`, `consoles/md/src/sound/sound.h`,
   `consoles/md/tests/unit/sound_check.c`, `consoles/md/tests/rom/cases.py`,
   `consoles/md/tests/rom/run.py`, `consoles/md/tests/rom/testcart.c`,
-  `consoles/md/tests/oracle/run.py`, `consoles/md/tests/oracle/trace_abi.{h,c}`,
-  `consoles/md/tests/oracle_check.py`, `consoles/md/tests/trace_abi_check.py`,
-  `tools/toolchains/patches/blastem/0001-m68k-cpu-trace.patch`
+  `consoles/md/tests/rom/audio_compare_check.py`, `consoles/md/tests/oracle/run.py`,
+  `consoles/md/tests/oracle/trace_abi.{h,c}`, `consoles/md/tests/oracle_check.py`,
+  `consoles/md/tests/trace_abi_check.py`, `tools/toolchains/patches/blastem/0001-m68k-cpu-trace.patch`,
+  root `mise.toml`
 
 **Interfaces:**
 - The six channels have four operators each. Model frequency/block, detune/multiple, total level,
@@ -230,28 +231,37 @@ BlastEm candidate.
 **Files:**
 - Create: `consoles/md/src/sound/mix.c`
 - Modify: `consoles/md/src/front/md_console.c`, `consoles/md/src/console/dispatch.c`,
-  `consoles/md/CMakeLists.txt`, `consoles/md/tests/rom/testcart.c`,
-  `consoles/md/tests/rom/run.py`, `consoles/md/tests/rom/cases.py`,
-  `consoles/md/tests/unit/sound_check.c`
+  `consoles/md/src/sound/sound.h`, `consoles/md/CMakeLists.txt`,
+  `consoles/md/tests/rom/testcart.c`, `consoles/md/tests/rom/run.py`,
+  `consoles/md/tests/rom/cases.py`, `consoles/md/tests/rom/audio_compare_check.py`,
+  `consoles/md/tests/unit/sound_check.c`, `consoles/md/tests/oracle/run.py`,
+  `consoles/md/tests/oracle/trace_abi.{h,c}`, `consoles/md/tests/oracle_check.py`,
+  `consoles/md/tests/trace_abi_check.py`, `consoles/md/tests/README.md`,
+  `tools/toolchains/patches/blastem/0001-m68k-cpu-trace.patch`, root `mise.toml`
 
 **Interfaces:**
 - `md_sound_advance_to(uint64_t)` brings PSG/YM to the shared master clock, resamples their streams
-  to `nmd_console.audio_hz`, applies the documented digital mix, and writes stereo frames to a
-  bounded SPSC queue. `audio_take` drains frames and `audio_queued` reports queued frames.
+  to `nmd_console.audio_hz`, sums their already-scaled signed samples with s16 saturation, and writes
+  stereo frames to a bounded SPSC queue. `audio_take` drains frames and `audio_queued` reports queued
+  frames.
 - `md_sound_reset(region)` resets phases, timers, pending events, and ring indices at power on. The
   host may drain audio concurrently; the emulator producer never waits for the host callback.
+- The mixer removes the resampler's 15-frame lookahead from each source and accounts for the YM
+  stream's first sample at MCLK 966 versus the PSG's MCLK 0 before pairing output frames.
 - The oracle runner manifest records each stream's sample rate, channel count, and frame count. The
   testcart emits the same raw format for mixed output and each chip.
 
-- [ ] **Step 1: Add failing integration tests** for empty/startup audio, deterministic same-run PCM,
-  combined PSG/YM output, PAL and NTSC sample counts, queue wrap/full/empty, and reset between runs.
-- [ ] **Step 2: Extend the synthetic oracle runner** to compare complete PCM streams and report the
-  first differing sample, channel, and rate; prove it fails after a planted sample change.
-- [ ] **Step 3: Implement the bounded audio queue and resampling** with atomics matching the kit's
+- [x] **Step 1: Add failing integration tests** for empty/startup audio, deterministic same-run PCM,
+  combined PSG/YM output, PAL and NTSC sample counts, queue wrap/full/empty, long clock advances,
+  reset between runs, and source-phase alignment from an impulse vector.
+- [x] **Step 2: Extend the synthetic oracle runner** to compare raw PSG/YM source streams and the
+  complete mixed stream, reporting the first differing sample, channel, and rate. The runner's
+  audio comparison check changes a sample and verifies the reported location.
+- [x] **Step 3: Implement the bounded audio queue and resampling** with atomics matching the kit's
   SPSC audio contract; wire `audio_take`/`audio_queued` to `md_sound`.
-- [ ] **Step 4: Run per-chip and mixed sample comparisons** with playback filters disabled and no
-  game ROMs in the repository.
-- [ ] **Step 5: Commit** sound integration and audio comparisons.
+- [x] **Step 4: Run per-chip and mixed sample comparisons** with host playback filters excluded and
+  no game ROMs in the repository.
+- [x] **Step 5: Commit** sound integration and audio comparisons.
 
 ### Task 7: Complete Stage 3 gates and branch review
 

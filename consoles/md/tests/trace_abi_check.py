@@ -44,8 +44,10 @@ with tempfile.TemporaryDirectory() as temp:
     assert audio_events == [(5, 123, -456)]
     instrumented_sink.nmd_trace_audio_source_emit(4, 321, -654)
     assert audio_events == [(5, 123, -456), (6, 321, -654)]
-    instrumented_sink.nmd_trace_audio_source_emit(5, 111, -222)
-    assert len(audio_events) == 2
+    instrumented_sink.nmd_trace_audio_source_emit(5, 222, -333)
+    assert audio_events[-1] == (7, 222, -333)
+    instrumented_sink.nmd_trace_audio_source_emit(4, 111, -222)
+    assert audio_events[-1] == (6, 111, -222)
     callback_type = c.CFUNCTYPE(None, c.c_void_p, c.c_uint64, c.c_uint8, c.c_uint8, c.c_uint8,
                                c.c_uint32, c.c_uint32)
     events = []
