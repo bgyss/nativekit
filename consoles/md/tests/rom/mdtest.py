@@ -4,6 +4,8 @@ import pathlib
 import struct
 import subprocess
 
+from cases import READ, TAS, WRITE
+
 
 MAGIC = b"NMDX"
 VERSION = 1
@@ -84,6 +86,21 @@ def _dc_bytes(data):
 
 
 def _assembler_source(case):
+    if case.direct:
+        lines = []
+        for op in case.operations:
+            if op.code == WRITE:
+                size = {1: "b", 2: "w", 4: "l"}[op.width]
+                lines.append(f"        move.{size} #${op.value:08X},${op.addr:08X}")
+            elif op.code == READ:
+                size = {1: "b", 2: "w", 4: "l"}[op.width]
+                lines.append(f"        move.{size} ${op.addr:08X},d0")
+            elif op.code == TAS and op.width == 1:
+                lines.append(f"        tas     ${op.addr:08X}")
+            else:
+                raise RuntimeError(f"direct ROM case {case.name} has an unsupported step")
+        lines.extend(("loop:   bra.s loop", ""))
+        return "\n".join(lines)
     return "\n".join(INTERPRETER + _dc_bytes(encode_steps(case))) + "\n"
 
 

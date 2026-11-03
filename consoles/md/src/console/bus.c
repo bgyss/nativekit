@@ -62,9 +62,12 @@ static void md_bus_advance_to(uint64_t to_clock)
         md_clock = to_clock;
 }
 
-static void md_bus_cycle_complete(void)
+static void md_bus_cycle_complete(uint64_t access_start)
 {
-    md_bus_advance_to(md_clock + MD_BUS_CYCLE_MASTER_CLOCKS);
+    uint64_t access_end = access_start + MD_BUS_CYCLE_MASTER_CLOCKS;
+    if (md_clock > access_end)
+        access_end = md_clock;
+    md_bus_advance_to(access_end);
 }
 
 static void md_bus_trace(uint8_t operation, uint8_t width, uint32_t addr, uint32_t value)
@@ -173,10 +176,12 @@ static uint16_t md_read16(uint32_t addr)
         nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
-    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x08u)
-        return md_vdp_hv_counter();
-    if (md_is_vdp(addr))
-        nk_fatal("VDP read state is not implemented at $%06X", (unsigned)addr);
+    if (md_is_vdp(addr)) {
+        uint32_t port = md_vdp_port(addr) & 0x1Du;
+        if (port == MD_VDP_DATA_PORT || port == MD_VDP_CONTROL_PORT || port == MD_VDP_HV_PORT)
+            return md_vdp_read16(port, md_clock);
+        nk_fatal("prohibited VDP word read at $%06X", (unsigned)addr);
+    }
 
     nk_fatal("unsupported 68000 word read at $%06X", (unsigned)addr);
 }
@@ -224,8 +229,15 @@ static void md_write8(uint32_t addr, uint8_t value)
         (addr >= 0xA10000u && addr <= 0xA1001Fu))
         return; /* mapped writes; chip state belongs to later stages */
 
-    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x11u)
-        return; /* the PSG is an 8-bit write port */
+    if (md_is_vdp(addr)) {
+        uint32_t port = md_vdp_port(addr);
+        if (port <= 3u) {
+            md_vdp_write8(port, value, md_clock);
+            return;
+        }
+        if (port == 0x11u)
+            return; /* the PSG is an 8-bit write port */
+    }
 
     nk_fatal("unsupported 68000 byte write at $%06X", (unsigned)addr);
 }
@@ -265,8 +277,10 @@ static void md_write16(uint32_t addr, uint16_t value)
 
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_port(addr) & 0x1Du;
-        if (port == 0 || port == 4)
-            return; /* VDP data/control state is implemented in Stage 4 */
+        if (port == MD_VDP_DATA_PORT || port == MD_VDP_CONTROL_PORT) {
+            md_vdp_write16(port, value, md_clock);
+            return;
+        }
     }
 
     nk_fatal("unsupported 68000 word write at $%06X", (unsigned)addr);
@@ -303,10 +317,12 @@ void md_irq_defer_end(void)
 uint8_t nmd_bus_read8(uint32_t addr)
 {
     uint8_t value;
+    uint64_t access_start;
     addr = md_address(addr);
     md_bus_advance_to(md_clock);
+    access_start = md_clock;
     value = md_read8(addr);
-    md_bus_cycle_complete();
+    md_bus_cycle_complete(access_start);
     md_bus_trace(MD_BUS_TRACE_READ, 1, addr, value);
     md_bus_interrupt_check();
     return value;
@@ -315,11 +331,13 @@ uint8_t nmd_bus_read8(uint32_t addr)
 uint16_t nmd_bus_read16(uint32_t addr)
 {
     uint16_t value;
+    uint64_t access_start;
     addr = md_address(addr);
     md_require_aligned(addr, "word read");
     md_bus_advance_to(md_clock);
+    access_start = md_clock;
     value = md_read16(addr);
-    md_bus_cycle_complete();
+    md_bus_cycle_complete(access_start);
     md_bus_trace(MD_BUS_TRACE_READ, 2, addr, value);
     md_bus_interrupt_check();
     return value;
@@ -327,21 +345,25 @@ uint16_t nmd_bus_read16(uint32_t addr)
 
 void nmd_bus_write8(uint32_t addr, uint8_t value)
 {
+    uint64_t access_start;
     addr = md_address(addr);
     md_bus_advance_to(md_clock);
+    access_start = md_clock;
     md_write8(addr, value);
-    md_bus_cycle_complete();
+    md_bus_cycle_complete(access_start);
     md_bus_trace(MD_BUS_TRACE_WRITE, 1, addr, value);
     md_bus_interrupt_check();
 }
 
 void nmd_bus_write16(uint32_t addr, uint16_t value)
 {
+    uint64_t access_start;
     addr = md_address(addr);
     md_require_aligned(addr, "word write");
     md_bus_advance_to(md_clock);
+    access_start = md_clock;
     md_write16(addr, value);
-    md_bus_cycle_complete();
+    md_bus_cycle_complete(access_start);
     md_bus_trace(MD_BUS_TRACE_WRITE, 2, addr, value);
     md_bus_interrupt_check();
 }

@@ -21,6 +21,7 @@ class Operation:
 class Case:
     name: str
     operations: tuple[Operation, ...]
+    direct: bool = False
 
 
 def all_cases():
@@ -40,6 +41,8 @@ def all_cases():
         Operation(WRITE, 2, 0xC00004, 0x8104),
         Operation(WRITE, 2, 0xC00006, 0x8104),
         Operation(WRITE, 2, 0xD00004, 0x8104),
+        Operation(WRITE, 2, 0xC00004, 0x8F02),
+        Operation(WRITE, 4, 0xC00004, 0x40800000),
         Operation(WRITE, 2, 0xC00000, 0x000E),
         Operation(WRITE, 1, 0xC00011, 0x9F),
         Operation(WRITE, 2, 0xA11200, 0x0000),
@@ -56,4 +59,15 @@ def all_cases():
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),
         Operation(READ, 1, 0xFF0020),
+    )), Case("vdp_port_timing", (
+        Operation(WRITE, 2, 0xC00004, 0x8104),
+        Operation(WRITE, 2, 0xC00000, 0x000E),
+        Operation(READ, 2, 0xC00004, compare_mask=0x0001),
+        Operation(READ, 2, 0xC00000),
+    ), direct=True), Case("vdp_fifo", (
+        Operation(WRITE, 2, 0xC00004, 0x8154),
+        Operation(WRITE, 2, 0xC00004, 0x8C01),
+        Operation(WRITE, 2, 0xC00004, 0x8F02),
+        Operation(WRITE, 4, 0xC00004, 0x40000000),
+        *(Operation(WRITE, 2, 0xC00000, 0x1234 + i) for i in range(16)),
     ))]

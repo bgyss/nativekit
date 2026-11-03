@@ -33,6 +33,11 @@ description = "Check the 68000 clock scheduler, VDP interrupts, and waits"
 depends = ["build:null", "tools:md"]
 run = "python3 consoles/md/tests/interrupt_check.py"
 
+[tasks."test:md-vdp"]
+description = "Check VDP control/data ports, memory, reads, and FIFO timing"
+depends = ["build:null"]
+run = "cmake --build build/null --target vdp_check && build/null/tests/vdp_check"
+
 [tasks."test:md-rom"]
 description = "Compare shared synthetic 68000 bus cases with the candidate core"
 depends = ["build:null", "tools:md"]

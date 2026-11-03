@@ -74,6 +74,13 @@ void md_irq_request(int level)
     irq_pending |= (uint8_t)(1u << level);
 }
 
+void md_irq_clear(int level)
+{
+    if (level != 2 && level != 4 && level != 6)
+        nk_fatal("unsupported interrupt clear level %d", level);
+    irq_pending &= (uint8_t)~(1u << level);
+}
+
 static void queue_event(uint8_t level, uint64_t clock, int external)
 {
     unsigned at;

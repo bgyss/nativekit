@@ -64,6 +64,13 @@ static void trace_bus(uint64_t clock, uint8_t operation, uint8_t width,
            (unsigned)addr, (unsigned)value);
 }
 
+static void trace_vdp(uint64_t clock, uint8_t operation, uint8_t width,
+                      uint32_t port, uint32_t value)
+{
+    printf("VDP\t%" PRIu64 "\t%u\t%u\t%08X\t%08X\n", clock, operation, width,
+           (unsigned)port, (unsigned)value);
+}
+
 static int execute_steps(const uint8_t *steps, size_t size)
 {
     uint16_t version, count;
@@ -164,6 +171,7 @@ int main(int argc, char **argv)
     cart.rom_size = (uint32_t)rom_size;
     nmd_power(&cart);
     md_bus_trace_hook = trace_bus;
+    md_vdp_trace_hook = trace_vdp;
     result = execute_steps(steps, steps_size);
     free(steps);
     free(rom);

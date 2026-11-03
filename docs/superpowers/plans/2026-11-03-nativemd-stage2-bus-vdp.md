@@ -214,13 +214,13 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 - VDP state includes its 24 registers, VRAM/CRAM/VSRAM, address/code latch, data read prefetch,
   status flags, H/V counter, and a four-word write FIFO.
 
-- [ ] Add failing cases for control command pairs, second-word latching, data-port cancellation,
+- [x] Add failing cases for control command pairs, second-word latching, data-port cancellation,
   register read/write, VRAM prefetch, CRAM/VSRAM access, H32/H40 status, and H/V counters.
-- [ ] Add a fixed CPU/VDP port microprogram with expected width/value/order and relative event-clock
+- [x] Add a fixed CPU/VDP port microprogram with expected width/value/order and relative event-clock
   deltas; include a four-word FIFO fill case that proves a later CPU write stalls.
-- [ ] Implement VDP port decode/mirrors and device-side scheduling; preserve the trace's documented
+- [x] Implement VDP port decode/mirrors and device-side scheduling; preserve the trace's documented
   distinction between CPU handler-completion clocks and VDP scheduler event clocks.
-- [ ] Run VDP unit cases and compare port values/clocks to BlastEm; commit.
+- [x] Run VDP unit cases and compare port values/clocks to BlastEm; commit.
 
 ### Task 5: Implement DMA modes and bus stalls
 
