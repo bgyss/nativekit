@@ -9,9 +9,10 @@
 #include "nmd/nmd.h"
 #include "md_internal.h"
 #include "md_console.h"
+#include "../vdp/render.h"
+#include "md_present.h"
 
 static const nmd_cart *active_cart;
-static uint32_t blank_picture[256 * 224];
 
 static void power(const void *cart)
 {
@@ -34,25 +35,24 @@ static uint64_t frame_ns(void)
 
 static void window_size(int *w, int *h)
 {
-    *w = 256;
-    *h = 224;
+    md_vdp_dimensions(w, h);
 }
 
 static double aspect(void)
 {
-    return 4.0 / 3.0;
+    int width, height;
+    md_vdp_dimensions(&width, &height);
+    return 4.0 / 3.0 * ((double)width / 256.0) * (224.0 / (double)height);
 }
 
 static void present(const int dst[4])
 {
-    (void)dst;
+    md_present(dst);
 }
 
 static const uint32_t *picture(int *w, int *h)
 {
-    *w = 256;
-    *h = 224;
-    return blank_picture;
+    return md_vdp_picture(w, h);
 }
 
 static const uint32_t *shot(int *w, int *h, int *xs, int *ys)

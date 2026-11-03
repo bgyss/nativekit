@@ -2,6 +2,7 @@
 """Compare shared synthetic bus cases on BlastEm and the native C model."""
 import os
 import pathlib
+import hashlib
 import subprocess
 import sys
 import tempfile
@@ -172,6 +173,59 @@ def _compare_dma(case, native_vdp, native_dma, candidate_vdp, candidate_dma):
     return None
 
 
+def _ignore_render_sync_reads(case, bus_events, vdp_events):
+    if not case.render:
+        return bus_events, vdp_events
+    bus = [event for event in bus_events
+           if not (event[0] == READ and 0xC00000 <= event[2] <= 0xDFFFFF and
+                   ((event[2] & 0x1F) & 0x1D) == 4)]
+    vdp = [event for event in vdp_events if not (event[0] == READ and event[2] == 4)]
+    return bus, vdp
+
+
+def _read_ppm(path):
+    data = path.read_bytes()
+    header, separator, pixels = data.partition(b"\n255\n")
+    if not separator:
+        raise ValueError("PPM has no pixel separator")
+    fields = header.split()
+    if len(fields) != 3 or fields[0] != b"P6":
+        raise ValueError("unsupported PPM header")
+    width, height = int(fields[1]), int(fields[2])
+    if len(pixels) != width * height * 3:
+        raise ValueError("PPM pixel payload size does not match its dimensions")
+    return width, height, pixels
+
+
+def _compare_picture(native_path, candidate_path):
+    native_w, native_h, native = _read_ppm(native_path)
+    candidate_w, candidate_h, candidate = _read_ppm(candidate_path)
+    if (native_w, native_h) == (candidate_w, candidate_h):
+        crop_x = crop_y = 0
+    elif candidate_w - native_w == 27 and (candidate_h, native_h) in ((243, 224), (294, 240)):
+        # The core's frame callback includes the overscan margins around the active raster.
+        crop_x = 13
+        crop_y = 11 if native_h == 224 else 30
+    else:
+        return f"picture dimensions: native {native_w}x{native_h}, candidate {candidate_w}x{candidate_h}"
+    cropped = bytearray(native_w * native_h * 3)
+    for y in range(native_h):
+        source = ((y + crop_y) * candidate_w + crop_x) * 3
+        target = y * native_w * 3
+        cropped[target:target + native_w * 3] = candidate[source:source + native_w * 3]
+    candidate = bytes(cropped)
+    for pixel in range(native_w * native_h):
+        offset = pixel * 3
+        if native[offset:offset + 3] != candidate[offset:offset + 3]:
+            x, y = pixel % native_w, pixel // native_w
+            got = native[offset:offset + 3].hex()
+            want = candidate[offset:offset + 3].hex()
+            hashes = (hashlib.sha256(native).hexdigest(), hashlib.sha256(candidate).hexdigest())
+            return (f"picture pixel ({x},{y}): native #{got}, candidate #{want}; "
+                    f"frame SHA-256 native/candidate {hashes[0]}/{hashes[1]}")
+    return None
+
+
 def run_one(case, assembler, core, testcart):
     with tempfile.TemporaryDirectory(prefix="nmd-rom-") as temp:
         base = pathlib.Path(temp)
@@ -180,15 +234,22 @@ def run_one(case, assembler, core, testcart):
         except RuntimeError as error:
             return str(error)
         oracle_out = base / "oracle"
+        frames = "2" if case.render else "1"
         candidate = subprocess.run([
             sys.executable, str(ROOT / "consoles/md/tests/oracle/run.py"),
-            "--core", str(core), "--rom", str(rom), "--frames", "1",
+            "--core", str(core), "--rom", str(rom), "--frames", frames,
+            "--region", case.region,
             "--out", str(oracle_out), "--trace",
         ], capture_output=True, text=True, timeout=90)
         if candidate.returncode:
             return "candidate run failed: " + candidate.stderr.strip()[-500:]
 
-        native = subprocess.run([str(testcart), "--rom", str(rom), "--steps", str(steps)],
+        native_picture = base / "native.ppm"
+        native_command = [str(testcart), "--rom", str(rom), "--steps", str(steps)]
+        native_command.extend(("--region", case.region))
+        if case.render:
+            native_command.extend(("--picture-out", str(native_picture)))
+        native = subprocess.run(native_command,
                                 capture_output=True, text=True, timeout=30)
         if native.returncode:
             return "native testcart failed: " + native.stderr.strip()[-500:]
@@ -199,6 +260,8 @@ def run_one(case, assembler, core, testcart):
                 oracle_out / "bus.trace", _target_addresses(case))
         except (OSError, ValueError) as error:
             return "trace read failed: " + str(error)
+        native_bus, native_vdp = _ignore_render_sync_reads(case, native_bus, native_vdp)
+        candidate_bus, candidate_vdp = _ignore_render_sync_reads(case, candidate_bus, candidate_vdp)
         difference = _compare(case, native_bus, candidate_bus)
         if difference:
             return difference
@@ -210,6 +273,10 @@ def run_one(case, assembler, core, testcart):
                                   candidate_vdp, candidate_dma)
         if difference:
             return difference
+        if case.render:
+            difference = _compare_picture(native_picture, oracle_out / "frame_000002.ppm")
+            if difference:
+                return difference
         return None
 
 

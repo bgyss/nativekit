@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "md_internal.h"
+#include "render.h"
 #include "nk/fatal.h"
 
 #define MD_VDP_FIFO_WORDS 4u
@@ -214,6 +215,7 @@ void md_vdp_reset(const nmd_cart *cart)
     control_pending = 0;
     read_buffer_valid = 0;
     vint_flag = 0;
+    md_vdp_render_reset();
 }
 
 void md_vdp_set_register(unsigned reg, uint8_t value)
@@ -231,6 +233,21 @@ uint8_t md_vdp_register(unsigned reg)
     if (reg >= sizeof registers)
         nk_fatal("VDP register number %u is outside 0-23", reg);
     return registers[reg];
+}
+
+uint8_t md_vdp_vram_byte(uint16_t addr)
+{
+    return vram[addr];
+}
+
+uint16_t md_vdp_cram_value(unsigned index)
+{
+    return cram[index & 0x3Fu];
+}
+
+uint16_t md_vdp_vsram_value(unsigned index)
+{
+    return vsram[index % 40u];
 }
 
 uint8_t md_vdp_code(void)
@@ -277,6 +294,7 @@ void md_vdp_advance(uint64_t to_clock)
             continue;
         }
 
+        md_vdp_render_line(line);
         line++;
         next_line_clock += MD_MASTER_CLOCKS_PER_LINE;
         if (line >= lines_per_frame) {
@@ -343,6 +361,14 @@ unsigned md_vdp_current_line(void)
 int md_vdp_active_display(void)
 {
     return (registers[1] & 0x40u) != 0 && line < active_lines;
+}
+
+void md_vdp_dimensions(int *width, int *height)
+{
+    if (width)
+        *width = (registers[12] & 0x01u) ? 320 : 256;
+    if (height)
+        *height = (int)active_lines;
 }
 
 uint16_t md_vdp_hv_counter(void)

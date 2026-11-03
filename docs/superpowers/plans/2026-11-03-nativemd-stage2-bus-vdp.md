@@ -260,13 +260,13 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
   and the VDP's tile/palette lookup. Mode IV remains the excluded Master System compatibility
   path.
 
-- [ ] Add deterministic ROM cases for plane A/B patterns, tile-map addressing, horizontal and
+- [x] Add deterministic ROM cases for plane A/B patterns, tile-map addressing, horizontal and
   vertical scroll, window boundaries, and all four output dimensions.
-- [ ] Compare every output pixel with BlastEm for those cases; retain frame hashes as diagnostics
+- [x] Compare every output pixel with BlastEm for those cases; retain frame hashes as diagnostics
   but fail on the first differing pixel.
-- [ ] Implement a software line renderer that consumes the same timestamped VDP state updated by
+- [x] Implement a software line renderer that consumes the same timestamped VDP state updated by
   `md_vdp_advance`; do not snapshot a frame only at VBlank.
-- [ ] Run the new render cases and Stage 0 gates; commit.
+- [x] Run the new render cases and Stage 0 gates; commit.
 
 ### Task 7: Add sprites, priority, shadow/highlight, and interlace
 

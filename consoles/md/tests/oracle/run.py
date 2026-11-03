@@ -84,6 +84,7 @@ def main():
     parser.add_argument("--core", type=pathlib.Path, required=True)
     parser.add_argument("--rom", type=pathlib.Path, required=True)
     parser.add_argument("--frames", type=int, required=True)
+    parser.add_argument("--region", choices=("J", "U", "E"), default="U")
     parser.add_argument("--out", type=pathlib.Path, required=True)
     parser.add_argument("--input", type=pathlib.Path, help="JSON: frame numbers to port/button lists")
     parser.add_argument("--pad1", choices=("3", "6"), default="6")
@@ -129,7 +130,7 @@ def main():
             digest.update(block)
     core = c.CDLL(str(args.core.resolve()))
     options = {b"blastem_system_type": b"gen", b"blastem_model": b"md1va3",
-               b"blastem_region": b"U", b"blastem_force_region": b"on",
+               b"blastem_region": args.region.encode(), b"blastem_force_region": b"on",
                b"blastem_ram_init": b"zero", b"blastem_m68k_divider": b"7",
                b"blastem_megawifi": b"off", b"blastem_io_1": f"gamepad{args.pad1}.1".encode(),
                b"blastem_io_2": f"gamepad{args.pad2}.2".encode(), b"blastem_lowpass_cutoff": b"24000",

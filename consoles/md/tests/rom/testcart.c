@@ -7,6 +7,7 @@
 #include <nmd/nmd.h>
 
 #include "md_internal.h"
+#include "render.h"
 
 #define STEPS_MAGIC "NMDX"
 #define STEPS_HEADER_SIZE 8u
@@ -71,6 +72,41 @@ static void trace_vdp(uint64_t clock, uint8_t operation, uint8_t width,
            (unsigned)port, (unsigned)value);
 }
 
+static int write_picture(const char *path)
+{
+    FILE *file;
+    uint8_t *rgb;
+    const uint32_t *pixels;
+    int width, height;
+    size_t count, i;
+    int valid = 1;
+
+    pixels = md_vdp_picture(&width, &height);
+    count = (size_t)width * (size_t)height;
+    rgb = (uint8_t *)malloc(count * 3u);
+    if (!rgb)
+        return 0;
+    for (i = 0; i < count; i++) {
+        rgb[i * 3u] = (uint8_t)(pixels[i] >> 16);
+        rgb[i * 3u + 1u] = (uint8_t)(pixels[i] >> 8);
+        rgb[i * 3u + 2u] = (uint8_t)pixels[i];
+    }
+
+    file = fopen(path, "wb");
+    if (!file) {
+        free(rgb);
+        return 0;
+    }
+    if (fprintf(file, "P6\n%d %d\n255\n", width, height) < 0)
+        valid = 0;
+    if (fwrite(rgb, 3u, count, file) != count)
+        valid = 0;
+    if (fclose(file))
+        valid = 0;
+    free(rgb);
+    return valid;
+}
+
 static int execute_steps(const uint8_t *steps, size_t size)
 {
     uint16_t version, count;
@@ -129,7 +165,8 @@ static int execute_steps(const uint8_t *steps, size_t size)
 
 int main(int argc, char **argv)
 {
-    const char *rom_path = NULL, *steps_path = NULL;
+    const char *rom_path = NULL, *steps_path = NULL, *picture_path = NULL;
+    const char *region = "U";
     uint8_t *rom, *steps;
     size_t rom_size, steps_size;
     nmd_cart cart;
@@ -140,8 +177,12 @@ int main(int argc, char **argv)
             rom_path = argv[++i];
         else if (!strcmp(argv[i], "--steps") && i + 1 < argc)
             steps_path = argv[++i];
+        else if (!strcmp(argv[i], "--picture-out") && i + 1 < argc)
+            picture_path = argv[++i];
+        else if (!strcmp(argv[i], "--region") && i + 1 < argc)
+            region = argv[++i];
         else {
-            fprintf(stderr, "testcart: usage: testcart --rom ROM --steps TABLE\n");
+            fprintf(stderr, "testcart: usage: testcart --rom ROM --steps TABLE [--picture-out PPM]\n");
             return 2;
         }
     }
@@ -166,13 +207,30 @@ int main(int argc, char **argv)
 
     memset(&cart, 0, sizeof cart);
     cart.title = "nativemd testcart";
-    cart.region = NMD_NTSC;
+    if (!strcmp(region, "E"))
+        cart.region = NMD_PAL;
+    else if (!strcmp(region, "J") || !strcmp(region, "U"))
+        cart.region = NMD_NTSC;
+    else {
+        fprintf(stderr, "testcart: unsupported region %s\n", region);
+        free(rom);
+        free(steps);
+        return 2;
+    }
     cart.rom = rom;
     cart.rom_size = (uint32_t)rom_size;
     nmd_power(&cart);
     md_bus_trace_hook = trace_bus;
     md_vdp_trace_hook = trace_vdp;
     result = execute_steps(steps, steps_size);
+    if (!result && picture_path) {
+        nmd_run_frame();
+        nmd_run_frame();
+        if (!write_picture(picture_path)) {
+            fprintf(stderr, "testcart: cannot write picture %s\n", picture_path);
+            result = 2;
+        }
+    }
     free(steps);
     free(rom);
     return result;
