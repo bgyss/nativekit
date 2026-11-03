@@ -29,6 +29,7 @@ uint64_t md_vdp_frame_count(void);
 uint64_t md_vdp_vblank_count(void);
 uint64_t md_vdp_hint_count(void);
 unsigned md_vdp_current_line(void);
+unsigned md_vdp_field(void);
 int md_vdp_active_display(void);
 void md_vdp_dimensions(int *width, int *height);
 uint16_t md_vdp_hv_counter(void);

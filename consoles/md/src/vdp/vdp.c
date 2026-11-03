@@ -33,6 +33,7 @@ static uint64_t next_fifo_clock;
 static unsigned lines_per_frame;
 static unsigned active_lines;
 static unsigned line;
+static unsigned field;
 static uint64_t next_line_clock;
 static uint64_t frame_count;
 static uint64_t vblank_count;
@@ -74,6 +75,7 @@ static uint16_t vram_read_word(uint16_t addr)
 static void vdp_memory_write(uint8_t write_code, uint8_t width, uint8_t lane,
                              uint16_t addr, uint16_t value)
 {
+    md_vdp_render_until(md_clock);
     if (write_code == 1) {
         uint16_t base = (uint16_t)(addr & 0xFFFEu);
         if (width == 1) {
@@ -167,6 +169,7 @@ static void control_write(uint16_t value, uint64_t clock)
 {
     if ((value & 0xC000u) == 0x8000u) {
         control_pending = 0;
+        md_vdp_render_until(clock);
         md_vdp_set_register((value >> 8) & 0x1Fu, (uint8_t)value);
         return;
     }
@@ -205,6 +208,7 @@ void md_vdp_reset(const nmd_cart *cart)
     vblank_count = 0;
     hint_count = 0;
     hint_counter = 0;
+    field = 0;
     fifo_head = 0;
     fifo_count = 0;
     next_fifo_clock = MD_VDP_NEVER;
@@ -223,6 +227,7 @@ void md_vdp_set_register(unsigned reg, uint8_t value)
     if (reg >= sizeof registers)
         nk_fatal("VDP register number %u is outside 0-23", reg);
 
+    md_vdp_render_until(md_clock);
     registers[reg] = value;
     if (reg == 1)
         active_lines = (lines_per_frame == 312 && (value & 0x08)) ? 240u : 224u;
@@ -233,6 +238,11 @@ uint8_t md_vdp_register(unsigned reg)
     if (reg >= sizeof registers)
         nk_fatal("VDP register number %u is outside 0-23", reg);
     return registers[reg];
+}
+
+unsigned md_vdp_field(void)
+{
+    return field;
 }
 
 uint8_t md_vdp_vram_byte(uint16_t addr)
@@ -301,6 +311,10 @@ void md_vdp_advance(uint64_t to_clock)
             line = 0;
             frame_count++;
             hint_counter = 0;
+            if ((registers[12] & 0x06u) != 0)
+                field ^= 1u;
+            else
+                field = 0;
         }
 
         if (line == active_lines) {
@@ -368,7 +382,8 @@ void md_vdp_dimensions(int *width, int *height)
     if (width)
         *width = (registers[12] & 0x01u) ? 320 : 256;
     if (height)
-        *height = (int)active_lines;
+        *height = (int)active_lines *
+                  (((registers[12] & 0x06u) == 0x06u) ? 2 : 1);
 }
 
 uint16_t md_vdp_hv_counter(void)

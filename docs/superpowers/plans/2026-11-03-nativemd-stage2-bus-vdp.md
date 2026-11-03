@@ -278,14 +278,14 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
 - The compositor resolves plane/window/sprite priority and the VDP shadow/highlight palette
   modes. Interlace tracks field parity and returns doubled-height pixels when active.
 
-- [ ] Add deterministic cases for sprite table traversal, clipping and priority, shadow/highlight,
+- [x] Add deterministic cases for sprite table traversal, clipping and priority, shadow/highlight,
   interlace field alternation, and register changes made mid-line.
-- [ ] Compare complete frames with BlastEm for each case, including sprite overflow limits the
+- [x] Compare complete frames with BlastEm for each case, including sprite overflow limits the
   official manual documents; do not turn the test oracle's internal behavior into an undocumented
   hardware claim.
-- [ ] Implement the compositor and field buffer; verify 256/320 widths, 224/240 heights, and
+- [x] Implement the compositor and field buffer; verify 256/320 widths, 224/240 heights, and
   doubled interlace output through `nk_console.window_size` and `shot`.
-- [ ] Run render cases, consumer/build checks, and Stage 0 gates; commit.
+- [x] Run render cases, consumer/build checks, and Stage 0 gates; commit.
 
 ### Task 8: Complete the Stage 2 ROM matrix and branch review
 

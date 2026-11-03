@@ -29,6 +29,7 @@ target_link_libraries(dma_check PRIVATE nmd)
 set_target_properties(dma_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
 add_executable(render_check unit/render_check.c)
-target_include_directories(render_check PRIVATE ../src/console ../src/vdp)
+target_include_directories(render_check PRIVATE
+  ../src/console ../src/front ../src/vdp ${NK_INCLUDE})
 target_link_libraries(render_check PRIVATE nmd)
 set_target_properties(render_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)

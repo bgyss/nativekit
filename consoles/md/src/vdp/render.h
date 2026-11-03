@@ -6,6 +6,7 @@
 
 void md_vdp_render_reset(void);
 void md_vdp_render_line(unsigned line);
+void md_vdp_render_until(uint64_t clock);
 const uint32_t *md_vdp_picture(int *width, int *height);
 void md_vdp_dimensions(int *width, int *height);
 

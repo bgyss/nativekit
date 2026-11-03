@@ -24,6 +24,8 @@ class Case:
     direct: bool = False
     render: bool = False
     region: str = "U"
+    capture_frames: int = 2
+    weave_fields: bool = False
 
 
 def _vdp_reg(index, value):
@@ -68,7 +70,10 @@ def _vdp_write_words(code, address, words):
 def _render_scene(name, tile_colors, plane_a_rows=None, plane_b_row=None,
                   window_row=None, hscroll=(0, 0), vsram=(0, 0),
                   mode11=0, h40=False, v30=False, plane_size=0,
-                  window_h=0, window_v=0, region="U"):
+                  window_h=0, window_v=0, region="U", sprite_entries=None,
+                  shadow_highlight=False, interlace=0, cram_colors=None,
+                  extra_operations=(),
+                  capture_frames=2, weave_fields=False):
     width_cells = 64 if plane_size & 0x03 == 1 else 32
     operations = [
         Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
@@ -79,18 +84,23 @@ def _render_scene(name, tile_colors, plane_a_rows=None, plane_b_row=None,
         _vdp_reg(4, 0x03),
         _vdp_reg(7, 0),
         _vdp_reg(11, mode11),
-        _vdp_reg(12, 0x81 if h40 else 0),
+        _vdp_reg(12, (0x81 if h40 else 0) | ((interlace & 0x03) << 1) |
+                 (0x08 if shadow_highlight else 0)),
         _vdp_reg(13, 0x2E),
         _vdp_reg(15, 2),
         _vdp_reg(16, plane_size),
         _vdp_reg(17, window_h),
         _vdp_reg(18, window_v),
     ]
+    sprite_base = 0xA800 if h40 else 0xFE00
+    if sprite_entries:
+        operations.append(_vdp_reg(5, 0x54 if h40 else 0x7F))
 
     for tile, color in sorted(tile_colors.items()):
         packed = color * 0x1111
         operations.extend(_vdp_write_words(1, tile * 32, [packed] * 16))
-    operations.extend(_vdp_write_words(3, 2, [0x000E, 0x00E0, 0x0E00, 0x0EEE]))
+    operations.extend(_vdp_write_words(
+        3, 2, cram_colors or [0x000E, 0x00E0, 0x0E00, 0x0EEE]))
 
     for row, entries in sorted((plane_a_rows or {}).items()):
         operations.extend(_vdp_write_words(1, 0x4000 + row * width_cells * 2, entries))
@@ -98,10 +108,15 @@ def _render_scene(name, tile_colors, plane_a_rows=None, plane_b_row=None,
         operations.extend(_vdp_write_words(1, 0x6000, plane_b_row))
     if window_row:
         operations.extend(_vdp_write_words(1, 0x8000, window_row))
+    if sprite_entries:
+        operations.extend(_vdp_write_words(1, sprite_base,
+                                           [word for entry in sprite_entries for word in entry]))
     operations.extend(_vdp_write_words(1, 0xB800, hscroll))
     if vsram != (0, 0):
         operations.extend(_vdp_write_words(5, 0, vsram))
-    return Case(name, tuple(operations), render=True, region=region)
+    operations.extend(extra_operations)
+    return Case(name, tuple(operations), render=True, region=region,
+                capture_frames=capture_frames, weave_fields=weave_fields)
 
 
 def all_cases():
@@ -217,4 +232,38 @@ def all_cases():
     _render_scene("render_h40", {0: 1}, h40=True, plane_size=1),
     _render_scene("render_h32_v30", {0: 1}, v30=True, region="E"),
     _render_scene("render_h40_v30", {0: 1}, h40=True, v30=True,
-                  plane_size=1, region="E")]
+                  plane_size=1, region="E"),
+    _render_scene("render_sprite_basic", {0: 1, 1: 2},
+                  sprite_entries=[(0x0080, 0x0000, 0x0001, 0x0080)]),
+    _render_scene("render_sprite_clipping", {0: 1, 1: 2},
+                  sprite_entries=[(0x0080, 0x0000, 0x0001, 0x007C)]),
+    _render_scene("render_sprite_link_priority", {0: 1, 1: 2, 2: 3},
+                  sprite_entries=[(0x0080, 0x0002, 0x0000, 0x0080),
+                                  (0x0080, 0x0000, 0x0002, 0x0080),
+                                  (0x0080, 0x0000, 0x0001, 0x0080)]),
+    _render_scene("render_plane_sprite_priority", {0: 1, 1: 2},
+                  plane_a_rows={0: [0x8000]},
+                  sprite_entries=[(0x0080, 0x0000, 0x0001, 0x0080)]),
+    _render_scene("render_sprite_overflow_h32", {0: 0, 1: 2, 2: 1},
+                  plane_a_rows={0: [2]},
+                  sprite_entries=[(0x0080, index + 1, 0, 0x0080)
+                                  for index in range(16)] +
+                                 [(0x0080, 0, 1, 0x0080)]),
+    _render_scene("render_sprite_overflow_h40", {0: 0, 1: 2, 2: 1}, h40=True,
+                  plane_size=1, plane_a_rows={0: [2]},
+                  sprite_entries=[(0x0080, index + 1, 0, 0x0080)
+                                  for index in range(20)] +
+                                 [(0x0080, 0, 1, 0x0080)]),
+    _render_scene("render_shadow_operator", {0: 1, 1: 15}, plane_a_rows={0: [0]},
+                  sprite_entries=[(0x0080, 0, 0x6001, 0x0080)],
+                  shadow_highlight=True, cram_colors=[0x0008, 0x00E0, 0x0E00, 0x0EEE]),
+    _render_scene("render_highlight_operator", {0: 1, 1: 14},
+                  plane_a_rows={0: [0x8000]},
+                  sprite_entries=[(0x0080, 0, 0x6001, 0x0080)],
+                  shadow_highlight=True, cram_colors=[0x0008, 0x00E0, 0x0E00, 0x0EEE]),
+    _render_scene("render_interlace2", {0: 1}, interlace=3, weave_fields=True),
+    _render_scene("render_midline_register", {0: 1},
+                  extra_operations=(Operation(POLL, 2, 0xC00008, 0x1000,
+                                              compare_mask=0xF0FF),
+                                    _vdp_reg(7, 1)),
+                  capture_frames=1)]

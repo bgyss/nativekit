@@ -41,8 +41,12 @@ static void window_size(int *w, int *h)
 static double aspect(void)
 {
     int width, height;
+    double logical_height;
     md_vdp_dimensions(&width, &height);
-    return 4.0 / 3.0 * ((double)width / 256.0) * (224.0 / (double)height);
+    logical_height = (double)height;
+    if ((md_vdp_register(12) & 0x06u) == 0x06u)
+        logical_height /= 2.0;
+    return 4.0 / 3.0 * ((double)width / 256.0) * (224.0 / logical_height);
 }
 
 static void present(const int dst[4])

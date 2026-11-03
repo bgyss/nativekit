@@ -178,8 +178,9 @@ def _ignore_render_sync_reads(case, bus_events, vdp_events):
         return bus_events, vdp_events
     bus = [event for event in bus_events
            if not (event[0] == READ and 0xC00000 <= event[2] <= 0xDFFFFF and
-                   ((event[2] & 0x1F) & 0x1D) == 4)]
-    vdp = [event for event in vdp_events if not (event[0] == READ and event[2] == 4)]
+                   ((event[2] & 0x1F) & 0x1D) in (4, 8))]
+    vdp = [event for event in vdp_events
+           if not (event[0] == READ and event[2] in (4, 8))]
     return bus, vdp
 
 
@@ -226,6 +227,35 @@ def _compare_picture(native_path, candidate_path):
     return None
 
 
+def _active_picture(path, width, height):
+    frame_width, frame_height, pixels = _read_ppm(path)
+    if (frame_width, frame_height) == (width, height):
+        return pixels
+    if frame_width - width == 27 and frame_height - height in (19, 54):
+        crop_x = 13
+        crop_y = 11 if height == 224 else 30
+        active = bytearray(width * height * 3)
+        for y in range(height):
+            source = ((y + crop_y) * frame_width + crop_x) * 3
+            target = y * width * 3
+            active[target:target + width * 3] = pixels[source:source + width * 3]
+        return bytes(active)
+    raise ValueError(f"cannot crop {frame_width}x{frame_height} to {width}x{height}")
+
+
+def _weave_fields(first_path, second_path, width, field_height, output_path):
+    first = _active_picture(first_path, width, field_height)
+    second = _active_picture(second_path, width, field_height)
+    frame = bytearray(width * field_height * 2 * 3)
+    for y in range(field_height):
+        source = y * width * 3
+        even = (2 * y) * width * 3
+        odd = (2 * y + 1) * width * 3
+        frame[even:even + width * 3] = first[source:source + width * 3]
+        frame[odd:odd + width * 3] = second[source:source + width * 3]
+    output_path.write_bytes(f"P6\n{width} {field_height * 2}\n255\n".encode() + frame)
+
+
 def run_one(case, assembler, core, testcart):
     with tempfile.TemporaryDirectory(prefix="nmd-rom-") as temp:
         base = pathlib.Path(temp)
@@ -234,7 +264,7 @@ def run_one(case, assembler, core, testcart):
         except RuntimeError as error:
             return str(error)
         oracle_out = base / "oracle"
-        frames = "2" if case.render else "1"
+        frames = str(case.capture_frames) if case.render else "1"
         candidate = subprocess.run([
             sys.executable, str(ROOT / "consoles/md/tests/oracle/run.py"),
             "--core", str(core), "--rom", str(rom), "--frames", frames,
@@ -248,6 +278,7 @@ def run_one(case, assembler, core, testcart):
         native_command = [str(testcart), "--rom", str(rom), "--steps", str(steps)]
         native_command.extend(("--region", case.region))
         if case.render:
+            native_command.extend(("--frames", frames))
             native_command.extend(("--picture-out", str(native_picture)))
         native = subprocess.run(native_command,
                                 capture_output=True, text=True, timeout=30)
@@ -274,7 +305,15 @@ def run_one(case, assembler, core, testcart):
         if difference:
             return difference
         if case.render:
-            difference = _compare_picture(native_picture, oracle_out / "frame_000002.ppm")
+            frame_path = oracle_out / f"frame_{case.capture_frames:06}.ppm"
+            if case.weave_fields:
+                candidate_width = 320 if case.name.endswith("h40") else 256
+                field_height = 240 if case.region == "E" else 224
+                woven = base / "candidate-woven.ppm"
+                _weave_fields(oracle_out / "frame_000001.ppm", frame_path,
+                              candidate_width, field_height, woven)
+                frame_path = woven
+            difference = _compare_picture(native_picture, frame_path)
             if difference:
                 return difference
         return None

@@ -167,6 +167,7 @@ int main(int argc, char **argv)
 {
     const char *rom_path = NULL, *steps_path = NULL, *picture_path = NULL;
     const char *region = "U";
+    unsigned frames = 2;
     uint8_t *rom, *steps;
     size_t rom_size, steps_size;
     nmd_cart cart;
@@ -181,6 +182,8 @@ int main(int argc, char **argv)
             picture_path = argv[++i];
         else if (!strcmp(argv[i], "--region") && i + 1 < argc)
             region = argv[++i];
+        else if (!strcmp(argv[i], "--frames") && i + 1 < argc)
+            frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else {
             fprintf(stderr, "testcart: usage: testcart --rom ROM --steps TABLE [--picture-out PPM]\n");
             return 2;
@@ -224,8 +227,15 @@ int main(int argc, char **argv)
     md_vdp_trace_hook = trace_vdp;
     result = execute_steps(steps, steps_size);
     if (!result && picture_path) {
-        nmd_run_frame();
-        nmd_run_frame();
+        unsigned frame;
+        if (!frames || frames > 4) {
+            fprintf(stderr, "testcart: frame count must be in 1-4\n");
+            result = 2;
+        }
+        for (frame = 0; !result && frame < frames; frame++)
+            nmd_run_frame();
+    }
+    if (!result && picture_path) {
         if (!write_picture(picture_path)) {
             fprintf(stderr, "testcart: cannot write picture %s\n", picture_path);
             result = 2;
