@@ -6,6 +6,7 @@
 
 #include "nk/nk.h"
 #include "nmd/nmd.h"
+#include "md_internal.h"
 #include "md_console.h"
 
 static const nmd_cart *active_cart;
@@ -106,6 +107,7 @@ int nmd_main(const nmd_cart *cart, int argc, char **argv)
 void nmd_power(const nmd_cart *cart)
 {
     active_cart = cart;
+    md_bus_reset(cart);
 }
 
 void nmd_run_frame(void)

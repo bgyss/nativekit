@@ -1,13 +1,34 @@
 /*
- * bus.c: the 68000-visible bus. Stage 2 adds the memory map and clocked
- * device accesses; the console fatal is needed by the kit from its first
- * link.
+ * bus.c: the 68000-visible bus and the base Mega Drive memory map.
+ *
+ * A native game pays for each memory bus cycle, not for the host C used to
+ * calculate its operands. The master-clock scheduler is connected through
+ * md_clock_hook when Stage 2's VDP timing is present.
  */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
+#include "md_internal.h"
 #include "nk/fatal.h"
+
+#define MD_ADDRESS_MASK 0x00FFFFFFu
+#define MD_BUS_CYCLE_MASTER_CLOCKS 28ull /* 4 M68000 clocks, 7 master clocks each */
+
+nmd_cpu_state nmd_cpu;
+uint64_t md_clock;
+uint8_t md_z80_ram[0x2000];
+uint8_t md_memory_mode;
+uint8_t md_z80_busreq;
+uint8_t md_z80_reset;
+unsigned md_irq_defer_depth;
+void (*md_clock_hook)(uint64_t to_clock);
+void (*md_irq_check_hook)(void);
+md_bus_trace_fn md_bus_trace_hook;
+
+static const nmd_cart *active_cart;
+static uint8_t work_ram[0x10000];
 
 static _Noreturn void md_vfatal(const char *fmt, va_list ap)
 {
@@ -23,4 +44,352 @@ void nk_fatal(const char *fmt, ...)
     va_list ap;
     va_start(ap, fmt);
     md_vfatal(fmt, ap);
+}
+
+static uint32_t md_address(uint32_t addr)
+{
+    return addr & MD_ADDRESS_MASK;
+}
+
+static void md_advance_to(uint64_t to_clock)
+{
+    if (md_clock_hook)
+        md_clock_hook(to_clock);
+    else
+        md_clock = to_clock;
+
+    if (md_clock < to_clock)
+        md_clock = to_clock;
+}
+
+static void md_bus_cycle_complete(void)
+{
+    md_advance_to(md_clock + MD_BUS_CYCLE_MASTER_CLOCKS);
+}
+
+static void md_bus_trace(uint8_t operation, uint8_t width, uint32_t addr, uint32_t value)
+{
+    if (md_bus_trace_hook)
+        md_bus_trace_hook(md_clock, operation, width, addr, value);
+}
+
+static void md_bus_interrupt_check(void)
+{
+    if (!md_irq_defer_depth && md_irq_check_hook)
+        md_irq_check_hook();
+}
+
+static void md_require_aligned(uint32_t addr, const char *operation)
+{
+    if (addr & 1)
+        nk_fatal("68000 address error: odd-address %s at $%06X",
+                 operation, (unsigned)addr);
+}
+
+static const uint8_t *md_rom_bytes(uint32_t addr, unsigned count)
+{
+    if (!active_cart || !active_cart->rom)
+        nk_fatal("68000 read at $%06X without a cartridge ROM", (unsigned)addr);
+    if (addr > active_cart->rom_size || count > active_cart->rom_size - addr)
+        nk_fatal("68000 access outside cartridge ROM at $%06X", (unsigned)addr);
+    return active_cart->rom + addr;
+}
+
+static int md_is_work_ram(uint32_t addr)
+{
+    return addr >= 0xE00000u;
+}
+
+static int md_is_z80_ram(uint32_t addr)
+{
+    return addr >= 0xA00000u && addr <= 0xA01FFFu;
+}
+
+static int md_is_vdp(uint32_t addr)
+{
+    return addr >= 0xC00000u && addr <= 0xDFFFFFu;
+}
+
+static uint32_t md_vdp_port(uint32_t addr)
+{
+    return addr & 0x1Fu;
+}
+
+static uint8_t md_read8(uint32_t addr)
+{
+    if (addr <= 0x3FFFFFu)
+        return md_rom_bytes(addr, 1)[0];
+
+    if (md_is_z80_ram(addr)) {
+        if (!md_z80_busreq)
+            nk_fatal("68000 read of Z80 RAM at $%06X without BUSREQ", (unsigned)addr);
+        return md_z80_ram[addr & 0x1FFFu];
+    }
+
+    if (md_is_work_ram(addr))
+        return work_ram[addr & 0xFFFFu];
+
+    if (addr == 0xA11100u)
+        return md_z80_busreq ? 0 : 1;
+
+    if (addr == 0xA11101u)
+        nk_fatal("68000 read from the unconnected low lane of Z80 BUSREQ at $%06X",
+                 (unsigned)addr);
+
+    if (addr >= 0xA04000u && addr <= 0xA04003u)
+        nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
+    if (addr >= 0xA10000u && addr <= 0xA1001Fu)
+        nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
+    if (md_is_vdp(addr))
+        nk_fatal("VDP read state is not implemented at $%06X", (unsigned)addr);
+
+    nk_fatal("unsupported 68000 byte read at $%06X", (unsigned)addr);
+}
+
+static uint16_t md_read16(uint32_t addr)
+{
+    if (addr <= 0x3FFFFEu) {
+        const uint8_t *p = md_rom_bytes(addr, 2);
+        return (uint16_t)((uint16_t)p[0] << 8 | p[1]);
+    }
+
+    if (md_is_z80_ram(addr))
+        nk_fatal("68000 word access to 8-bit Z80 RAM at $%06X", (unsigned)addr);
+
+    if (md_is_work_ram(addr)) {
+        uint32_t offset = addr & 0xFFFFu;
+        return (uint16_t)((uint16_t)work_ram[offset] << 8 |
+                          work_ram[(offset + 1u) & 0xFFFFu]);
+    }
+
+    if (addr == 0xA11100u)
+        return md_z80_busreq ? 0 : 0x0100;
+
+    if (addr >= 0xA04000u && addr <= 0xA04003u)
+        nk_fatal("YM2612 read state is not implemented at $%06X", (unsigned)addr);
+    if (addr >= 0xA10000u && addr <= 0xA1001Fu)
+        nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
+    if (md_is_vdp(addr))
+        nk_fatal("VDP read state is not implemented at $%06X", (unsigned)addr);
+
+    nk_fatal("unsupported 68000 word read at $%06X", (unsigned)addr);
+}
+
+static void md_write8(uint32_t addr, uint8_t value)
+{
+    if (addr <= 0x3FFFFFu)
+        nk_fatal("68000 byte write to cartridge ROM at $%06X", (unsigned)addr);
+
+    if (md_is_z80_ram(addr)) {
+        if (!md_z80_busreq)
+            nk_fatal("68000 write of Z80 RAM at $%06X without BUSREQ", (unsigned)addr);
+        md_z80_ram[addr & 0x1FFFu] = value;
+        return;
+    }
+
+    if (md_is_work_ram(addr)) {
+        work_ram[addr & 0xFFFFu] = value;
+        return;
+    }
+
+    if (addr == 0xA11000u) {
+        md_memory_mode = value & 1u;
+        return;
+    }
+    if (addr == 0xA11001u)
+        return; /* the control register is connected to the high data lane */
+
+    if (addr == 0xA11100u) {
+        md_z80_busreq = value & 1u;
+        return;
+    }
+    if (addr == 0xA11101u)
+        return;
+
+    if (addr == 0xA11200u) {
+        md_z80_reset = (value & 1u) == 0;
+        return;
+    }
+    if (addr == 0xA11201u)
+        return;
+
+    if ((addr >= 0xA04000u && addr <= 0xA04003u) ||
+        addr == 0xA06000u || addr == 0xA06001u ||
+        (addr >= 0xA10000u && addr <= 0xA1001Fu))
+        return; /* mapped writes; chip state belongs to later stages */
+
+    if (md_is_vdp(addr) && md_vdp_port(addr) == 0x11u)
+        return; /* the PSG is an 8-bit write port */
+
+    nk_fatal("unsupported 68000 byte write at $%06X", (unsigned)addr);
+}
+
+static void md_write16(uint32_t addr, uint16_t value)
+{
+    if (addr <= 0x3FFFFEu)
+        nk_fatal("68000 word write to cartridge ROM at $%06X", (unsigned)addr);
+
+    if (md_is_z80_ram(addr))
+        nk_fatal("68000 word access to 8-bit Z80 RAM at $%06X", (unsigned)addr);
+
+    if (md_is_work_ram(addr)) {
+        uint32_t offset = addr & 0xFFFFu;
+        work_ram[offset] = (uint8_t)(value >> 8);
+        work_ram[(offset + 1u) & 0xFFFFu] = (uint8_t)value;
+        return;
+    }
+
+    if (addr == 0xA11000u) {
+        md_memory_mode = (uint8_t)((value >> 8) & 1u);
+        return;
+    }
+    if (addr == 0xA11100u) {
+        md_z80_busreq = (uint8_t)((value >> 8) & 1u);
+        return;
+    }
+    if (addr == 0xA11200u) {
+        md_z80_reset = ((value >> 8) & 1u) == 0;
+        return;
+    }
+
+    if ((addr >= 0xA04000u && addr <= 0xA04003u) ||
+        addr == 0xA06000u ||
+        (addr >= 0xA10000u && addr <= 0xA1001Eu))
+        return; /* mapped writes; chip state belongs to later stages */
+
+    if (md_is_vdp(addr)) {
+        uint32_t port = md_vdp_port(addr) & 0x1Du;
+        if (port == 0 || port == 4)
+            return; /* VDP data/control state is implemented in Stage 4 */
+    }
+
+    nk_fatal("unsupported 68000 word write at $%06X", (unsigned)addr);
+}
+
+void md_bus_reset(const nmd_cart *cart)
+{
+    active_cart = cart;
+    memset(&nmd_cpu, 0, sizeof nmd_cpu);
+    memset(work_ram, 0, sizeof work_ram);
+    memset(md_z80_ram, 0, sizeof md_z80_ram);
+    md_clock = 0;
+    md_memory_mode = 0;
+    md_z80_busreq = 1;
+    md_z80_reset = 1;
+    md_irq_defer_depth = 0;
+}
+
+void md_irq_defer_begin(void)
+{
+    md_irq_defer_depth++;
+}
+
+void md_irq_defer_end(void)
+{
+    if (!md_irq_defer_depth)
+        nk_fatal("unbalanced 68000 interrupt deferral");
+    md_irq_defer_depth--;
+    if (!md_irq_defer_depth && md_irq_check_hook)
+        md_irq_check_hook();
+}
+
+uint8_t nmd_bus_read8(uint32_t addr)
+{
+    uint8_t value;
+    addr = md_address(addr);
+    md_advance_to(md_clock);
+    value = md_read8(addr);
+    md_bus_cycle_complete();
+    md_bus_trace(MD_BUS_TRACE_READ, 1, addr, value);
+    md_bus_interrupt_check();
+    return value;
+}
+
+uint16_t nmd_bus_read16(uint32_t addr)
+{
+    uint16_t value;
+    addr = md_address(addr);
+    md_require_aligned(addr, "word read");
+    md_advance_to(md_clock);
+    value = md_read16(addr);
+    md_bus_cycle_complete();
+    md_bus_trace(MD_BUS_TRACE_READ, 2, addr, value);
+    md_bus_interrupt_check();
+    return value;
+}
+
+void nmd_bus_write8(uint32_t addr, uint8_t value)
+{
+    addr = md_address(addr);
+    md_advance_to(md_clock);
+    md_write8(addr, value);
+    md_bus_cycle_complete();
+    md_bus_trace(MD_BUS_TRACE_WRITE, 1, addr, value);
+    md_bus_interrupt_check();
+}
+
+void nmd_bus_write16(uint32_t addr, uint16_t value)
+{
+    addr = md_address(addr);
+    md_require_aligned(addr, "word write");
+    md_advance_to(md_clock);
+    md_write16(addr, value);
+    md_bus_cycle_complete();
+    md_bus_trace(MD_BUS_TRACE_WRITE, 2, addr, value);
+    md_bus_interrupt_check();
+}
+
+uint8_t rd8(uint32_t addr)
+{
+    return nmd_bus_read8(addr);
+}
+
+uint16_t rd16(uint32_t addr)
+{
+    return nmd_bus_read16(addr);
+}
+
+uint32_t rd32(uint32_t addr)
+{
+    uint32_t value;
+    addr = md_address(addr);
+    md_require_aligned(addr, "longword read");
+    md_irq_defer_begin();
+    value = (uint32_t)nmd_bus_read16(addr) << 16;
+    value |= nmd_bus_read16(addr + 2u);
+    md_irq_defer_end();
+    return value;
+}
+
+void wr8(uint32_t addr, uint8_t value)
+{
+    nmd_bus_write8(addr, value);
+}
+
+void wr16(uint32_t addr, uint16_t value)
+{
+    nmd_bus_write16(addr, value);
+}
+
+void wr32(uint32_t addr, uint32_t value)
+{
+    addr = md_address(addr);
+    md_require_aligned(addr, "longword write");
+    md_irq_defer_begin();
+    nmd_bus_write16(addr, (uint16_t)(value >> 16));
+    nmd_bus_write16(addr + 2u, (uint16_t)value);
+    md_irq_defer_end();
+}
+
+uint8_t nmd_tas(uint32_t addr)
+{
+    uint8_t old_value;
+    md_irq_defer_begin();
+    old_value = nmd_bus_read8(addr);
+    nmd_bus_write8(addr, (uint8_t)(old_value | 0x80u));
+    nmd_cpu.sr = (uint16_t)((nmd_cpu.sr & ~0x000Fu) |
+                            ((old_value & 0x80u) ? 0x0008u : 0) |
+                            (old_value == 0 ? 0x0004u : 0));
+    md_irq_defer_end();
+    return old_value;
 }

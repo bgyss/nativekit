@@ -23,6 +23,16 @@ description = "Check that the nmd console entry point links to the kit"
 depends = ["build:null"]
 run = "cmake --build build/null --target console_check && build/null/tests/console_check"
 
+[tasks."test:md-bus"]
+description = "Check the 68000 bus map, byte lanes, timing, and fatal accesses"
+depends = ["build:null"]
+run = "python3 consoles/md/tests/bus_check.py"
+
+[tasks."test:md-rom"]
+description = "Compare shared synthetic 68000 bus cases with the candidate core"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/rom/run.py"
+
 [tasks."test:md-oracle-smoke"]
 description = "Exercise the exploratory libretro runner with a synthetic cartridge"
 run = "python3 consoles/md/tests/oracle_check.py"

@@ -145,21 +145,26 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
   still decodes and times those ports. Do not add SRAM or mapper support. Unknown/prohibited
   accesses fail with `nativemd:` instead of returning guessed data.
 
-- [ ] Add a 68000 table interpreter in `mdtest.py` and a native interpreter in `testcart.c`; the
+- [x] Add a 68000 table interpreter in `mdtest.py` and a native interpreter in `testcart.c`; the
   same `cases.py` table drives both the candidate ROM and `nmd`.
-- [ ] Add failing unit and ROM cases for ROM/work-RAM reads, mirrored work RAM, byte lanes, big-
-  endian words, ordered longwords, 24-bit address masking, and refresh delay. The Z80 RAM case
-  must issue a word write of `$0100` to `$A11100`, poll BUSREQ acknowledgement before access, then
-  release it with a word write of `$0000`.
-- [ ] Add a failing odd-address word/long access case; report the 68000 address error as a
+- [x] Add failing unit and ROM cases for ROM/work-RAM reads, mirrored work RAM, byte lanes, big-
+  endian words, ordered longwords, 24-bit address masking, and the four-clock-period base memory
+  bus cycle. The Z80 RAM case must issue a word write of `$0100` to `$A11100`, poll BUSREQ
+  acknowledgement before access, then release it with a word write of `$0000`.
+- [x] Add a failing odd-address word/long access case; report the 68000 address error as a
   `nativemd:` fatal with exit 70 rather than silently aligning the address.
-- [ ] Implement the memory map and bus cycle accounting from the Sega memory map and Motorola
-  68000 cycle tables. Reserved, prohibited, and unsupported cartridge-space accesses fail with
-  `nativemd:`; implement documented open-bus behavior only in the device paths that specify it.
-- [ ] Add `nmd_tas(uint32_t addr)`: the 68000 manual defines TAS as an indivisible byte
+- [x] Implement the memory map and bus cycle accounting from the Sega memory map and Motorola
+  68000 cycle tables. The Sega manual identifies `$A11000` as DRAM-development-cartridge refresh
+  mode; do not infer a stock work-RAM refresh stall from that setting. Reserved, prohibited, and
+  unsupported cartridge-space accesses fail with `nativemd:`; implement documented open-bus
+  behavior only in the device paths that specify it.
+- [x] Add `nmd_tas(uint32_t addr)`: the 68000 manual defines TAS as an indivisible byte
   read-modify-write cycle. Verify it returns the old byte, sets bit 7, sets N/Z from the old byte,
   clears V/C, preserves X, and prevents interrupt entry between the read and write.
-- [ ] Run bus unit cases, MD oracle comparisons, all Stage 0 gates, and commit.
+- [x] Run bus unit cases and MD oracle comparisons; record candidate-bound differences in `tests/rom/KNOWN`.
+- [x] Run the current-tree Stage 0 build, test, and timing gates; record host-limited failures in
+  the SDD ledger.
+- [x] Commit Task 2 as a focused implementation change.
 
 ### Task 3: Add the master-clock scheduler, counters, and interrupt dispatch
 

@@ -1,0 +1,2 @@
+# Candidate-only differences, one case name followed by the reviewed reason.
+tas_write BlastEm's TAS memory path did not set bit 7 or emit the write in the pinned synthetic fixture; nmd TAS is covered by bus_check and the Motorola byte read-modify-write contract.
