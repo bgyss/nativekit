@@ -38,6 +38,11 @@ description = "Check VDP control/data ports, memory, reads, and FIFO timing"
 depends = ["build:null"]
 run = "cmake --build build/null --target vdp_check && build/null/tests/vdp_check"
 
+[tasks."test:md-dma"]
+description = "Check DMA transfers, register setup, and bus stalls"
+depends = ["build:null"]
+run = "cmake --build build/null --target dma_check && python3 consoles/md/tests/dma_check.py"
+
 [tasks."test:md-rom"]
 description = "Compare shared synthetic 68000 bus cases with the candidate core"
 depends = ["build:null", "tools:md"]

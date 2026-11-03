@@ -13,7 +13,7 @@ sys.path.insert(0, str(HERE.parent / "oracle"))
 
 import cases  # noqa: E402
 import mdtest  # noqa: E402
-from trace import M68K, VDP, READ, WRITE, read as read_trace  # noqa: E402
+from trace import M68K, VDP, DMA, READ, WRITE, read as read_trace  # noqa: E402
 
 
 def _target_addresses(case):
@@ -27,18 +27,19 @@ def _target_addresses(case):
 
 
 def _native_events(result):
-    bus_events, vdp_events = [], []
+    bus_events, vdp_events, dma_events = [], [], []
     for line in result.stdout.splitlines():
         fields = line.split("\t")
         if len(fields) == 6 and fields[0] == "VDP":
             _, clock, operation, width, port, value = fields
-            vdp_events.append((int(operation), int(width), int(port, 16), int(value, 16), int(clock)))
+            event = (int(operation), int(width), int(port, 16), int(value, 16), int(clock))
+            (dma_events if event[0] == DMA else vdp_events).append(event)
             continue
         if len(fields) != 5:
             raise ValueError("testcart emitted an invalid bus trace line")
         clock, operation, width, addr, value = fields
         bus_events.append((int(operation), int(width), int(addr, 16), int(value, 16), int(clock)))
-    return bus_events, vdp_events
+    return bus_events, vdp_events, dma_events
 
 
 def _candidate_events(trace_path, addresses):
@@ -51,7 +52,9 @@ def _candidate_events(trace_path, addresses):
     vdp = [(event.operation, event.width, event.address, event.value, event.clock)
            for event in trace
            if event.device == VDP and event.operation in (READ, WRITE) and event.address in (0, 4, 8)]
-    return bus, vdp
+    dma = [(event.operation, event.width, event.address, event.value, event.clock)
+           for event in trace if event.device == VDP and event.operation == DMA]
+    return bus, vdp, dma
 
 
 def _event_value_masks(case):
@@ -131,6 +134,44 @@ def _compare_vdp_offsets(case, native_bus, native_vdp, candidate_bus, candidate_
     return None
 
 
+def _compare_dma(case, native_vdp, native_dma, candidate_vdp, candidate_dma):
+    if not case.name.startswith("dma_"):
+        return None
+    if len(native_dma) != len(candidate_dma):
+        return f"DMA event counts: native {len(native_dma)}, candidate {len(candidate_dma)}"
+    for index, (native_event, candidate_event) in enumerate(zip(native_dma, candidate_dma)):
+        if native_event[:4] != candidate_event[:4]:
+            return (f"DMA event {index}: native {native_event[:4]!r}, "
+                    f"candidate {candidate_event[:4]!r}")
+
+    if case.name == "dma_fill":
+        native_launch = next(event for event in native_vdp
+                             if event[:4] == (WRITE, 2, 0, 0xA500))
+        candidate_launch = next(event for event in candidate_vdp
+                                if event[:4] == (WRITE, 2, 0, 0xA500))
+    else:
+        launch_value = 0x0090 if case.name == "dma_memory_vsram" else 0x0080
+        native_launch = next(event for event in native_vdp
+                             if event[:4] == (WRITE, 2, 4, launch_value))
+        candidate_launch = next(event for event in candidate_vdp
+                                if event[:4] == (WRITE, 2, 4, launch_value))
+    if case.name == "dma_copy":
+        native_phases = [event[4] % 40 for event in native_dma]
+        candidate_phases = [event[4] % 40 for event in candidate_dma]
+        native_intervals = [b[4] - a[4] for a, b in zip(native_dma, native_dma[1:])]
+        candidate_intervals = [b[4] - a[4] for a, b in zip(candidate_dma, candidate_dma[1:])]
+        if native_phases != candidate_phases or native_intervals != candidate_intervals:
+            return (f"DMA copy slot clocks: native phases/intervals {native_phases}/{native_intervals}, "
+                    f"candidate {candidate_phases}/{candidate_intervals}")
+    else:
+        native_deltas = [event[4] - native_launch[4] for event in native_dma]
+        candidate_deltas = [event[4] - candidate_launch[4] for event in candidate_dma]
+        if native_deltas != candidate_deltas:
+            return f"DMA slot clocks: native {native_deltas}, candidate {candidate_deltas}"
+
+    return None
+
+
 def run_one(case, assembler, core, testcart):
     with tempfile.TemporaryDirectory(prefix="nmd-rom-") as temp:
         base = pathlib.Path(temp)
@@ -153,9 +194,9 @@ def run_one(case, assembler, core, testcart):
             return "native testcart failed: " + native.stderr.strip()[-500:]
 
         try:
-            native_bus, native_vdp = _native_events(native)
-            candidate_bus, candidate_vdp = _candidate_events(oracle_out / "bus.trace",
-                                                             _target_addresses(case))
+            native_bus, native_vdp, native_dma = _native_events(native)
+            candidate_bus, candidate_vdp, candidate_dma = _candidate_events(
+                oracle_out / "bus.trace", _target_addresses(case))
         except (OSError, ValueError) as error:
             return "trace read failed: " + str(error)
         difference = _compare(case, native_bus, candidate_bus)
@@ -163,6 +204,10 @@ def run_one(case, assembler, core, testcart):
             return difference
         difference = _compare_vdp_offsets(case, native_bus, native_vdp, candidate_bus, candidate_vdp,
                                           case.direct)
+        if difference:
+            return difference
+        difference = _compare_dma(case, native_vdp, native_dma,
+                                  candidate_vdp, candidate_dma)
         if difference:
             return difference
         return None

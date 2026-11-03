@@ -117,8 +117,10 @@ void md_ext_irq_at(int level, uint64_t clock)
 static uint64_t next_event_clock(void)
 {
     uint64_t next_vdp = md_vdp_next_event();
+    uint64_t next_dma = md_dma_next_event();
     uint64_t next_irq = irq_event_count ? irq_events[0].clock : MD_NEVER;
-    return next_vdp < next_irq ? next_vdp : next_irq;
+    uint64_t next = next_vdp < next_dma ? next_vdp : next_dma;
+    return next < next_irq ? next : next_irq;
 }
 
 static void process_irq_event(const md_irq_event *event)
@@ -149,6 +151,8 @@ void md_advance_to(uint64_t to_clock)
         md_clock = next;
         if (md_vdp_next_event() == next)
             md_vdp_advance(next);
+        if (md_dma_next_event() == next)
+            md_dma_advance(next);
         while (irq_event_count && irq_events[0].clock == next) {
             md_irq_event event = irq_events[0];
             unsigned i;
@@ -213,6 +217,7 @@ void md_timing_reset(const nmd_cart *cart)
     md_irq_taken = 0;
     md_irq_last_service_clock = 0;
     md_vdp_reset(cart);
+    md_dma_reset();
     md_clock_hook = md_advance_to;
     md_irq_check_hook = md_irq_dispatch_pending;
 }

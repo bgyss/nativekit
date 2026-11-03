@@ -68,6 +68,8 @@ static void md_bus_cycle_complete(uint64_t access_start)
     if (md_clock > access_end)
         access_end = md_clock;
     md_bus_advance_to(access_end);
+    while (md_dma_bus_owned())
+        md_bus_advance_to(md_dma_next_event());
 }
 
 static void md_bus_trace(uint8_t operation, uint8_t width, uint32_t addr, uint32_t value)
@@ -101,6 +103,25 @@ static const uint8_t *md_rom_bytes(uint32_t addr, unsigned count)
 static int md_is_work_ram(uint32_t addr)
 {
     return addr >= 0xE00000u;
+}
+
+uint16_t nmd_dma_source_read16(uint32_t addr)
+{
+    const uint8_t *bytes;
+    uint32_t offset;
+
+    addr = md_address(addr);
+    md_require_aligned(addr, "DMA source read");
+    if (addr <= 0x3FFFFEu) {
+        bytes = md_rom_bytes(addr, 2);
+        return (uint16_t)((uint16_t)bytes[0] << 8 | bytes[1]);
+    }
+    if (md_is_work_ram(addr)) {
+        offset = addr & 0xFFFFu;
+        return (uint16_t)((uint16_t)work_ram[offset] << 8 |
+                          work_ram[(offset + 1u) & 0xFFFFu]);
+    }
+    nk_fatal("unsupported VDP DMA source at $%06X", (unsigned)addr);
 }
 
 static int md_is_z80_ram(uint32_t addr)

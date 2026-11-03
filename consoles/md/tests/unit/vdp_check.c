@@ -89,9 +89,9 @@ static void test_cram_vsram(nmd_cart *cart)
     nmd_power(cart);
     nmd_wait_vblank();
     control(0xC0000000);           /* CRAM write at word address zero */
-    wr16(NMD_VDP_DATA, 0x0EEE);
+    wr16(NMD_VDP_DATA, 0x0123);
     control(0x00000020);           /* CRAM read at word address zero */
-    assert(rd16(NMD_VDP_DATA) == 0x0EEE);
+    assert(rd16(NMD_VDP_DATA) == 0x0022); /* Unused CRAM bits read as zero. */
 
     control(0x40000010);           /* VSRAM write at word address zero */
     wr16(NMD_VDP_DATA, 0x0123);

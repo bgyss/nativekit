@@ -128,7 +128,7 @@ def build_case(case, out_dir, assembler):
     rom[0x150:0x180] = b"NATIVEKIT BUS TEST".ljust(48, b" ")
     rom[0x1F0:0x200] = b"JUE             "
     rom[0x200:0x200 + len(code)] = code
-    rom[0x4000:0x4002] = bytes((0x5A, 0xA5))
+    rom[0x4000:0x4008] = bytes((0x01, 0x23, 0x04, 0x56, 0x07, 0x89, 0x0A, 0xBC))
     rom_path.write_bytes(rom)
     steps_path.write_bytes(encode_steps(case))
     return rom_path, steps_path

@@ -1,2 +1,5 @@
 # Candidate-only differences, one case name followed by the reviewed reason.
 tas_write BlastEm's TAS memory path did not set bit 7 or emit the write in the pinned synthetic fixture; nmd TAS is covered by bus_check and the Motorola byte read-modify-write contract.
+dma_memory_vram Pinned BlastEm emits H32 VRAM source words every 20 master clocks, while Sega's Technical Overview gives 167 transfer bytes per VBlank line; nmd models the manual's two-byte source word cadence.
+dma_active_vram_h32 BlastEm emits H32 DMA source words every 20 master clocks with DISP enabled on active line 21; Sega's Technical Overview gives 16 transfer bytes per effective line, so nmd uses the manual-derived slower active rate.
+dma_active_vram_h40 BlastEm emits H40 DMA source words every 16 master clocks with DISP enabled on active line 21; Sega's Technical Overview gives 18 transfer bytes per effective line, so nmd uses the manual-derived slower active rate.

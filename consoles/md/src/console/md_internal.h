@@ -7,6 +7,7 @@
 #include "nmd/cart.h"
 #include "nmd/machine.h"
 #include "../vdp/vdp.h"
+#include "../vdp/dma.h"
 
 #define MD_MASTER_CLOCKS_PER_LINE 3420u
 
@@ -49,5 +50,6 @@ uint8_t nmd_bus_read8(uint32_t addr);
 uint16_t nmd_bus_read16(uint32_t addr);
 void nmd_bus_write8(uint32_t addr, uint8_t value);
 void nmd_bus_write16(uint32_t addr, uint16_t value);
+uint16_t nmd_dma_source_read16(uint32_t addr);
 
 #endif

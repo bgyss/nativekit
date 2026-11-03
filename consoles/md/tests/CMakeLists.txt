@@ -22,3 +22,8 @@ add_executable(vdp_check unit/vdp_check.c)
 target_include_directories(vdp_check PRIVATE ../src/console)
 target_link_libraries(vdp_check PRIVATE nmd)
 set_target_properties(vdp_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(dma_check unit/dma_check.c)
+target_include_directories(dma_check PRIVATE ../src/console)
+target_link_libraries(dma_check PRIVATE nmd)
+set_target_properties(dma_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)

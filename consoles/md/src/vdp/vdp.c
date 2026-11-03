@@ -92,8 +92,9 @@ static void vdp_memory_write(uint8_t write_code, uint8_t width, uint8_t lane,
                 cram[index] = (uint16_t)((cram[index] & 0xFF00u) | (uint8_t)value);
             else
                 cram[index] = (uint16_t)((cram[index] & 0x00FFu) | ((uint16_t)(uint8_t)value << 8));
+            cram[index] &= 0x0EEEu;
         } else {
-            cram[index] = value;
+            cram[index] = value & 0x0EEEu;
         }
     } else if (write_code == 5) {
         unsigned index = (addr >> 1) % 40u;
@@ -148,6 +149,8 @@ static uint16_t vdp_status(void)
         value |= 0x0200;
     if (fifo_count == MD_VDP_FIFO_WORDS)
         value |= 0x0100;
+    if (md_dma_busy())
+        value |= 0x0002;
     if (vint_flag)
         value |= 0x0080;
     if (line >= active_lines)
@@ -159,7 +162,7 @@ static uint16_t vdp_status(void)
     return value;
 }
 
-static void control_write(uint16_t value)
+static void control_write(uint16_t value, uint64_t clock)
 {
     if ((value & 0xC000u) == 0x8000u) {
         control_pending = 0;
@@ -181,6 +184,8 @@ static void control_write(uint16_t value)
         address = (uint16_t)(address + registers[15]);
         read_buffer_valid = 1;
     }
+    if (code & 0x20u)
+        md_dma_start(clock);
 }
 
 void md_vdp_reset(const nmd_cart *cart)
@@ -219,6 +224,39 @@ void md_vdp_set_register(unsigned reg, uint8_t value)
     registers[reg] = value;
     if (reg == 1)
         active_lines = (lines_per_frame == 312 && (value & 0x08)) ? 240u : 224u;
+}
+
+uint8_t md_vdp_register(unsigned reg)
+{
+    if (reg >= sizeof registers)
+        nk_fatal("VDP register number %u is outside 0-23", reg);
+    return registers[reg];
+}
+
+uint8_t md_vdp_code(void)
+{
+    return code;
+}
+
+uint16_t md_vdp_address(void)
+{
+    return address;
+}
+
+void md_vdp_set_address(uint16_t value)
+{
+    address = value;
+}
+
+void md_vdp_dma_write(uint8_t write_code, uint8_t width, uint16_t addr, uint16_t value)
+{
+    vdp_memory_write(write_code, width, 0, addr, value);
+}
+
+void md_vdp_dma_write_byte(uint16_t addr, uint8_t value)
+{
+    /* Fill and copy drive the VDP's byte lane opposite to the 68000 lane. */
+    vdp_memory_write(1, 1, 1, addr, value);
 }
 
 uint64_t md_vdp_next_event(void)
@@ -302,6 +340,11 @@ unsigned md_vdp_current_line(void)
     return line;
 }
 
+int md_vdp_active_display(void)
+{
+    return (registers[1] & 0x40u) != 0 && line < active_lines;
+}
+
 uint16_t md_vdp_hv_counter(void)
 {
     uint64_t hpos = md_clock % MD_MASTER_CLOCKS_PER_LINE;
@@ -312,11 +355,21 @@ uint16_t md_vdp_hv_counter(void)
     return (uint16_t)((h << 8) | (line & 0xFFu));
 }
 
+uint8_t md_vdp_dma_read_copy_byte(uint16_t addr)
+{
+    return vram[(uint16_t)(addr ^ 1u)];
+}
+
 static void trace_vdp_port(uint64_t clock, uint8_t operation, uint8_t width,
                            uint32_t port, uint32_t value)
 {
     if (md_vdp_trace_hook)
         md_vdp_trace_hook(clock, operation, width, port, value);
+}
+
+void md_vdp_trace_dma(uint64_t clock, uint8_t width, uint32_t addr, uint16_t value)
+{
+    trace_vdp_port(clock, MD_VDP_TRACE_DMA, width, addr, value);
 }
 
 static void schedule_vram_read(void)
@@ -381,6 +434,13 @@ static void data_write(uint8_t width, uint8_t lane, uint16_t value, uint64_t clo
 
     md_advance_to(clock + 16u);
     control_pending = 0;
+    if (md_dma_waiting_seed()) {
+        port_clock = md_clock;
+        md_dma_seed(value, port_clock);
+        trace_vdp_port(port_clock, MD_VDP_TRACE_WRITE, width, MD_VDP_DATA_PORT, value);
+        md_advance_to(port_clock + 12u);
+        return;
+    }
     if (line >= active_lines) {
         vdp_memory_write(write_code, width, lane, address, value);
         address = (uint16_t)(address + registers[15]);
@@ -434,7 +494,7 @@ uint16_t md_vdp_read16(uint32_t port, uint64_t clock)
 void md_vdp_write16(uint32_t port, uint16_t value, uint64_t clock)
 {
     if (port == MD_VDP_CONTROL_PORT) {
-        control_write(value);
+        control_write(value, clock + 36u);
         trace_vdp_port(clock + 36u, MD_VDP_TRACE_WRITE, 2, MD_VDP_CONTROL_PORT, value);
         return;
     }

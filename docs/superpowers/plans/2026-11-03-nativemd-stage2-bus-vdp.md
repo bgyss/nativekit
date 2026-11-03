@@ -236,15 +236,15 @@ scope in `docs/superpowers/handoff/2026-11-01-nativemd-handoff.md`.
   is VRAM-only per Sega's Technical Overview; do not copy the candidate core's undocumented
   CRAM/VSRAM fill behavior into nmd.
 
-- [ ] Add failing cases for DMA source bounds, source word order, each destination memory type,
+- [x] Add failing cases for DMA source bounds, source word order, each destination memory type,
   VRAM fill seed/slot timing, VRAM copy bytes, zero count, autoincrement, active display, and
   VBlank.
-- [ ] Assert the 68000 is held for memory-to-VDP DMA and all interrupt timestamps remain ordered
+- [x] Assert the 68000 is held for memory-to-VDP DMA and all interrupt timestamps remain ordered
   during DMA. Expose the bus-ownership boundary Stage 3 will use to suspend Z80 accesses to the
   contested 68000 bus; do not claim Z80 execution while that CPU is not implemented.
-- [ ] Implement slot timing from the documented display modes; compare slot events, data, and
+- [x] Implement slot timing from the documented display modes; compare slot events, data, and
   first/last access clocks to the pinned candidate.
-- [ ] Run DMA cases and the full Stage 0 gate; commit.
+- [x] Run DMA cases and the full Stage 0 gate; commit.
 
 ### Task 6: Render Mode 5 background planes, scroll, and window
 
