@@ -50,6 +50,15 @@ add_executable(kit_stub_console stub_console.c $<TARGET_OBJECTS:nk_front>)
 target_include_directories(kit_stub_console PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
 set_target_properties(kit_stub_console PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/kit/tests)
 
+# the macOS host's mouse buttons, in a window (run by hand: kit/tests/click_macos.m)
+if(NK_HOST STREQUAL "macos")
+  add_executable(kit_click_macos click_macos.m)
+  target_link_libraries(kit_click_macos PRIVATE ${NK_HOST_TARGETS} "-framework Cocoa" "-framework QuartzCore"
+    "-framework AudioToolbox" "-framework CoreAudio" "-framework GameController")
+  target_include_directories(kit_click_macos PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
+  set_target_properties(kit_click_macos PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/kit/tests)
+endif()
+
 # every kit check, and the name check, at once: cmake --build <dir> --target kit-check
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 add_custom_target(kit-check
