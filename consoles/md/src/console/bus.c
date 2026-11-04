@@ -32,6 +32,11 @@ md_bus_trace_fn md_bus_trace_hook;
 static const nmd_cart *active_cart;
 static uint8_t work_ram[0x10000];
 static uint64_t md_68k_bus_busy_until;
+static int m68k_costs_on = 1;
+static uint32_t m68k_tenths[2][NMD_KINDS];
+static uint32_t m68k_tenths_carry;
+static md_count_hook count_read_hook;
+static md_count_hook count_write_hook;
 
 static _Noreturn void md_vfatal(const char *fmt, va_list ap)
 {
@@ -67,9 +72,13 @@ static void md_bus_advance_to(uint64_t to_clock)
 
 static void md_bus_cycle_complete(uint64_t access_start)
 {
-    uint64_t access_end = access_start + MD_BUS_CYCLE_MASTER_CLOCKS;
-    if (md_68k_bus_busy_until < access_end)
-        md_68k_bus_busy_until = access_end;
+    uint64_t access_end = access_start;
+
+    if (m68k_costs_on) {
+        access_end += MD_BUS_CYCLE_MASTER_CLOCKS;
+        if (md_68k_bus_busy_until < access_end)
+            md_68k_bus_busy_until = access_end;
+    }
     if (md_clock > access_end)
         access_end = md_clock;
     md_bus_advance_to(access_end);
@@ -161,6 +170,77 @@ static uint32_t md_vdp_word_port(uint32_t addr)
     if (port == 0x08u)
         return MD_VDP_HV_PORT;
     return UINT32_MAX;
+}
+
+int nmd_access_kind(uint32_t addr)
+{
+    if ((addr & 0xFF000000u) == MD_Z80_COUNT_MARKER)
+        return NMD_KINDS + nmd_z80_access_kind((uint16_t)addr);
+
+    addr = md_address(addr);
+    if (addr <= 0x3FFFFFu)
+        return NMD_KIND_ROM;
+    if (md_is_z80_ram(addr))
+        return NMD_KIND_Z80_RAM;
+    if (md_is_work_ram(addr))
+        return NMD_KIND_WORK_RAM;
+    if ((addr >= 0xA04000u && addr <= 0xA04003u) ||
+        (md_is_vdp(addr) && md_vdp_port(addr) == 0x11u))
+        return NMD_KIND_SOUND;
+    if (md_is_vdp(addr))
+        return NMD_KIND_VDP;
+    if ((addr >= 0xA06000u && addr <= 0xA06001u) ||
+        (addr >= 0xA10000u && addr <= 0xA1001Fu) ||
+        (addr >= 0xA11000u && addr <= 0xA11201u) ||
+        (addr >= 0xA14000u && addr <= 0xA14101u))
+        return NMD_KIND_IO;
+    return NMD_KIND_OPEN_BUS;
+}
+
+void nmd_set_cpu_costs(int on)
+{
+    m68k_costs_on = on != 0;
+    m68k_tenths_carry = 0;
+}
+
+const nmd_cost_profile *md_cost_profile_current(void)
+{
+    return active_cart ? active_cart->cost_profile : NULL;
+}
+
+void md_bus_counts_hooks(md_count_hook rd, md_count_hook wr)
+{
+    count_read_hook = rd;
+    count_write_hook = wr;
+}
+
+void md_bus_count_read(uint32_t addr, uint8_t value)
+{
+    if (count_read_hook)
+        count_read_hook(addr, value);
+}
+
+void md_bus_count_write(uint32_t addr, uint8_t value)
+{
+    if (count_write_hook)
+        count_write_hook(addr, value);
+}
+
+static void md_bus_profile_spend(uint32_t addr, int write)
+{
+    uint64_t total;
+    uint64_t clocks;
+
+    if (!m68k_costs_on)
+        return;
+    total = (uint64_t)m68k_tenths[write][nmd_access_kind(addr)] + m68k_tenths_carry;
+    clocks = total / 10u;
+    m68k_tenths_carry = (uint32_t)(total % 10u);
+    if (clocks) {
+        if (UINT64_MAX - md_clock < clocks)
+            nk_fatal("68000 profile clock overflow");
+        md_bus_advance_to(md_clock + clocks);
+    }
 }
 
 static void md_vdp_require_unlocked(uint32_t addr)
@@ -428,11 +508,20 @@ void md_z80_window_write8(uint32_t addr, uint8_t value)
 void md_bus_reset(const nmd_cart *cart)
 {
     active_cart = cart;
+    memset(m68k_tenths, 0, sizeof m68k_tenths);
+    m68k_tenths_carry = 0;
+    if (cart && cart->cost_profile) {
+        if (cart->cost_profile->version != NMD_COST_PROFILE_VERSION)
+            nk_fatal("nmd cost profile version %d is not supported (expected %d)",
+                     cart->cost_profile->version, NMD_COST_PROFILE_VERSION);
+        memcpy(m68k_tenths, cart->cost_profile->m68k_tenths, sizeof m68k_tenths);
+    }
     memset(&nmd_cpu, 0, sizeof nmd_cpu);
     nmd_cpu.sr = 0x2700; /* reset starts in supervisor mode with all IRQs masked */
     memset(work_ram, 0, sizeof work_ram);
     memset(md_z80_ram, 0, sizeof md_z80_ram);
     md_z80_bus_reset();
+    m68k_costs_on = 1;
     md_clock = 0;
     md_memory_mode = 0;
     md_z80_busreq = 1;
@@ -461,10 +550,12 @@ uint8_t nmd_bus_read8(uint32_t addr)
     uint8_t value;
     uint64_t access_start;
     addr = md_address(addr);
+    md_bus_profile_spend(addr, 0);
     md_bus_begin_access();
     access_start = md_clock;
     value = md_read8(addr, 0);
     md_bus_cycle_complete(access_start);
+    md_bus_count_read(addr, value);
     md_bus_trace(MD_BUS_TRACE_READ, 1, addr, value);
     md_bus_interrupt_check();
     return value;
@@ -476,10 +567,12 @@ uint16_t nmd_bus_read16(uint32_t addr)
     uint64_t access_start;
     addr = md_address(addr);
     md_require_aligned(addr, "word read");
+    md_bus_profile_spend(addr, 0);
     md_bus_begin_access();
     access_start = md_clock;
     value = md_read16(addr);
     md_bus_cycle_complete(access_start);
+    md_bus_count_read(addr, (uint8_t)value);
     md_bus_trace(MD_BUS_TRACE_READ, 2, addr, value);
     md_bus_interrupt_check();
     return value;
@@ -489,10 +582,12 @@ void nmd_bus_write8(uint32_t addr, uint8_t value)
 {
     uint64_t access_start;
     addr = md_address(addr);
+    md_bus_profile_spend(addr, 1);
     md_bus_begin_access();
     access_start = md_clock;
     md_write8(addr, value, 0);
     md_bus_cycle_complete(access_start);
+    md_bus_count_write(addr, value);
     md_bus_trace(MD_BUS_TRACE_WRITE, 1, addr, value);
     md_bus_interrupt_check();
 }
@@ -502,10 +597,12 @@ void nmd_bus_write16(uint32_t addr, uint16_t value)
     uint64_t access_start;
     addr = md_address(addr);
     md_require_aligned(addr, "word write");
+    md_bus_profile_spend(addr, 1);
     md_bus_begin_access();
     access_start = md_clock;
     md_write16(addr, value);
     md_bus_cycle_complete(access_start);
+    md_bus_count_write(addr, (uint8_t)value);
     md_bus_trace(MD_BUS_TRACE_WRITE, 2, addr, value);
     md_bus_interrupt_check();
 }

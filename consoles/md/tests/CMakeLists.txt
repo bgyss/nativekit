@@ -8,7 +8,7 @@ target_link_libraries(io_check PRIVATE nmd)
 set_target_properties(io_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
 add_executable(bus_check unit/bus_check.c)
-target_include_directories(bus_check PRIVATE ../src/console)
+target_include_directories(bus_check PRIVATE ../src/console ../src/front ${NK_INCLUDE})
 target_link_libraries(bus_check PRIVATE nmd)
 set_target_properties(bus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 

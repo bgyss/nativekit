@@ -4,13 +4,13 @@
 
 #include <stdint.h>
 
-#include "nmd/cart.h"
+#include "nmd/nmd.h"
 #include "../io/io.h"
-#include "nmd/machine.h"
 #include "../vdp/vdp.h"
 #include "../vdp/dma.h"
 
 #define MD_MASTER_CLOCKS_PER_LINE 3420u
+#define MD_Z80_COUNT_MARKER 0x01000000u
 
 extern uint64_t md_clock;
 extern uint8_t md_z80_ram[0x2000];
@@ -32,6 +32,11 @@ extern md_bus_trace_fn md_bus_trace_hook;
 typedef void (*md_z80_bus_trace_fn)(uint64_t clock, uint8_t operation, uint8_t width,
                                     uint32_t addr, uint32_t value);
 extern md_z80_bus_trace_fn md_z80_bus_trace_hook;
+typedef void (*md_count_hook)(uint32_t addr, uint8_t value);
+void md_bus_counts_hooks(md_count_hook rd, md_count_hook wr);
+void md_bus_count_read(uint32_t addr, uint8_t value);
+void md_bus_count_write(uint32_t addr, uint8_t value);
+const nmd_cost_profile *md_cost_profile_current(void);
 
 /* The scheduler services device deadlines; interrupt checks run after an
  * access, except while a longword or TAS read-modify-write is indivisible. */

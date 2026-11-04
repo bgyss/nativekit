@@ -28,6 +28,15 @@ static const nk_button buttons[] = {
     { "Z", NMD_BUTTON_Z },
     { "MODE", NMD_BUTTON_MODE },
 };
+static const char *const kind_names[] = {
+    "rom", "work ram", "z80 ram", "io", "vdp", "sound", "open bus",
+    "z80 ram", "z80 ym2612", "z80 bank register", "z80 psg", "z80 bank window",
+    "z80 open bus",
+};
+
+_Static_assert(sizeof kind_names / sizeof kind_names[0] == NMD_KINDS + NMD_Z80_KINDS,
+               "nmd access kind names");
+_Static_assert(NMD_KINDS + NMD_Z80_KINDS <= NK_KINDS_MAX, "nmd count kind limit");
 
 static void power(const void *cart)
 {
@@ -97,6 +106,12 @@ static void input(int headless, const uint32_t *buttons)
     md_io_input(buttons);
 }
 
+static void counts_hooks(void (*rd)(uint32_t addr, uint8_t value),
+                         void (*wr)(uint32_t addr, uint8_t value))
+{
+    md_bus_counts_hooks(rd, wr);
+}
+
 const nk_console nmd_console = {
     .name = "nativemd",
     .env = "NMD",
@@ -117,6 +132,10 @@ const nk_console nmd_console = {
     .buttons = buttons,
     .button_count = (int)(sizeof buttons / sizeof buttons[0]),
     .input = input,
+    .counts_hooks = counts_hooks,
+    .access_kind = nmd_access_kind,
+    .kind_count = NMD_KINDS + NMD_Z80_KINDS,
+    .kind_names = kind_names,
 };
 
 int nmd_main(const nmd_cart *cart, int argc, char **argv)

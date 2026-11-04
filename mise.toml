@@ -29,7 +29,7 @@ depends = ["build:null"]
 run = "cmake --build build/null --target io_check && build/null/tests/io_check"
 
 [tasks."test:md-z80"]
-description = "Check Z80 reset, BUSREQ, memory map, bank window, and coroutine behavior"
+description = "Check Z80 reset, BUSREQ, memory map, bank window, coroutine, and profile costs"
 depends = ["build:null"]
 run = "cmake --build build/null --target z80_check && python3 consoles/md/tests/z80_check.py"
 
@@ -39,7 +39,7 @@ depends = ["build:null"]
 run = "cmake --build build/null --target sound_check && build/null/tests/sound_check"
 
 [tasks."test:md-bus"]
-description = "Check the 68000 bus map, byte lanes, timing, and fatal accesses"
+description = "Check the 68000 bus map, byte lanes, profile costs, waits, and fatal accesses"
 depends = ["build:null"]
 run = "python3 consoles/md/tests/bus_check.py"
 

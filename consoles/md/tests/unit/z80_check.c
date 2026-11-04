@@ -40,6 +40,13 @@ static uint16_t z80_vint_pc_at_entry;
 static int z80_vint_enable_on_start;
 static int z80_vint_mode_on_start;
 static int z80_vint_continue;
+static const nmd_cost_profile z80_profile = {
+    .version = NMD_COST_PROFILE_VERSION,
+    .z80_tenths = {
+        { 0 },
+        { [NMD_Z80_KIND_PSG] = 10u },
+    },
+};
 
 static void vdp_register_write(unsigned reg, uint8_t value);
 
@@ -504,6 +511,28 @@ static void test_z80_bus_timestamps_ignore_caller_step_size(void)
                   (size_t)coarse_frames * 2u * sizeof coarse_pcm[0]) == 0);
 }
 
+static void test_z80_cost_profile_tstates(void)
+{
+    unsigned i;
+
+    clocked_write_cart.cost_profile = &z80_profile;
+    z80_write_clock_count = 0;
+    md_z80_bus_trace_hook = record_z80_write_clock;
+    nmd_power(&clocked_write_cart);
+    nmd_set_cpu_costs(0);
+    wr16(0xA11200u, 0x0100u);
+    wr16(0xA11100u, 0x0000u);
+    md_advance_to(md_clock + 70000u);
+    md_z80_bus_trace_hook = NULL;
+
+    assert(z80_write_clock_count == 5u);
+    for (i = 1; i < z80_write_clock_count; i++)
+        assert(z80_write_clocks[i] - z80_write_clocks[i - 1u] == 60u);
+
+    clocked_write_cart.cost_profile = NULL;
+    nmd_set_cpu_costs(1);
+}
+
 static void test_z80_vint_mask_busreq_and_return(void)
 {
     z80_vint_mode_on_start = 1;
@@ -623,6 +652,7 @@ int main(int argc, char **argv)
     test_z80_bank_window_waits_for_dma();
     test_68000_programs_z80_bank_register();
     test_z80_bus_timestamps_ignore_caller_step_size();
+    test_z80_cost_profile_tstates();
     test_z80_vint_mask_busreq_and_return();
     return 0;
 }
