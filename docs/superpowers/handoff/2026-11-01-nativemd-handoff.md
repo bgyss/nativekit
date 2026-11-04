@@ -9,23 +9,30 @@ The two documents it builds on are:
 - **Spec (approved):** `docs/superpowers/specs/2026-11-01-nativemd-design.md`
 - **Stage 0 plan (completed):** `docs/superpowers/plans/2026-11-01-nativemd-stage0-kit.md`
 
-**Current state (2026-11-03):** Stages 0-2 and Stage 3 Tasks 1-7 are complete for their stated
-scopes. Stage 3 includes the native Z80 coroutine, memory map, serial bank window, shared-bus
-arbitration, VINT dispatch, PSG tone/noise, YM2612 ports/timers/DAC/FM, and a bounded stereo mixer
-with reset-safe host draining. All 56 MD ROM cases either match or have an individually reviewed
-`KNOWN` reason; six candidate differences remain. Raw FM and mixed audio compare sample-for-sample;
-the explicitly approved PSG tone/noise and YM DAC vectors retain bounded phase/error tolerances.
-All eight MD unit tasks, oracle smoke, trace ABI, toolchain, feature, survey, and ROM checks pass.
+**Current state (2026-11-04):** Stages 0-4 are complete for their recorded scopes. Stage 4 adds
+selectable md1va3 and TMSS-equipped md1va6 models, 3- and 6-button input, separate 68000/Z80 cost
+profiles, a 1.0.0 public nmd contract, an independent consumer, and a frozen 59-case synthetic
+golden. The selectable model and both processor profiles were approved as drafted. All 59 cases
+match or have one of six documented candidate `KNOWN` differences; no known case newly matches.
+BlastEm remains a candidate oracle, not a hardware qualification result.
 
-The Stage 0 preservation gates pass for golden comparison (0/2393), SNES ROM comparison
-(0/1164 unlisted differences; 56 documented known), and timing (22.0 s CPU against the 23.07 s
-limit). Eight of the nine build targets pass; the Windows cross-build is limited by the Nix MinGW
-installation missing `libmcfgthread.a`. The consumer passes and the full `mise run test` completes,
-with four host-dependent checks unable to run: the macOS pointer test traps in Launch Services and
-the Metal, GL, and Vulkan overlay tests cannot open a renderer. BlastEm remains a candidate oracle,
-not a hardware qualification result. Continue by creating a separate Stage 4 plan.
+The MD unit, profile, toolchain, oracle-smoke, trace, feature, survey, consumer, ROM, kit, and golden
+checks passed. `test:md-rom` reported 0 of 59 unlisted differences and `golden:md-compare` reported
+0 of 59 differences. The frozen manifest SHA-256 is
+`e9eb3bdacc221fd3e27b162e21156c046584afd93a91cfc6a2b0fa52a22aec97`. SNES preservation gates
+passed: golden comparison 0/2393, ROM comparison 0/1164 unlisted (56 documented known, 0 newly
+matching), and timing 20.3 s CPU against a 23.07 s limit.
 
-Read the spec first, then this handoff, then the stage 0 plan.
+The nine-target build matrix completed eight targets; Windows failed at the `hello.exe` link because
+the Nix MinGW installation lacks `libmcfgthread.a`. iOS returned success with stale CoreSimulator/
+Xcode warnings. `mise run test` had four host/render failures: the macOS pointer check trapped after
+Launch Services returned `LSModifyNotification -50`; Metal, GL, and Vulkan overlay checks could not
+open a renderer (`vkCreateInstance -9`). Other repository checks passed. A fresh Stage 4 review found
+no remaining Critical or Important issues. One minor test limitation remains: the native testcart
+consumes only the first `input_frames` snapshot, while per-frame input sampling is unit-tested.
+First-game selection from the local ROM survey is the next objective; keep ROMs and paths external.
+
+Read the Stage 4 plan and design, then this handoff for current evidence and the next objective.
 
 ---
 
@@ -60,10 +67,12 @@ Success, from the spec:
 
 ## 2. Where to start
 
-Stages 0-3 are complete for their recorded scopes. Stage 1 evidence and limitations are in
+Stages 0-4 are complete for their recorded scopes. Stage 1 evidence and limitations are in
 `docs/superpowers/plans/2026-11-01-nativemd-stage1-oracle.md` and its SDD ledger; Stage 2
 implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage2-bus-vdp.md`;
-Stage 3 implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
+Stage 3 implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`;
+Stage 4 implementation and final gate evidence are in
+`docs/superpowers/plans/2026-11-03-nativemd-stage4.md` and its approved design.
 
 1. From the repository root, use the `nativemd` branch.
 2. `nix develop`. Run everything inside it, and use the mise tasks.
@@ -71,8 +80,9 @@ Stage 3 implementation and validation are in `docs/superpowers/plans/2026-11-03-
    asar 1.91 and the patched bsnes oracle, which the SNES checks need.
 4. Ensure the candidate MD tools are present with `mise run tools:md`; `mise run test:md-*`
    covers their synthetic fixtures and survey logic.
-5. Start Stage 4 with its own plan. Preserve the separate C-routine Z80 model and candidate trace
-   boundary; BlastEm comparisons remain exploratory evidence, not hardware qualification.
+5. Continue with first-game selection from the local ROM survey. Use only user-owned ROMs as runtime
+   inputs; do not store ROM paths or contents in the repository. Keep BlastEm comparisons separate
+   from hardware qualification.
 
 ### Stage 0 tasks (the plan has the code and the tests for each)
 
@@ -93,11 +103,10 @@ Stage 3 implementation and validation are in `docs/superpowers/plans/2026-11-03-
 `include/nshvc/*.h` stays byte-identical. `include/nk.h` must never include `input.h`; it is
 `input.h` that includes `nk.h`.
 
-## 3. After stage 0: the stages that still need plans
+## 3. Stage plans and implementation history
 
-Each stage gets its own plan (`superpowers:writing-plans`, saved under
-`docs/superpowers/plans/`), its per-task reviews, and a branch review. Write each plan only
-after the previous stage has landed, because each one depends on what the previous stage found.
+Stages 0-4 are complete for the scopes recorded in their plans. The following sections preserve
+the original implementation sequence and decisions; consult the linked plans for current evidence.
 
 ### Stage 1: tooling, the oracle, and the survey
 - Add pins to `tools/toolchains/pins.env`: BlastEm (by commit) and vasm (`vasmm68k_mot`,
