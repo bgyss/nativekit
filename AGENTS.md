@@ -2,27 +2,26 @@
 
 ## Project Structure & Module Organization
 
-`kit/` holds console-independent application, host, input, audio, coroutine, and rendering code. Public interfaces are in `kit/include/nk/`; implementation, checks, and contracts are in `kit/src/`, `kit/tests/`, and `kit/docs/`. `consoles/snes/` contains nativeshvc headers, hardware and renderer code, shaders, examples, docs, and tests. `consoles/md/` contains the nativemd library, exploratory Mega Drive/Genesis oracle and trace tools, docs, and tests. Shared tooling is in `tools/`, plans in `docs/superpowers/`, and generated builds and tools in `build/`.
+`kit/` contains console-independent application, host, input, audio, coroutine, and rendering code. Public interfaces are in `kit/include/nk/`; implementation, checks, and contracts are in `kit/src/`, `kit/tests/`, and `kit/docs/`. `consoles/snes/` contains the SNES hardware, renderer, shaders, examples, and tests. `consoles/md/` contains the native Mega Drive implementation and exploratory oracle, trace, and synthetic-ROM tools. Shared tooling is in `tools/`; plans and specifications are in `docs/superpowers/`; generated builds and toolchains belong under `build/`.
 
 ## Build, Test, and Development Commands
 
-From the repository root:
+Run commands from the repository root. `nix develop` enters the compiler and tooling environment; run `mise trust` once to authorize repository tasks.
 
-- `nix develop`: enter the compiler and tooling environment; `mise trust` authorizes repository tasks once.
-- `mise run tools` and `mise run tools:md`: build pinned SNES tools and candidate Mega Drive tools, respectively.
-- `mise run build:null`, `mise run build:macos`, and `mise run build`: build headless, macOS Metal, and the macOS-oriented matrix. iOS needs Xcode and its SDK; Linux is untested.
-- `mise run test:kit`, `mise run test`, and `mise run test:rom`: run kit checks, the full scripted checks with consumer integration, and SNES reference comparisons. Prepare required builds and tools first.
-- `mise run test:md-console`, `mise run test:md-z80`, `mise run test:md-sound`, `mise run test:md-bus`, `mise run test:md-interrupt`, `mise run test:md-vdp`, `mise run test:md-dma`, and `mise run test:md-render`: check console, Z80, sound, bus, VDP/DMA, scheduler, interrupt, and render paths. `mise run test:md-rom` compares shared synthetic cases with the candidate core.
-- `mise run test:md-toolchain`, `mise run test:md-oracle-smoke`, `mise run test:md-trace`, `mise run test:md-features`, and `mise run test:md-survey`: check the exploratory toolchain, synthetic capture runner, trace ABI, feature extraction, and survey reporting.
+- `mise run build:null` builds headless targets; `mise run build:macos` builds the macOS Metal host; `mise run build` runs the macOS-oriented build matrix.
+- `mise run tools` builds pinned SNES reference tools; `mise run tools:md` builds candidate Mega Drive tools.
+- `mise run test:kit`, `mise run test:rom`, and `mise run test` run kit checks, SNES reference comparisons, and the full checks with consumer integration.
+- Run focused Mega Drive checks with `mise run` and one of `test:md-console`, `test:md-io`, `test:md-z80`, `test:md-sound`, `test:md-bus`, `test:md-interrupt`, `test:md-vdp`, `test:md-dma`, or `test:md-render`. `mise run test:md-rom` compares synthetic cases with the candidate core.
+- Run exploratory tooling checks with `mise run` and one of `test:md-toolchain`, `test:md-oracle-smoke`, `test:md-trace`, `test:md-features`, or `test:md-survey`.
 
 ## Coding Style & Naming Conventions
 
-Use C11, four-space indentation, snake_case, and put function opening braces on their own lines. Kit interfaces use the `nk_` prefix; SNES and Mega Drive interfaces use `nshvc_` and `nmd_`. Keep console-specific concepts out of `kit/`. No repository-wide formatter or linter is configured; avoid unrelated reformatting.
+Use C11, four-space indentation, snake_case, and put function opening braces on their own lines. Kit interfaces use the `nk_` prefix; console interfaces use `nshvc_` or `nmd_`. Keep console-specific concepts out of `kit/`. No repository-wide formatter or linter is configured; avoid unrelated reformatting.
 
 ## Testing Guidelines
 
-Checks are C executables and Python scripts, usually named `*_check.c` or `*_check.py`. Add them beside the module and wire them into its runner. Demonstrate a planted-error catch; keep checks deterministic and report reference differences. See `consoles/snes/tests/README.md` and `kit/docs/contract-discipline.md`.
+Checks are C executables and Python scripts, commonly named `*_check.c` or `*_check.py`. Add checks beside the affected module and wire them into its runner. New checks should catch a planted error, stay deterministic, and report known reference differences explicitly. Mega Drive fixtures use synthetic cartridges; commercial ROMs are not stored here. See `consoles/snes/tests/README.md`, `consoles/md/tests/README.md`, and `kit/docs/contract-discipline.md`.
 
 ## Commit & Pull Request Guidelines
 
-Use focused commit subjects; examples include `nativemd: ...` and `Plan: ...`. Pull requests should describe behavior changes and affected contracts, list commands run and skipped validation, link relevant plans or issues, and include screenshots for rendering changes. Preserve upstream attribution and license notices.
+Use focused commit subjects such as `nativemd: ...`, `Plan: ...`, or `Docs: ...`. Pull requests should explain behavior changes and affected contracts, list commands run and validation skipped, and link relevant plans or issues. Include screenshots for visible rendering changes. Preserve upstream attribution and license notices.
