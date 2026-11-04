@@ -65,6 +65,12 @@ consumer project is checked with `mise run test:md-consumer`; its synthetic outp
 compared with `mise run golden:md-compare`. See [`consoles/md/docs/nativemd.md`](consoles/md/docs/nativemd.md)
 for the supported hardware scope, cost profiles, and current evidence limits.
 
+The proposed [ROM-to-decomp milestones](docs/superpowers/plans/2026-11-04-nativemd-decomp/README.md)
+and [master goal prompt](docs/superpowers/plans/2026-11-04-nativemd-decomp/GOAL.md) describe the
+remaining game-recovery workflow: symbolic byte-exact assembly, verified readable C, native
+reset/main execution, full first-title delivery, and a second-title reuse pilot. These are plans,
+not implemented decompiler capabilities.
+
 ### For ports from nativeshvc
 
 A game that adds this repository's root with `add_subdirectory` and links `nshvc` builds

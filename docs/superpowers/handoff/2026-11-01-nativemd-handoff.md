@@ -32,6 +32,13 @@ no remaining Critical or Important issues. One minor test limitation remains: th
 consumes only the first `input_frames` snapshot, while per-frame input sampling is unit-tested.
 First-game selection from the local ROM survey is the next objective; keep ROMs and paths external.
 
+The proposed [ROM-to-decomp milestone suite](../plans/2026-11-04-nativemd-decomp/README.md) and
+[master goal prompt](../plans/2026-11-04-nativemd-decomp/GOAL.md) now define that follow-on work.
+Its source audit identifies an execution gap beyond the synthetic consumer: the current frame
+adapter advances hardware and IRQs but does not dispatch and resume a game's 68000 reset/main
+routine. The suite includes this runtime path, both CPU verification harnesses and the first game's
+assembly/C recovery. None of those new milestones has been executed.
+
 Read the Stage 4 plan and design, then this handoff for current evidence and the next objective.
 
 ---
