@@ -240,6 +240,65 @@ static void test_io_6button_extended_phase(void)
     assert(nmd_bus_read8(0xA10003u) == 0x3Fu);
 }
 
+static uint8_t read_pad6_extended_button(uint32_t button)
+{
+    nmd_cart cart = pad6_cart();
+    const uint32_t buttons[2] = { button, 0 };
+
+    nmd_power(&cart);
+    md_io_input(buttons);
+    pad6_precharge_th_high();
+    pad6_write_th(0);
+    pad6_write_th(1);
+    pad6_write_th(0);
+    pad6_write_th(1);
+    pad6_write_th(0);
+    pad6_write_th(1);
+    return nmd_bus_read8(0xA10003u);
+}
+
+static uint8_t read_pad3_low_button(uint32_t button)
+{
+    nmd_cart cart = pad3_cart();
+    const uint32_t buttons[2] = { button, 0 };
+
+    nmd_power(&cart);
+    md_io_input(buttons);
+    nmd_bus_write8(0xA10009u, 0x40u);
+    nmd_bus_write8(0xA10003u, 0x00u);
+    wait_for_pad_settle();
+    return nmd_bus_read8(0xA10003u);
+}
+
+static uint8_t read_pad3_high_button(uint32_t button)
+{
+    nmd_cart cart = pad3_cart();
+    const uint32_t buttons[2] = { button, 0 };
+
+    nmd_power(&cart);
+    md_io_input(buttons);
+    nmd_bus_write8(0xA10009u, 0x40u);
+    nmd_bus_write8(0xA10003u, 0x40u);
+    wait_for_pad_settle();
+    return nmd_bus_read8(0xA10003u);
+}
+
+static void test_io_button_bits_have_distinct_pad_lines(void)
+{
+    assert(read_pad3_high_button(NMD_BUTTON_UP) == 0x7Eu);
+    assert(read_pad3_high_button(NMD_BUTTON_DOWN) == 0x7Du);
+    assert(read_pad3_high_button(NMD_BUTTON_LEFT) == 0x7Bu);
+    assert(read_pad3_high_button(NMD_BUTTON_RIGHT) == 0x77u);
+    assert(read_pad3_high_button(NMD_BUTTON_B) == 0x6Fu);
+    assert(read_pad3_high_button(NMD_BUTTON_C) == 0x5Fu);
+    assert(read_pad6_extended_button(NMD_BUTTON_MODE) == 0x77u);
+    assert(read_pad6_extended_button(NMD_BUTTON_X) == 0x7Bu);
+    assert(read_pad6_extended_button(NMD_BUTTON_Y) == 0x7Du);
+    assert(read_pad6_extended_button(NMD_BUTTON_Z) == 0x7Eu);
+    assert(read_pad3_low_button(NMD_BUTTON_A) == 0x23u);
+    assert(read_pad3_low_button(NMD_BUTTON_START) == 0x13u);
+}
+
 static void test_io_6button_timeout_resets(void)
 {
     nmd_cart cart = pad6_cart();
@@ -302,6 +361,8 @@ static void test_io_version_register_model_bits(void)
 
     nmd_power(&cart);
     assert(nmd_bus_read8(0xA10001u) == 0xA0u);
+    nmd_bus_write8(0xA10001u, 0xFFu); /* The version register is read-only. */
+    assert(nmd_bus_read8(0xA10001u) == 0xA0u);
 
     cart.model = NMD_MODEL_MD1VA6_TMSS;
     nmd_power(&cart);
@@ -363,6 +424,18 @@ int main(int argc, char **argv)
         test_io_tmss_vdp_locked(1);
         return 0;
     }
+    if (argc == 2 && strcmp(argv[1], "unsupported-io-read") == 0) {
+        nmd_cart cart = pad3_cart();
+        nmd_power(&cart);
+        (void)nmd_bus_read8(0xA10011u);
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "unsupported-io-write") == 0) {
+        nmd_cart cart = pad3_cart();
+        nmd_power(&cart);
+        nmd_bus_write8(0xA10011u, 0x5Au);
+        return 0;
+    }
     if (argc != 1)
         return 2;
 
@@ -374,6 +447,7 @@ int main(int argc, char **argv)
     test_io_port_state_independent();
     test_io_pad_data_settles_after_th_change();
     test_io_6button_extended_phase();
+    test_io_button_bits_have_distinct_pad_lines();
     test_io_6button_timeout_resets();
     test_io_buttons_sampled_per_frame();
     test_io_version_register_model_bits();

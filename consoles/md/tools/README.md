@@ -41,7 +41,9 @@ python3 consoles/md/tools/nmd-profile measure game.bin \
 
 The output directory receives `profile.txt`, `profile.c`, and `report.txt`.
 The C table uses the public `nmd_cost_profile` type; assign its symbol to the
-cartridge's `cost_profile` field. Reports store ROM hashes, not ROM paths or
+cartridge's `cost_profile` field. Its default symbol is
+`nmd_profile_cost_profile`; pass `--name game_profile` to choose another.
+Reports store ROM hashes, not ROM paths or
 contents. `--decomp 'build/game'` also runs the native build with `--counts`;
 when measuring multiple ROMs, the native count comparison uses the first ROM.
 Add `--source game-src` to record a source-tree hash, then check it later with

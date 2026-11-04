@@ -211,9 +211,10 @@ def write_report(path, rom_hashes, candidate_sha256, model, region, frames,
                   "frames per span: %d; spans per ROM: %d" % (frames, span_count),
                   "",
                   "Method: per-CPU candidate clock deltas minus nominal bus clocks. Fetch intervals",
-                  "accrue as CPU work; read-only polls over 64 accesses and residual gaps over 1,024",
-                  "master clocks are omitted. Dynamic device waits may remain in the residual. This",
-                  "candidate-derived fit is exploratory and does not qualify hardware timing.",
+                  "accrue as CPU work. Polls over 64 reads and residual gaps over 1,024 master clocks",
+                  "are omitted. Retained reads are assigned to the VBlank of the closing write,",
+                  "matching native --counts. Dynamic device waits may remain in the residual; these",
+                  "candidate-derived fits are exploratory and do not qualify hardware timing.",
                   ""))
     lines.extend(_cpu_report("m68k", M68K_KIND_NAMES, m68k_fit,
                              m68k_tenths[0] + m68k_tenths[1]))
@@ -228,6 +229,10 @@ def write_report(path, rom_hashes, candidate_sha256, model, region, frames,
         lines.extend("  %s decomp/original %s" % (name, ratio)
                      for name, ratio in count_differences["ratios"])
         lines.append("  frames with count differences: %d" % len(count_differences["mismatches"]))
+        for frame, _, native in count_differences["mismatches"][:20]:
+            lines.append("    frame %d: %s" %
+                         (frame, "native count row missing" if native is None else
+                          "per-kind counts differ"))
     pathlib.Path(path).write_text("\n".join(lines) + "\n")
 
 
@@ -373,13 +378,15 @@ def compare_counts(reference_rows, native_frames, input_span=False):
     offset = 1 if input_span else 0
     for frame, expected in sorted(reference.items()):
         actual = native_frames.get(frame + offset)
+        missing = actual is None
         if actual is None:
-            continue
+            mismatches.append((frame, expected, None))
+            actual = [0] * len(expected)
         for index, value in enumerate(expected):
             totals_reference[index] += value
         for index, value in enumerate(actual):
             totals_native[index] += value
-        if expected != actual:
+        if expected != actual and not missing:
             mismatches.append((frame, expected, actual))
     names = (["m68k." + name for name in M68K_KIND_NAMES] +
              ["z80." + name for name in Z80_KIND_NAMES])
@@ -476,7 +483,7 @@ def measure(args):
         count_differences = {"ratios": count_ratios, "mismatches": mismatches}
 
     source_digest = source_hash(args.source) if args.source else "-"
-    name = c_identifier(args.name or args.rom[0].stem.lower())
+    name = c_identifier(args.name or "nmd_profile")
     write_profile(outdir / "profile.txt", rom_hashes, core_digest, args.model, args.region,
                   m68k_tenths, z80_tenths, source_sha256=source_digest,
                   checked=bool(args.decomp), count_ratios=count_ratios)

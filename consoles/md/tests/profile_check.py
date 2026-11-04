@@ -113,6 +113,20 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(sum(row.counts[:kinds]), 0)
         self.assertEqual(sum(row.counts[kinds:]), 2)
 
+    def test_poll_reads_are_attributed_to_the_frame_that_closes_them(self):
+        stats = trace.CPUStats()
+        stats.begin_frame(1)
+        stats.add(trace.Event(28, trace.M68K, trace.READ, 1, 0x100, 0))
+        stats.end_frame()
+        stats.begin_frame(2)
+        stats.add(trace.Event(56, trace.M68K, trace.WRITE, 1, 0x100, 0))
+        stats.end_frame()
+        rows = {row.frame: row for row in stats.rows() if row.cpu == "m68k"}
+        self.assertEqual(sum(rows[1].counts), 0)
+        self.assertEqual(rows[2].counts[0], 1)
+        self.assertEqual(rows[2].counts[trace.M68K_KIND_COUNT], 1)
+        self.assertEqual(rows[2].bus_clocks, 56)
+
     def test_m68k_longword_matches_two_native_bus_accesses(self):
         stats = trace.CPUStats()
         stats.begin_frame(1)
@@ -139,6 +153,18 @@ class ProfileTests(unittest.TestCase):
         ratios = dict(comparison["ratios"])
         self.assertEqual(ratios["read.m68k.rom"], "0.5000")
         self.assertEqual(ratios["read.z80.z80_ram"], "1.0000")
+        self.assertEqual(len(comparison["mismatches"]), 1)
+
+    def test_decomp_count_comparison_reports_missing_native_frames(self):
+        tool = self.load_tool()
+        m68k = [0] * (2 * tool.NMD_KINDS)
+        z80 = [0] * (2 * tool.NMD_Z80_KINDS)
+        m68k[tool.M68K_KIND_NAMES.index("rom")] = 1
+        reference = [trace.CPUStatsRow(1, "m68k", m68k, 0, 28),
+                     trace.CPUStatsRow(1, "z80", z80, 0, 0)]
+        comparison = tool.compare_counts(reference, {})
+        ratios = dict(comparison["ratios"])
+        self.assertEqual(ratios["read.m68k.rom"], "0.0000")
         self.assertEqual(len(comparison["mismatches"]), 1)
 
     def test_cpu_stats_reader_rejects_missing_vblank_rows(self):
@@ -230,7 +256,7 @@ class ProfileTests(unittest.TestCase):
             output = root / "profile-output"
             result = subprocess.run(
                 [sys.executable, str(TOOL), "measure", str(rom), "--core", str(core),
-                 "--frames", "2", "--name", "fixture", "--out", str(output),
+                 "--frames", "2", "--out", str(output),
                  "--input", str(input_path), "--decomp", str(decomp)],
                 capture_output=True, text=True, timeout=120)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -241,8 +267,10 @@ class ProfileTests(unittest.TestCase):
             self.assertIn("checked yes", (output / "profile.txt").read_text())
             self.assertIn("native --counts comparison", (output / "report.txt").read_text())
             self.assertIn("read.m68k.rom", (output / "profile.txt").read_text())
+            self.assertIn("nmd_profile_cost_profile", (output / "profile.c").read_text())
             self.assertNotIn(str(root), generated)
             self.assertNotIn("private-rom-name.bin", generated)
+            self.assertNotIn("private_rom_name", generated)
             self.assertNotIn(contents.decode("latin1"), generated)
 
     def test_runner_emits_cpu_stats_sidecar(self):

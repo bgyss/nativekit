@@ -118,8 +118,10 @@ class CPUStats:
     Trace timestamps are each CPU's cumulative master-clock counter after an
     access handler returns. A data event's nominal bus time is removed from
     the interval; the remaining interval is candidate-derived CPU work.
-    Fetch and idle intervals accrue until the next data access. Poll reads
-    and gaps over 1,024 clocks are omitted, like the shared SNES fitter.
+    Fetch and idle intervals accrue until the next data access. Pending poll
+    reads are attributed to the frame whose write closes the sequence, matching
+    native --counts. Poll reads and gaps over 1,024 clocks are omitted, like
+    the shared SNES fitter.
     """
 
     def __init__(self, max_gap=CPU_STATS_MAX_GAP,
@@ -146,8 +148,9 @@ class CPUStats:
                 "work_clocks": 0, "bus_clocks": 0,
             })
 
-    def _commit(self, cpu, sample):
-        frame, kinds, work, bus, is_write = sample
+    def _commit(self, cpu, sample, frame=None):
+        sample_frame, kinds, work, bus, is_write = sample
+        frame = sample_frame if frame is None else frame
         row = self.data[(frame, cpu)]
         kind_count = M68K_KIND_COUNT if cpu == M68K else Z80_KIND_COUNT
         for kind in kinds:
@@ -185,7 +188,7 @@ class CPUStats:
         if self.pending_count[cpu] <= self.max_poll_reads:
             for pending in self.pending[cpu]:
                 if pending[2] or pending[3]:
-                    self._commit(cpu, pending)
+                    self._commit(cpu, pending, self.current_frame)
         self.pending[cpu].clear()
         self.pending_count[cpu] = 0
         if sample[2] or sample[3]:

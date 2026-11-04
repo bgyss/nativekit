@@ -39,4 +39,11 @@ for mode in ("tmss-vdp-locked", "tmss-vdp-partial"):
             "VDP access before TMSS unlock" not in result.stderr):
         sys.exit(f"bus_check: {mode} fatal mismatch: {result.returncode}, {result.stderr!r}")
 
+for mode, message in (("unsupported-io-read", "unsupported 68000 I/O byte read"),
+                      ("unsupported-io-write", "unsupported 68000 I/O byte write")):
+    result = subprocess.run([str(io_binary), mode], capture_output=True, text=True)
+    if (result.returncode != 70 or not result.stderr.startswith("nativemd: ") or
+            message not in result.stderr):
+        sys.exit(f"bus_check: {mode} fatal mismatch: {result.returncode}, {result.stderr!r}")
+
 print("bus_check: ok")

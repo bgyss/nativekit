@@ -10,8 +10,10 @@ not execute 68000 or Z80 machine code and does not model Sega CD, 32X, or other
 expansion hardware. Unsupported operations fail explicitly.
 
 Games include `nmd/nmd.h`, initialize an `nmd_cart`, and call `nmd_main` for
-the kit loop or `nmd_power` / `nmd_run_frame` from their own host. The
-`nmd_cart.routines` table maps 68000 interrupt vectors to C handlers;
+the supported kit loop and host/script input path. `nmd_power` and
+`nmd_run_frame` expose lower-level machine control for tests and embedding;
+the public API does not provide a separate controller-mask setter for a custom
+host. The `nmd_cart.routines` table maps 68000 interrupt vectors to C handlers;
 `z80_routines` maps Z80 entry points to C routines. The machine bus functions
 are `rd8`, `rd16`, `rd32`, `wr8`, `wr16`, and `wr32`; longwords are two
 16-bit bus transfers.
@@ -27,7 +29,7 @@ both ports. A null `cost_profile` adds no profiled access work.
 | `$A00000-$A01FFF` | Z80 RAM, owned by the 68000 only after BUSREQ acknowledgement. |
 | `$A04000-$A04003` | YM2612 ports; 68000 access requires BUSREQ acknowledgement. |
 | `$A06000` | Z80 serial bank register. |
-| `$A10001` | Version and region bits. |
+| `$A10001` | Read-only version and region bits; writes are ignored. |
 | `$A10003/$A10005` | Controller data ports 1 and 2. |
 | `$A10009/$A1000B` | Controller control ports 1 and 2. |
 | `$A11000` | Memory mode control. |
@@ -40,7 +42,10 @@ both ports. A null `cost_profile` adds no profiled access work.
 The Z80 has 8 KiB RAM at `$0000-$1FFF`, YM2612 ports at `$4000-$4003`, the
 serial bank register at `$6000`, the PSG at `$7F10-$7F17` (or output port
 `$7F`), and the 68000 bank window at `$8000-$FFFF`. Other unsupported bus
-operations fail.
+operations fail. On byte-wide I/O registers, the even/high byte lane reads
+`0xFF` and ignores writes. Unsupported odd offsets in the `$A10000-$A1001F`
+I/O window fail. The documented md1va3 TMSS addresses are the exception: they
+read open bus and ignore writes.
 
 ## Models, region, and I/O
 
@@ -85,9 +90,10 @@ qualification. Reports contain ROM hashes, not ROM paths or contents.
 ## Errors, compatibility, and verification
 
 Odd word/longword accesses, unsupported device operations, invalid profile
-versions, and access outside the declared cartridge memory fail through
-`nk_fatal` with exit status 70. A game must use the bus APIs and documented
-device routines for the behaviors it needs; unsupported behavior is not
+versions, and accesses outside the declared cartridge memory fail through
+`nk_fatal` with exit status 70. The explicit exceptions are the disconnected
+high I/O byte lane and md1va3's open TMSS ports described above. A game must
+use the bus APIs and documented device routines; unsupported behavior is not
 silently approximated.
 
 The public C interface is C11. The separate consumer project under

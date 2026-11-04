@@ -2,6 +2,7 @@
 #include "io.h"
 
 #include "../console/md_internal.h"
+#include "nk/fatal.h"
 #include "nmd/cart.h"
 #include "nmd/hw.h"
 
@@ -255,7 +256,7 @@ uint8_t md_io_read8(uint32_t addr)
     case 0x0Bu:
         return ports[1].control;
     default:
-        return 0xFFu;
+        nk_fatal("unsupported 68000 I/O byte read at $%06X", (unsigned)addr);
     }
 }
 
@@ -327,8 +328,10 @@ void md_io_write8(uint32_t addr, uint8_t value)
         md_io_set_th(1, old_th);
         break;
     }
+    case 0x01u:
+        break; /* The version register is read-only. */
     default:
-        break;
+        nk_fatal("unsupported 68000 I/O byte write at $%06X", (unsigned)addr);
     }
 }
 

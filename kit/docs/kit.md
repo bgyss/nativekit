@@ -14,7 +14,7 @@ A console fills one table (`nk_console`, in [`nk.h`](../include/nk/nk.h)) and ca
 controllers. Games never include the kit's headers: a console's own headers are its
 game's contract.
 
-nativekit is at 0.2.0 ([contract-discipline.md](contract-discipline.md)).
+nativekit is at 1.0.0 ([contract-discipline.md](contract-discipline.md)).
 
 ## The parts
 
@@ -34,7 +34,8 @@ script's buttons, shots and dumps. `--counts` writes each frame's accesses by th
 console's kinds (`access_kind`, `kind_count`, at most `NK_KINDS_MAX`), for the cost profile's
 fitter; a read in a run of more than 64 with no write between is left out. Consoles with
 independent processors can provide `count_group` so each processor keeps its own poll-read
-sequence; the default group is 0. `--sound`
+sequence; the default group is 0. Retained reads are written in the frame whose write closes
+their sequence. `--sound`
 writes the console's samples as made. The table's fields are commented in `nk.h`;
 those marked optional may be NULL. Optional `kind_names` identify access kinds in error
 messages. `nk_quit()` ends the current frame; windowed runs save on quit, headless runs do not.

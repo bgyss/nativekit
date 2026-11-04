@@ -81,6 +81,7 @@ additional 45 for the Z80 bank-window wait. Fetch intervals accrue as CPU work.
 A width-4 68000 data event contributes two access counts, matching nmd's two
 16-bit bus transfers for a longword.
 Read-only polls longer than 64 accesses and residual work gaps over 1,024
-master clocks are excluded. Dynamic device waits can remain in the residual;
+master clocks are excluded. A retained read group is assigned to the frame of
+the write that closes it, matching native `--counts`. Dynamic device waits can remain in the residual;
 profiles fitted from these rows are candidate estimates, not hardware timing
 qualification.
