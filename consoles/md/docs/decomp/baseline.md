@@ -34,7 +34,7 @@ The nmd 1.0 contract supports md1va3 and md1va6 with TMSS, NTSC and PAL, and thr
 | Fresh 120-frame feature survey, three selected inputs | All six no-input/Start scenarios completed on core SHA-256 `af61f42b79bc45f8a26ed2ff10c57afcf798ef05bc6000eb11da1246e2c4d1f0` | Candidate evidence only; no mapper or six-button probe was observed. SRAM stayed unavailable because the images declare no SRAM window. |
 | Fresh 360-frame scripted candidate runs | All three completed on md1va3/NTSC with 3-button pads | Captures are private under ignored `build/decomp`; they are candidate-core observations, not compatibility claims. |
 | Reset-reachable Ghidra static screen | After Burner II: 6,312 instructions/163 functions; Batman: 10,488/281; Streets of Rage: 7,372/257 | All three profiles used the exact reset vectors. Indirect calls/jumps and full-image code/data classification remain open. |
-| 600-frame feature trace | Inconclusive: the pinned core raised `core trace error` before the bounded survey finished | This is a trace-capacity/tool limit, not a title compatibility failure. The 360-frame longer runs used untraced captures instead. |
+| 600-frame feature trace | Inconclusive: the pinned core raised `core trace error` before the bounded survey finished | Cause not assessed; this is not a title compatibility failure. The 360-frame longer runs used untraced captures instead. |
 | `git diff --check` | Passed, exit 0 before the current D00 document edits | Re-run after these edits before commit. |
 
 ## Existing known differences
