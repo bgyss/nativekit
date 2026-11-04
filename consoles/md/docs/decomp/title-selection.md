@@ -1,12 +1,14 @@
 # D00 first-title selection
 
-**Status: partial.** D00 now has a ranked three-image shortlist and a provisional exact first-title binding. The full eligibility gate remains open because reset-reachable analysis is not a complete code census, indirect targets remain unresolved, and the scripted start flow has not reached gameplay.
+**Status: D00 complete.** D00 has a ranked three-image shortlist, an exact first-title binding with a base-console eligibility decision, and a versioned title scenario inventory. Full code census and playable-game evidence remain downstream work.
 
 ## Input screen and candidate IDs
 
 The supplied `titles` subdirectory contained title metadata and SNES patch material. Its parent game-material store had 381 raw `.gen` images across adjacent collections. I screened headers only, then hashed and analyzed three 512 KiB raw images. No archive was extracted and no full-library survey ran. The user ROM path and original filenames are not recorded here.
 
 The following fresh evidence used the currently available pinned BlastEm binary, SHA-256 `af61f42b79bc45f8a26ed2ff10c57afcf798ef05bc6000eb11da1246e2c4d1f0`. Each image had the `SEGA` signature at offset `0x100`, a reset vector inside the ROM, and a matching header/computed checksum. None declared an SRAM range. `sram_access` remains **unavailable** in the feature survey without an SRAM window; that result does not prove the game never accesses persistent memory.
+
+All three ROM images are 512 KiB. The Ghidra counts below are reset-reachable instruction/function facts, not code-byte denominators. The 120-frame survey is feature-filtered and does not measure PC-level code coverage; indirect call/jump counts are only a control-flow signal.
 
 | Rank | Neutral ID and SHA-256 | Reset-reachable static screen | 120-frame features | Reference and hardware screen |
 |---|---|---|---|---|
@@ -41,8 +43,8 @@ The private versioned title manifest and scenario inventory are under ignored `b
 
 The inventory keeps the milestone tiers separate: D06 first playable, D07 full-game behavior and census, D04/D05 routine certification, and D03/D07 unreachable-code closure are all unstarted. The title screen or a candidate-core run does not satisfy any of those gates.
 
-## Workspace boundary and remaining D00 work
+## Workspace boundary and downstream gates
 
 The private workspace uses neutral ID `md-f68818ae1a61` under ignored `build/decomp/`. No separate maintained game repository was supplied or authorized for writes. No ROM path is persisted; all candidate hashes and captures stay private or are represented by neutral IDs in tracked reports.
 
-D00 is partial until the indirect targets, RAM execution, mapper/SRAM behavior, and title-specific Start-to-gameplay scenario are resolved and the scenario inventory is complete. The Ghidra pass was limited to code reachable from each reset vector; its results do not close the full image census.
+D00 is complete for title selection and preparatory scenario planning. The Ghidra pass was limited to code reachable from each reset vector; D03/D06 and later milestones must close indirect targets, RAM execution, mapper/SRAM behavior, and the native Start-to-gameplay path. No nmd compatibility or native-playable claim is made.

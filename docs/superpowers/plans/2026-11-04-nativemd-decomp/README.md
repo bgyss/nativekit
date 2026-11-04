@@ -1,6 +1,6 @@
 # nativemd ROM-to-decomp milestones
 
-**Current status: D00 partial; D01-D12 unstarted.** This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no new implementation, retail-ROM run, or verification gate had been executed.
+**Current status: D00 complete; D01-D12 unstarted.** This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no new implementation, retail-ROM run, or verification gate had been executed.
 
 ## What must be added
 
@@ -14,7 +14,7 @@ nativemd is the native hardware/runtime library. The missing project is the assi
 | Reference hooks | [NMDT v2](../../../../consoles/md/tests/oracle/TRACE_FORMAT.md), [hook ABI](../../../../consoles/md/tests/oracle/trace_abi.h) | Instruction/state/control hooks, callable original execution, full comparison snapshots and replay capabilities |
 | Assembly recovery | Pinned vasm tools; two small [assembler smoke controls](../../../../consoles/md/tests/toolchain_check.py) | Decoder controls, code/data census, RAM-code identities, exact whole-image rebuild and symbolic filing |
 | C recovery | Public 68000/Z80 state and bus APIs; synthetic C programs | Routine catalog, ABI adapters, semantic controls, A5, A7, complete title C and typed refactoring |
-| Title selection | [416-candidate bounded survey](../../../../consoles/md/docs/survey.md) | D00 has a provisional exact revision; complete hardware/RAM audit, manual-guided gameplay scenario, and final eligibility gate remain open |
+| Title selection | [416-candidate bounded survey](../../../../consoles/md/docs/survey.md) | D00 selected an exact revision for the current base-console scope; D03/D06 must close the full hardware/RAM census and native-playable scenarios. Short traces do not prove absent features |
 | Delivery | Nativekit host/input/audio/build infrastructure | Full native game, measured timing on held-out scenarios, source/data separation and clean reproducible delivery |
 
 The [Stage 4 handoff](../../handoff/2026-11-01-nativemd-handoff.md) records prior MD/SNES gates and Windows/host-render limitations. Those results are historical baseline evidence, not checks rerun for this proposal. No retail game is currently certified by this suite.
@@ -29,7 +29,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 
 | ID | Deliverable | Prerequisite | Status |
 |---|---|---|---|
-| [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM | partial |
+| [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM | complete |
 | [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory | unstarted |
 | [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory | unstarted |
 | [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | unstarted |
@@ -43,7 +43,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 | [D11](d11-reproducible-first-game-delivery.md) | Package the first completed decomp and native game | D07-D10 complete at their declared gates | unstarted |
 | [D12](d12-reusable-rom-to-decomp-workflow.md) | Prove reuse on a second ROM and document the operating workflow | D11 full first-title delivery | unstarted |
 
-D01-D05 shared synthetic tooling can progress independently of title input. D00 has a provisional exact first-title binding, but its complete static hardware audit and scenario inventory remain partial; title-dependent D03/D06 work must use that binding and close the remaining gates. Mark partially completed milestones partial; do not convert missing retail evidence into synthetic-only completion. D08 symbolic filing and D09 refactoring may proceed in verified batches during D07; full completion still requires their listed gates.
+D01-D05 shared synthetic tooling can progress independently of title input. D00 has selected an exact first-title revision and defined its scenario inventory; title-dependent D03/D06 work must use that binding and close the remaining code-census and native-playable gates. Mark partially completed milestones partial; do not convert missing retail evidence into synthetic-only completion. D08 symbolic filing and D09 refactoring may proceed in verified batches during D07; full completion still requires their listed gates.
 
 ## Shared execution contract
 
@@ -98,4 +98,4 @@ At a platform release boundary, run `mise run build`, `mise run test`, `mise run
 
 ## How to start
 
-Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00 is partial and D01-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.
+Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00 is complete and D01-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.

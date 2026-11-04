@@ -1,6 +1,6 @@
 # D00 baseline
 
-**Status: partial.** The checkout is refreshed; the SNES parity inventory, current tool identities, fresh synthetic check, three-candidate screen, and a provisional exact first-title binding are recorded. Full eligibility and title scenarios remain open.
+**D00 status: complete.** The checkout is refreshed; the SNES parity inventory, current tool identities, fresh synthetic check, three-candidate screen, exact first-title binding, and versioned title scenario inventory are recorded. This is a selection baseline, not a title compatibility claim.
 
 ## Checkout and host
 
@@ -48,8 +48,8 @@ The [Stage 4 handoff](../../../../docs/superpowers/handoff/2026-11-01-nativemd-h
 
 The tracked [survey report](../survey.md) is historical: it reports 416 candidate files at 120 frames per scenario, with Start at frame 60. Its recorded core SHA-256 (`b5afaf3ab1f2d7e36735e877153a45f7effef8b563e697e59981e4f05295db53`) differs from the currently available BlastEm binary hash above. It was not used as current title-selection evidence.
 
-## Open baseline items
+## Downstream evidence limits
 
 The supplied `titles` subdirectory contained catalog metadata and SNES patch material, not Mega Drive images. Header-only screening of its parent game-material store found 381 raw `.gen` inputs across adjacent collections; no archive extraction or full-library run was done. Three 512 KiB candidates were hashed and screened. The provisional selection is `md-f68818ae1a61`, SHA-256 `f68818ae1a616562e4c7dc77932bbc9f6bc4e42229f5b5d5796d4b2c2cc3f334`; its raw container, checksum, zero-offset policy, region, model, and pad setup are recorded in the ignored private manifest. No local ROM path is persisted in tracked files or the manifest.
 
-The remaining D00 gates are the selected title's complete mapper/SRAM/RAM-execution audit, closure of indirect targets and generated code, and a stable manual-guided Start-to-gameplay scenario. Candidate surveys and Ghidra's reset-reachable functions do not close the full-image census or certify nmd compatibility.
+D00 exits with the exact candidate, initial base-console eligibility decision, and scenario inventory bound. D03/D06 and later gates still need to close the full mapper/SRAM/RAM-execution audit, indirect targets, generated code, and the native Start-to-gameplay path. Candidate surveys and Ghidra's reset-reachable functions do not close the full-image census or certify nmd compatibility.

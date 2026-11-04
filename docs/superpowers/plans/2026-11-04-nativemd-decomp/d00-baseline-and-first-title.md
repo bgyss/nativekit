@@ -1,6 +1,8 @@
 # D00: Establish the SNES parity target and select the first title
 
-**Status:** Partial. The checkout/tool baseline, SNES parity inventory, and provisional exact title binding are recorded. Full hardware eligibility and the title-specific scenario inventory remain open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Complete for D00. The checkout/tool baseline, SNES parity inventory, exact first-title binding, eligibility decision, and versioned scenario inventory are recorded. Later code-census and native-playable gates remain open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+
+D00 artifacts: [baseline](../../../../consoles/md/docs/decomp/baseline.md), [SNES workflow parity](../../../../consoles/md/docs/decomp/workflow-parity.md), and [title selection](../../../../consoles/md/docs/decomp/title-selection.md). The private title manifest and scenario inventory are under ignored `build/decomp/md-f68818ae1a61/`.
 
 ## Objective
 
