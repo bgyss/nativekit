@@ -1,6 +1,6 @@
 # D00: Establish the SNES parity target and select the first title
 
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Partial. The checkout/tool baseline, SNES parity inventory, and provisional exact title binding are recorded. Full hardware eligibility and the title-specific scenario inventory remain open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 

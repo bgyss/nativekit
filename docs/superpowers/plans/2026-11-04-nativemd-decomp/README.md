@@ -1,6 +1,6 @@
 # nativemd ROM-to-decomp milestones
 
-**Status: proposed execution contracts; planning only.** Written 2026-11-04 from a source review of nativekit `21525cc`. No new implementation, retail-ROM run, or verification gate was executed while writing this suite.
+**Current status: D00 partial; D01-D12 unstarted.** This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no new implementation, retail-ROM run, or verification gate had been executed.
 
 ## What must be added
 
@@ -8,13 +8,13 @@ nativemd is the native hardware/runtime library. The missing project is the assi
 
 | Area | Present evidence or implementation | Work still required |
 |---|---|---|
-| SNES method | [SNES playbook](../../../../consoles/snes/docs/snes-decomp-learnings.md), especially sections 1, 4, 5, 9 and 15-18 | Audit actual available game-specific SNES tools; the playbook alone is not a reusable automatic decompiler |
+| SNES method | [SNES playbook](../../../../consoles/snes/docs/snes-decomp-learnings.md), especially sections 1, 4, 5, 9 and 15-18 | Actual local game-tool sources are inventoried in [workflow parity](../../../../consoles/md/docs/decomp/workflow-parity.md); reusable 68000/Z80 equivalents remain absent |
 | MD hardware | [1.0 contract](../../../../consoles/md/docs/contract.md), synthetic comparison, profiles and consumer | Real-game integration and title-exposed defect controls |
 | Native startup | [frame adapter](../../../../consoles/md/src/front/md_console.c), [reset state](../../../../consoles/md/src/console/bus.c), [IRQ dispatch](../../../../consoles/md/src/console/dispatch.c) | Current frame path advances hardware and IRQs; reset-vector dispatch and a resumable 68000 main execution path are absent |
 | Reference hooks | [NMDT v2](../../../../consoles/md/tests/oracle/TRACE_FORMAT.md), [hook ABI](../../../../consoles/md/tests/oracle/trace_abi.h) | Instruction/state/control hooks, callable original execution, full comparison snapshots and replay capabilities |
 | Assembly recovery | Pinned vasm tools; two small [assembler smoke controls](../../../../consoles/md/tests/toolchain_check.py) | Decoder controls, code/data census, RAM-code identities, exact whole-image rebuild and symbolic filing |
 | C recovery | Public 68000/Z80 state and bus APIs; synthetic C programs | Routine catalog, ABI adapters, semantic controls, A5, A7, complete title C and typed refactoring |
-| Title selection | [416-candidate bounded survey](../../../../consoles/md/docs/survey.md) | Exact revision, longer scenarios, static hardware audit and first-title decision; short traces cannot establish absence of features |
+| Title selection | [416-candidate bounded survey](../../../../consoles/md/docs/survey.md) | D00 has a provisional exact revision; complete hardware/RAM audit, manual-guided gameplay scenario, and final eligibility gate remain open |
 | Delivery | Nativekit host/input/audio/build infrastructure | Full native game, measured timing on held-out scenarios, source/data separation and clean reproducible delivery |
 
 The [Stage 4 handoff](../../handoff/2026-11-01-nativemd-handoff.md) records prior MD/SNES gates and Windows/host-render limitations. Those results are historical baseline evidence, not checks rerun for this proposal. No retail game is currently certified by this suite.
@@ -27,23 +27,23 @@ Choose one base-console title within current hardware scope, including its Z80 s
 
 ## Milestones and dependencies
 
-| ID | Deliverable | Prerequisite |
-|---|---|---|
-| [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM |
-| [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory |
-| [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory |
-| [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks |
-| [D04](d04-per-routine-c-verification.md) | Verify C routines against original execution on both CPUs | D01 hooks, D03 shared catalog/decoder controls |
-| [D05](d05-whole-image-lockstep.md) | Verify combined C substitution under concurrent hardware execution | D01, D04 |
-| [D06](d06-first-native-playable-slice.md) | Deliver the first game slice through the actual native launch path | D00 selected title, D02 execution path, D03 title skeleton, D04 and D05 verified checking infrastructure. |
-| [D07](d07-whole-game-behavior-recovery.md) | Recover and certify the complete game's C behavior | D06 first playable and stable A5/A7 infrastructure. |
-| [D08](d08-symbolic-assembly-completion.md) | Finish the symbolic, byte-exact assembly record | D03 lossless skeleton and D07 behavior/census closure |
-| [D09](d09-plain-typed-c.md) | Turn certified translations into maintainable plain C | D07 certified behavior |
-| [D10](d10-full-native-game-and-timing.md) | Qualify complete native gameplay and measured timing | D02, D07 and D09 |
-| [D11](d11-reproducible-first-game-delivery.md) | Package the first completed decomp and native game | D07-D10 complete at their declared gates |
-| [D12](d12-reusable-rom-to-decomp-workflow.md) | Prove reuse on a second ROM and document the operating workflow | D11 full first-title delivery |
+| ID | Deliverable | Prerequisite | Status |
+|---|---|---|---|
+| [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM | partial |
+| [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory | unstarted |
+| [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory | unstarted |
+| [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | unstarted |
+| [D04](d04-per-routine-c-verification.md) | Verify C routines against original execution on both CPUs | D01 hooks, D03 shared catalog/decoder controls | unstarted |
+| [D05](d05-whole-image-lockstep.md) | Verify combined C substitution under concurrent hardware execution | D01, D04 | unstarted |
+| [D06](d06-first-native-playable-slice.md) | Deliver the first game slice through the actual native launch path | D00 selected title, D02 execution path, D03 title skeleton, D04 and D05 verified checking infrastructure. | unstarted |
+| [D07](d07-whole-game-behavior-recovery.md) | Recover and certify the complete game's C behavior | D06 first playable and stable A5/A7 infrastructure. | unstarted |
+| [D08](d08-symbolic-assembly-completion.md) | Finish the symbolic, byte-exact assembly record | D03 lossless skeleton and D07 behavior/census closure | unstarted |
+| [D09](d09-plain-typed-c.md) | Turn certified translations into maintainable plain C | D07 certified behavior | unstarted |
+| [D10](d10-full-native-game-and-timing.md) | Qualify complete native gameplay and measured timing | D02, D07 and D09 | unstarted |
+| [D11](d11-reproducible-first-game-delivery.md) | Package the first completed decomp and native game | D07-D10 complete at their declared gates | unstarted |
+| [D12](d12-reusable-rom-to-decomp-workflow.md) | Prove reuse on a second ROM and document the operating workflow | D11 full first-title delivery | unstarted |
 
-D01-D05 shared synthetic tooling can progress while private ROM input is unavailable. Title-dependent portions of D00/D03 and D06 onward remain blocked on exact input. Mark partially completed milestones partial; do not convert unavailable retail evidence into a synthetic-only completion. D08 symbolic filing and D09 refactoring may proceed in verified batches during D07; full completion still requires their listed gates.
+D01-D05 shared synthetic tooling can progress independently of title input. D00 has a provisional exact first-title binding, but its complete static hardware audit and scenario inventory remain partial; title-dependent D03/D06 work must use that binding and close the remaining gates. Mark partially completed milestones partial; do not convert missing retail evidence into synthetic-only completion. D08 symbolic filing and D09 refactoring may proceed in verified batches during D07; full completion still requires their listed gates.
 
 ## Shared execution contract
 
@@ -98,4 +98,4 @@ At a platform release boundary, run `mise run build`, `mise run test`, `mise run
 
 ## How to start
 
-Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. All milestones are unstarted proposals. The first inputs needed for real-title work are a local ROM/library runtime path, exact chosen revision and an authorized maintained game workspace; these are execution prerequisites, not reasons to delay preparing this plan.
+Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00 is partial and D01-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.
