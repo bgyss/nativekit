@@ -29,6 +29,15 @@ static nmd_cart pad6_cart(void)
     return cart;
 }
 
+static nmd_cart tmss_cart(nmd_region region)
+{
+    nmd_cart cart = pad6_cart();
+
+    cart.region = region;
+    cart.model = NMD_MODEL_MD1VA6_TMSS;
+    return cart;
+}
+
 static void wait_for_pad_settle(void)
 {
     md_advance_to(md_clock + 84u);
@@ -287,8 +296,76 @@ static void test_io_buttons_sampled_per_frame(void)
     assert(nmd_bus_read8(0xA10003u) == 0x74u);
 }
 
-int main(void)
+static void test_io_version_register_model_bits(void)
 {
+    nmd_cart cart = pad3_cart();
+
+    nmd_power(&cart);
+    assert(nmd_bus_read8(0xA10001u) == 0xA0u);
+
+    cart.model = NMD_MODEL_MD1VA6_TMSS;
+    nmd_power(&cart);
+    assert(nmd_bus_read8(0xA10001u) == 0xA1u);
+
+    cart.region = NMD_PAL;
+    nmd_power(&cart);
+    assert(nmd_bus_read8(0xA10001u) == 0xE1u);
+}
+
+static void test_io_tmss_absent_is_open(void)
+{
+    nmd_cart cart = pad3_cart();
+
+    nmd_power(&cart);
+    nmd_bus_write16(0xA14000u, 0x5345u);
+    nmd_bus_write16(0xA14002u, 0x4741u);
+    assert(nmd_bus_read16(0xA14000u) == 0xFFFFu);
+    nmd_bus_write16(0xC00004u, 0x8104u);
+}
+
+static void test_io_tmss_lock_unlock_sequence(void)
+{
+    nmd_cart cart = tmss_cart(NMD_NTSC);
+
+    nmd_power(&cart);
+    nmd_bus_write8(0xA14000u, 0x53u);
+    assert(nmd_bus_read16(0xA14000u) == 0x5300u);
+    nmd_bus_write8(0xA14001u, 0x45u);
+    assert(nmd_bus_read16(0xA14000u) == 0x5345u);
+    nmd_bus_write8(0xA14002u, 0x47u);
+    assert(nmd_bus_read16(0xA14002u) == 0x4700u);
+    nmd_bus_write8(0xA14003u, 0x41u);
+    assert(nmd_bus_read16(0xA14002u) == 0x4741u);
+    nmd_bus_write16(0xC00004u, 0x8104u);
+
+    nmd_power(&cart);
+    wr32(0xA14000u, 0x53454741u);
+    nmd_bus_write16(0xC00004u, 0x8104u);
+}
+
+static void test_io_tmss_vdp_locked(int partial_signature)
+{
+    nmd_cart cart = tmss_cart(NMD_NTSC);
+
+    nmd_power(&cart);
+    if (partial_signature)
+        nmd_bus_write16(0xA14000u, 0x5345u);
+    nmd_bus_write16(0xC00004u, 0x8104u);
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "tmss-vdp-locked") == 0) {
+        test_io_tmss_vdp_locked(0);
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "tmss-vdp-partial") == 0) {
+        test_io_tmss_vdp_locked(1);
+        return 0;
+    }
+    if (argc != 1)
+        return 2;
+
     test_nmd_cart_zero_defaults();
     test_nmd_console_button_map();
     test_nmd_console_input_forwards_players();
@@ -299,5 +376,8 @@ int main(void)
     test_io_6button_extended_phase();
     test_io_6button_timeout_resets();
     test_io_buttons_sampled_per_frame();
+    test_io_version_register_model_bits();
+    test_io_tmss_absent_is_open();
+    test_io_tmss_lock_unlock_sequence();
     return 0;
 }

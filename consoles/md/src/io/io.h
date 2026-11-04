@@ -13,5 +13,6 @@ uint8_t md_io_read8(uint32_t addr);
 uint16_t md_io_read16(uint32_t addr);
 void md_io_write8(uint32_t addr, uint8_t value);
 void md_io_write16(uint32_t addr, uint16_t value);
+int md_io_vdp_unlocked(void);
 
 #endif

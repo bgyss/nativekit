@@ -23,6 +23,31 @@ typedef struct {
 static md_io_port ports[2];
 static nmd_port_type pad_types[2];
 static uint32_t button_masks[2];
+static nmd_model machine_model;
+static nmd_region machine_region;
+static uint16_t tmss_signature[2];
+
+static int md_io_tmss_present(void)
+{
+    return machine_model == NMD_MODEL_MD1VA6_TMSS;
+}
+
+int md_io_vdp_unlocked(void)
+{
+    return !md_io_tmss_present() ||
+           (tmss_signature[0] == 0x5345u && tmss_signature[1] == 0x4741u);
+}
+
+static uint8_t md_io_version(void)
+{
+    uint8_t value = 0xA0u; /* Export NTSC hardware with no floppy unit. */
+
+    if (machine_region == NMD_PAL)
+        value |= 0x40u;
+    if (md_io_tmss_present())
+        value |= 0x01u;
+    return value;
+}
 
 static uint8_t md_io_th_level(int port)
 {
@@ -157,6 +182,12 @@ void md_io_reset(const nmd_cart *cart)
 {
     int port;
 
+    machine_model = cart && cart->model == NMD_MODEL_MD1VA6_TMSS ?
+        NMD_MODEL_MD1VA6_TMSS : NMD_MODEL_MD1VA3;
+    machine_region = cart && cart->region == NMD_PAL ? NMD_PAL : NMD_NTSC;
+    tmss_signature[0] = 0;
+    tmss_signature[1] = 0;
+
     for (port = 0; port < 2; port++) {
         ports[port].data = 0;
         ports[port].control = 0;
@@ -198,12 +229,23 @@ uint8_t md_io_read8(uint32_t addr)
 {
     uint32_t reg = addr & 0x1Fu;
 
+    if (addr >= 0xA14000u && addr <= 0xA14003u) {
+        uint16_t word;
+        unsigned index;
+
+        if (!md_io_tmss_present())
+            return 0xFFu;
+        index = (unsigned)((addr - 0xA14000u) >> 1);
+        word = tmss_signature[index];
+        return (addr & 1u) ? (uint8_t)word : (uint8_t)(word >> 8);
+    }
+
     if (!(addr & 1u))
         return 0xFFu; /* The I/O devices are connected to the low byte lane. */
 
     switch (reg) {
     case 0x01u:
-        return 0; /* md1va3 version; the TMSS model is handled in Task 4. */
+        return md_io_version();
     case 0x03u:
         return md_io_data_read(0);
     case 0x05u:
@@ -219,12 +261,31 @@ uint8_t md_io_read8(uint32_t addr)
 
 uint16_t md_io_read16(uint32_t addr)
 {
+    uint32_t aligned = addr & ~1u;
+
+    if (aligned == 0xA14000u || aligned == 0xA14002u) {
+        if (!md_io_tmss_present())
+            return 0xFFFFu;
+        return tmss_signature[(aligned - 0xA14000u) >> 1];
+    }
     return md_io_read8((addr & ~1u) + 1u);
 }
 
 void md_io_write8(uint32_t addr, uint8_t value)
 {
     uint32_t reg = addr & 0x1Fu;
+
+    if (addr >= 0xA14000u && addr <= 0xA14003u) {
+        if (md_io_tmss_present()) {
+            unsigned index = (unsigned)((addr - 0xA14000u) >> 1);
+            if (addr & 1u)
+                tmss_signature[index] = (uint16_t)((tmss_signature[index] & 0xFF00u) | value);
+            else
+                tmss_signature[index] = (uint16_t)((tmss_signature[index] & 0x00FFu) |
+                                                   (uint16_t)value << 8);
+        }
+        return;
+    }
 
     if (!(addr & 1u))
         return; /* The high byte lane is not connected to these registers. */
@@ -273,5 +334,12 @@ void md_io_write8(uint32_t addr, uint8_t value)
 
 void md_io_write16(uint32_t addr, uint16_t value)
 {
-    md_io_write8((addr & ~1u) + 1u, (uint8_t)value);
+    uint32_t aligned = addr & ~1u;
+
+    if (aligned == 0xA14000u || aligned == 0xA14002u) {
+        if (md_io_tmss_present())
+            tmss_signature[(aligned - 0xA14000u) >> 1] = value;
+        return;
+    }
+    md_io_write8(aligned + 1u, (uint8_t)value);
 }

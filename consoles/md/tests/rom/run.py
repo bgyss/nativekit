@@ -48,6 +48,35 @@ def _native_button_mask(names):
     return sum(NMD_BUTTON_BITS[name] for name in names)
 
 
+def _build_tmss_test_stub(base, assembler):
+    system_dir = base / "tmss-system"
+    system_dir.mkdir()
+    source = system_dir / "tmss_stub.s68"
+    output = system_dir / "tmss.md"
+    source.write_text("""\
+        dc.l    $00FFFF00, start
+        ds.b    $200-8
+start:
+        lea     unlock_jump(pc),a0
+        lea     $FFFF00,a1
+        moveq   #7,d0
+copy_stub:
+        move.w  (a0)+,(a1)+
+        dbra    d0,copy_stub
+        lea     $FFFF00,a0
+        jmp     (a0)
+unlock_jump:
+        move.b  #1,$A14101
+        movea.l $00000004,a0
+        jmp     (a0)
+""")
+    result = subprocess.run([str(assembler), "-Fbin", "-o", str(output), str(source)],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError("vasm TMSS stub failed: " + result.stderr.strip())
+    return system_dir
+
+
 def _target_addresses(case):
     addresses = set()
     for op in case.operations:
@@ -473,14 +502,23 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         if input_script:
             input_path = base / "input.json"
             input_path.write_text(json.dumps(input_script, sort_keys=True))
+        system_dir = None
+        if case.model == "md1va6":
+            try:
+                system_dir = _build_tmss_test_stub(base, assembler)
+            except RuntimeError as error:
+                return str(error)
         candidate_command = [
             sys.executable, str(ROOT / "consoles/md/tests/oracle/run.py"),
             "--core", str(core), "--rom", str(rom), "--frames", frames,
-            "--region", case.region, "--pad1", case.pad1, "--pad2", case.pad2,
+            "--region", case.region, "--model", case.model,
+            "--pad1", case.pad1, "--pad2", case.pad2,
             "--out", str(oracle_out), "--trace",
         ]
         if input_path:
             candidate_command.extend(("--input", str(input_path)))
+        if system_dir:
+            candidate_command.extend(("--system-dir", str(system_dir)))
         candidate = subprocess.run(candidate_command, capture_output=True, text=True, timeout=90)
         if candidate.returncode:
             return "candidate run failed: " + candidate.stderr.strip()[-500:]
@@ -529,7 +567,8 @@ def run_one(case, assembler, z80_assembler, core, testcart):
 
         native_picture = base / "native.ppm"
         native_command = [str(testcart), "--rom", str(rom), "--steps", str(steps)]
-        native_command.extend(("--region", case.region, "--pad1", case.pad1, "--pad2", case.pad2))
+        native_command.extend(("--region", case.region, "--model", case.model,
+                               "--pad1", case.pad1, "--pad2", case.pad2))
         first_input = case.input_frames[0] if case.input_frames else ((), ())
         native_command.extend(("--buttons1", str(_native_button_mask(first_input[0])),
                                "--buttons2", str(_native_button_mask(first_input[1]))))

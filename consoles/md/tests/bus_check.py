@@ -32,4 +32,11 @@ for mode, message in fatal_cases.items():
     if result.returncode != 70 or not result.stderr.startswith("nativemd: ") or message not in result.stderr:
         sys.exit(f"bus_check: {mode} fatal mismatch: {result.returncode}, {result.stderr!r}")
 
+io_binary = root / "build/null/tests/io_check"
+for mode in ("tmss-vdp-locked", "tmss-vdp-partial"):
+    result = subprocess.run([str(io_binary), mode], capture_output=True, text=True)
+    if (result.returncode != 70 or not result.stderr.startswith("nativemd: ") or
+            "VDP access before TMSS unlock" not in result.stderr):
+        sys.exit(f"bus_check: {mode} fatal mismatch: {result.returncode}, {result.stderr!r}")
+
 print("bus_check: ok")

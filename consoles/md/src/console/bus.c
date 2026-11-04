@@ -163,6 +163,12 @@ static uint32_t md_vdp_word_port(uint32_t addr)
     return UINT32_MAX;
 }
 
+static void md_vdp_require_unlocked(uint32_t addr)
+{
+    if (!md_io_vdp_unlocked())
+        nk_fatal("68000 VDP access before TMSS unlock at $%06X", (unsigned)addr);
+}
+
 static uint8_t md_read8(uint32_t addr, int z80_access)
 {
     if (addr <= 0x3FFFFFu)
@@ -192,12 +198,18 @@ static uint8_t md_read8(uint32_t addr, int z80_access)
     }
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         return md_io_read8(addr);
+    if (addr >= 0xA14000u && addr <= 0xA14003u)
+        return md_io_read8(addr);
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_port(addr);
-        if (port == 0x08u)
+        if (port == 0x08u) {
+            md_vdp_require_unlocked(addr);
             return (uint8_t)(md_vdp_hv_counter() >> 8);
-        if (port == 0x09u)
+        }
+        if (port == 0x09u) {
+            md_vdp_require_unlocked(addr);
             return (uint8_t)md_vdp_hv_counter();
+        }
         nk_fatal("VDP read state is not implemented at $%06X", (unsigned)addr);
     }
 
@@ -227,10 +239,14 @@ static uint16_t md_read16(uint32_t addr)
         nk_fatal("YM2612 byte ports require byte access at $%06X", (unsigned)addr);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
         return md_io_read16(addr);
+    if (addr >= 0xA14000u && addr <= 0xA14002u)
+        return md_io_read16(addr);
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_word_port(addr);
-        if (port != UINT32_MAX)
+        if (port != UINT32_MAX) {
+            md_vdp_require_unlocked(addr);
             return md_vdp_read16(port, md_clock);
+        }
         nk_fatal("prohibited VDP word read at $%06X", (unsigned)addr);
     }
 
@@ -295,6 +311,10 @@ static void md_write8(uint32_t addr, uint8_t value, int z80_access)
 
     if (addr == 0xA06001u)
         return; /* the low data lane and unimplemented peripheral writes are open */
+    if (addr >= 0xA14000u && addr <= 0xA14003u) {
+        md_io_write8(addr, value);
+        return;
+    }
     if (addr >= 0xA10000u && addr <= 0xA1001Fu) {
         md_io_write8(addr, value);
         return;
@@ -303,6 +323,7 @@ static void md_write8(uint32_t addr, uint8_t value, int z80_access)
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_port(addr);
         if (port <= 3u) {
+            md_vdp_require_unlocked(addr);
             md_vdp_write8(port, value, md_clock);
             return;
         }
@@ -361,6 +382,10 @@ static void md_write16(uint32_t addr, uint16_t value)
         return;
     }
 
+    if (addr >= 0xA14000u && addr <= 0xA14002u) {
+        md_io_write16(addr, value);
+        return;
+    }
     if (addr >= 0xA10000u && addr <= 0xA1001Eu) {
         md_io_write16(addr, value);
         return;
@@ -369,6 +394,7 @@ static void md_write16(uint32_t addr, uint16_t value)
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_word_port(addr);
         if (port == MD_VDP_DATA_PORT || port == MD_VDP_CONTROL_PORT) {
+            md_vdp_require_unlocked(addr);
             md_vdp_write16(port, value, md_clock);
             return;
         }

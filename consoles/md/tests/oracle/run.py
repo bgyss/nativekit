@@ -88,7 +88,10 @@ def main():
     parser.add_argument("--rom", type=pathlib.Path, required=True)
     parser.add_argument("--frames", type=int, required=True)
     parser.add_argument("--region", choices=("J", "U", "E"), default="U")
+    parser.add_argument("--model", choices=("md1va3", "md1va6"), default="md1va3")
     parser.add_argument("--out", type=pathlib.Path, required=True)
+    parser.add_argument("--system-dir", type=pathlib.Path,
+                        help="candidate system files, such as a test TMSS ROM")
     parser.add_argument("--input", type=pathlib.Path, help="JSON: frame numbers to port/button lists")
     parser.add_argument("--pad1", choices=("3", "6"), default="6")
     parser.add_argument("--pad2", choices=("3", "6"), default="6")
@@ -101,6 +104,8 @@ def main():
     args = parser.parse_args()
     if args.frames < 1 or not args.core.is_file() or not args.rom.is_file():
         parser.error("core and ROM must exist, and frames must be positive")
+    if args.system_dir and not args.system_dir.is_dir():
+        parser.error("--system-dir must name an existing directory")
     if args.feature_only and not args.trace:
         parser.error("--feature-only requires --trace")
     buttons = {"A": 0, "X": 1, "MODE": 2, "START": 3, "UP": 4, "DOWN": 5,
@@ -132,7 +137,7 @@ def main():
         for block in iter(lambda: core_file.read(1024 * 1024), b""):
             digest.update(block)
     core = c.CDLL(str(args.core.resolve()))
-    options = {b"blastem_system_type": b"gen", b"blastem_model": b"md1va3",
+    options = {b"blastem_system_type": b"gen", b"blastem_model": args.model.encode(),
                b"blastem_region": args.region.encode(), b"blastem_force_region": b"on",
                b"blastem_ram_init": b"zero", b"blastem_m68k_divider": b"7",
                b"blastem_megawifi": b"off", b"blastem_io_1": f"gamepad{args.pad1}.1".encode(),
@@ -141,7 +146,7 @@ def main():
                b"blastem_fm_dac": b"zero_offset", b"blastem_overscan_top": b"0",
                b"blastem_overscan_bottom": b"0", b"blastem_overscan_left": b"0",
                b"blastem_overscan_right": b"0"}
-    directory = str(args.out.resolve()).encode()
+    directory = str((args.system_dir or args.out).resolve()).encode()
     pixel_format = [None]
     frame_count = [0]
     frame_sizes = []

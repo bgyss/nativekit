@@ -40,6 +40,7 @@ class Case:
     pad1: str = "6"
     pad2: str = "6"
     input_frames: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
+    model: str = "md1va3"
 
 
 def _vdp_reg(index, value):
@@ -276,6 +277,29 @@ def _io_pad6_sequence_case():
                 ),))
 
 
+def _io_tmss_unlock_case():
+    return Case("io_tmss_unlock", (
+        Operation(READ, 1, 0xA10001, 0xA1, compare_mask=0xFF),
+        Operation(WRITE, 1, 0xA14000, 0x53),
+        Operation(READ, 2, 0xA14000, 0x5300, compare_mask=0xFFFF),
+        Operation(WRITE, 1, 0xA14001, 0x45),
+        Operation(READ, 2, 0xA14000, 0x5345, compare_mask=0xFFFF),
+        Operation(WRITE, 4, 0xA14000, 0x53454741),
+        Operation(READ, 2, 0xA14000, 0x5345, compare_mask=0xFFFF),
+        Operation(READ, 2, 0xA14002, 0x4741, compare_mask=0xFFFF),
+        Operation(WRITE, 2, 0xC00004, 0x8104),
+        Operation(WRITE, 2, 0xC00000, 0x000E),
+    ), model="md1va6")
+
+
+def _io_version_md1va3_case():
+    return Case("io_version_md1va3", (
+        Operation(READ, 1, 0xA10001, 0xA0, compare_mask=0xFF),
+        Operation(WRITE, 2, 0xC00004, 0x8104),
+        Operation(WRITE, 2, 0xC00000, 0x000E),
+    ))
+
+
 def _ym_write_register(bank, address, value):
     port = 0xA04000 + (bank * 2)
     return (Operation(WRITE, 1, port, address),
@@ -450,7 +474,7 @@ def all_cases():
         Operation(READ, 1, 0xFF0010),
     )), _z80_bank_window_case(), _z80_psg_tone_case(), _z80_psg_noise_case(),
     _psg_data_only_volume_case(), _psg_tone3_noise_switch_case(),
-    _io_pad6_sequence_case(),
+    _io_pad6_sequence_case(), _io_tmss_unlock_case(), _io_version_md1va3_case(),
     *_ym_sound_cases(), Case("tas_write", (
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),

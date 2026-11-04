@@ -824,6 +824,7 @@ int main(int argc, char **argv)
     const char *mix_path = NULL, *mix_reference_path = NULL;
     const char *mix_ym_source_path = NULL, *mix_psg_source_path = NULL;
     const char *region = "U";
+    const char *model = "md1va3";
     const char *pad1 = "6", *pad2 = "6";
     uint32_t button_masks[2] = { 0, 0 };
     unsigned frames = 2;
@@ -886,6 +887,8 @@ int main(int argc, char **argv)
             psg_frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--region") && i + 1 < argc)
             region = argv[++i];
+        else if (!strcmp(argv[i], "--model") && i + 1 < argc)
+            model = argv[++i];
         else if (!strcmp(argv[i], "--pad1") && i + 1 < argc)
             pad1 = argv[++i];
         else if (!strcmp(argv[i], "--pad2") && i + 1 < argc)
@@ -914,6 +917,10 @@ int main(int argc, char **argv)
     if ((strcmp(pad1, "3") && strcmp(pad1, "6")) ||
         (strcmp(pad2, "3") && strcmp(pad2, "6"))) {
         fprintf(stderr, "testcart: pad types must be 3 or 6\n");
+        return 2;
+    }
+    if (strcmp(model, "md1va3") && strcmp(model, "md1va6")) {
+        fprintf(stderr, "testcart: model must be md1va3 or md1va6\n");
         return 2;
     }
     if (psg_path && (!(psg_rate > 0.0) || !psg_frames)) {
@@ -972,6 +979,7 @@ int main(int argc, char **argv)
 
     memset(&cart, 0, sizeof cart);
     cart.title = "nativemd testcart";
+    cart.model = !strcmp(model, "md1va6") ? NMD_MODEL_MD1VA6_TMSS : NMD_MODEL_MD1VA3;
     cart.ports[0] = !strcmp(pad1, "3") ? NMD_PORT_PAD3 : NMD_PORT_PAD6;
     cart.ports[1] = !strcmp(pad2, "3") ? NMD_PORT_PAD3 : NMD_PORT_PAD6;
     if (!strcmp(region, "E"))
