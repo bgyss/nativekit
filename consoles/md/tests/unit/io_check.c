@@ -6,7 +6,18 @@
 #include <nmd/nmd.h>
 
 #include "io.h"
+#include "md_internal.h"
 #include "md_console.h"
+
+static nmd_cart pad3_cart(void)
+{
+    nmd_cart cart = { 0 };
+
+    cart.region = NMD_NTSC;
+    cart.ports[0] = NMD_PORT_PAD3;
+    cart.ports[1] = NMD_PORT_PAD3;
+    return cart;
+}
 
 static void test_nmd_cart_zero_defaults(void)
 {
@@ -65,10 +76,79 @@ static void test_nmd_console_input_forwards_players(void)
     assert(md_io_button_mask(1) == 0);
 }
 
+static void test_io_3button_phase_reads(void)
+{
+    nmd_cart cart = pad3_cart();
+    const uint32_t buttons[2] = {
+        NMD_BUTTON_UP | NMD_BUTTON_LEFT | NMD_BUTTON_B | NMD_BUTTON_C |
+            NMD_BUTTON_A | NMD_BUTTON_START,
+        0,
+    };
+
+    nmd_power(&cart);
+    assert(nmd_bus_read8(0xA10003u) == 0x7Fu);
+    md_io_input(buttons);
+
+    nmd_bus_write8(0xA10009u, 0x40u);
+    nmd_bus_write8(0xA10003u, 0x40u);
+    assert(nmd_bus_read8(0xA10003u) == 0x4Au);
+
+    nmd_bus_write8(0xA10003u, 0x00u);
+    assert(nmd_bus_read8(0xA10003u) == 0x02u);
+}
+
+static void test_io_3button_ctrl_driven_output(void)
+{
+    nmd_cart cart = pad3_cart();
+    uint64_t before;
+
+    nmd_power(&cart);
+    nmd_bus_write8(0xA10009u, 0x43u);
+    nmd_bus_write8(0xA10003u, 0x01u);
+    assert(nmd_bus_read8(0xA10009u) == 0x43u);
+    assert(nmd_bus_read8(0xA10003u) == 0x31u);
+
+    before = md_clock;
+    nmd_bus_write16(0xA10008u, 0xAA40u);
+    assert(md_clock - before == 28u);
+    assert(nmd_bus_read8(0xA10009u) == 0x40u);
+
+    before = md_clock;
+    nmd_bus_write8(0xA10008u, 0x03u);
+    assert(md_clock - before == 28u);
+    assert(nmd_bus_read8(0xA10009u) == 0x40u);
+}
+
+static void test_io_port_state_independent(void)
+{
+    nmd_cart cart = pad3_cart();
+    const uint32_t buttons[2] = { NMD_BUTTON_A, NMD_BUTTON_B };
+    uint64_t before;
+    uint16_t port0;
+
+    nmd_power(&cart);
+    md_io_input(buttons);
+    nmd_bus_write16(0xA10008u, 0x1140u);
+    nmd_bus_write16(0xA10002u, 0x2200u);
+    nmd_bus_write16(0xA1000Au, 0x3300u);
+    nmd_bus_write16(0xA10004u, 0x4440u);
+
+    assert(nmd_bus_read8(0xA10009u) == 0x40u);
+    assert(nmd_bus_read8(0xA1000Bu) == 0x00u);
+    before = md_clock;
+    port0 = nmd_bus_read16(0xA10002u);
+    assert(md_clock - before == 28u);
+    assert((port0 & 0x00FFu) == 0x23u);
+    assert((nmd_bus_read16(0xA10004u) & 0x00FFu) == 0x6Fu);
+}
+
 int main(void)
 {
     test_nmd_cart_zero_defaults();
     test_nmd_console_button_map();
     test_nmd_console_input_forwards_players();
+    test_io_3button_phase_reads();
+    test_io_3button_ctrl_driven_output();
+    test_io_port_state_independent();
     return 0;
 }

@@ -191,7 +191,7 @@ static uint8_t md_read8(uint32_t addr, int z80_access)
         return md_ym_read((uint8_t)(addr - 0xA04000u), md_clock);
     }
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
-        nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
+        return md_io_read8(addr);
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_port(addr);
         if (port == 0x08u)
@@ -226,7 +226,7 @@ static uint16_t md_read16(uint32_t addr)
     if (addr >= 0xA04000u && addr <= 0xA04003u)
         nk_fatal("YM2612 byte ports require byte access at $%06X", (unsigned)addr);
     if (addr >= 0xA10000u && addr <= 0xA1001Fu)
-        nk_fatal("I/O read state is not implemented at $%06X", (unsigned)addr);
+        return md_io_read16(addr);
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_word_port(addr);
         if (port != UINT32_MAX)
@@ -293,8 +293,12 @@ static void md_write8(uint32_t addr, uint8_t value, int z80_access)
         return;
     }
 
-    if (addr == 0xA06001u || (addr >= 0xA10000u && addr <= 0xA1001Fu))
+    if (addr == 0xA06001u)
         return; /* the low data lane and unimplemented peripheral writes are open */
+    if (addr >= 0xA10000u && addr <= 0xA1001Fu) {
+        md_io_write8(addr, value);
+        return;
+    }
 
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_port(addr);
@@ -357,8 +361,10 @@ static void md_write16(uint32_t addr, uint16_t value)
         return;
     }
 
-    if (addr >= 0xA10000u && addr <= 0xA1001Eu)
-        return; /* unimplemented peripheral writes are open */
+    if (addr >= 0xA10000u && addr <= 0xA1001Eu) {
+        md_io_write16(addr, value);
+        return;
+    }
 
     if (md_is_vdp(addr)) {
         uint32_t port = md_vdp_word_port(addr);

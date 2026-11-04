@@ -127,7 +127,7 @@ int nmd_main(const nmd_cart *cart, int argc, char **argv)
 void nmd_power(const nmd_cart *cart)
 {
     active_cart = cart;
-    md_io_input(NULL);
+    md_io_reset(cart);
     md_bus_reset(cart);
     md_timing_reset(cart);
 }
