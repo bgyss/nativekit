@@ -14,6 +14,20 @@
 #include "md_present.h"
 
 static const nmd_cart *active_cart;
+static const nk_button buttons[] = {
+    { "UP", NMD_BUTTON_UP },
+    { "DOWN", NMD_BUTTON_DOWN },
+    { "LEFT", NMD_BUTTON_LEFT },
+    { "RIGHT", NMD_BUTTON_RIGHT },
+    { "B", NMD_BUTTON_B },
+    { "C", NMD_BUTTON_C },
+    { "A", NMD_BUTTON_A },
+    { "START", NMD_BUTTON_START },
+    { "X", NMD_BUTTON_X },
+    { "Y", NMD_BUTTON_Y },
+    { "Z", NMD_BUTTON_Z },
+    { "MODE", NMD_BUTTON_MODE },
+};
 
 static void power(const void *cart)
 {
@@ -80,7 +94,7 @@ static int audio_queued(void)
 static void input(int headless, const uint32_t *buttons)
 {
     (void)headless;
-    (void)buttons;
+    md_io_input(buttons);
 }
 
 const nk_console nmd_console = {
@@ -100,6 +114,8 @@ const nk_console nmd_console = {
     .audio_take = audio_take,
     .audio_queued = audio_queued,
     .players = 2,
+    .buttons = buttons,
+    .button_count = (int)(sizeof buttons / sizeof buttons[0]),
     .input = input,
 };
 
@@ -111,6 +127,7 @@ int nmd_main(const nmd_cart *cart, int argc, char **argv)
 void nmd_power(const nmd_cart *cart)
 {
     active_cart = cart;
+    md_io_input(NULL);
     md_bus_reset(cart);
     md_timing_reset(cart);
 }

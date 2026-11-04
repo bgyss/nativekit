@@ -5,6 +5,7 @@
 #define NMD_NMD_H
 
 #include "nmd/cart.h"
+#include "nmd/hw.h"
 #include "nmd/machine.h"
 #include "nmd/z80.h"
 

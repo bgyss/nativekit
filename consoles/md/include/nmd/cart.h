@@ -14,6 +14,18 @@ typedef enum {
     NMD_PAL = 1
 } nmd_region;
 
+typedef enum {
+    NMD_MODEL_MD1VA3 = 0,
+    NMD_MODEL_MD1VA6_TMSS = 1
+} nmd_model;
+
+typedef enum {
+    NMD_PORT_PAD6 = 0,
+    NMD_PORT_PAD3 = 1
+} nmd_port_type;
+
+typedef struct nmd_cost_profile nmd_cost_profile;
+
 typedef struct nmd_routine {
     uint32_t addr;
     void (*abi)(void);
@@ -29,6 +41,9 @@ typedef struct nmd_cart {
     size_t routine_count;
     const nmd_z80_routine *z80_routines;
     size_t z80_routine_count;
+    nmd_model model;
+    nmd_port_type ports[2];
+    const nmd_cost_profile *cost_profile;
 } nmd_cart;
 
 #endif

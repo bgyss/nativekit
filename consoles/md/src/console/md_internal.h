@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "nmd/cart.h"
+#include "../io/io.h"
 #include "nmd/machine.h"
 #include "../vdp/vdp.h"
 #include "../vdp/dma.h"

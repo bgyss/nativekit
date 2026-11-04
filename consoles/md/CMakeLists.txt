@@ -10,12 +10,13 @@ add_library(nmd STATIC src/console/bus.c src/console/dispatch.c src/z80/z80.c
   src/sound/sn76489.c src/sound/ym2612.c src/sound/mix.c
   src/vdp/vdp.c src/vdp/dma.c
   src/vdp/render.c
+  src/io/io.c
   src/front/md_console.c src/front/md_present.c)
 if(NK_RENDER STREQUAL "vulkan")
   # Imported targets created by sibling console directories are not visible here.
   find_package(Vulkan REQUIRED)
 endif()
-target_include_directories(nmd PUBLIC include PRIVATE src/front src/console ${NK_INCLUDE})
+target_include_directories(nmd PUBLIC include PRIVATE src/front src/console src/io ${NK_INCLUDE})
 if(NOT MSVC)
   target_compile_options(nmd PRIVATE -Wall -fno-strict-aliasing -ffp-contract=off)
 endif()

@@ -2,6 +2,11 @@ add_executable(console_check unit/console_check.c)
 target_link_libraries(console_check PRIVATE nmd)
 set_target_properties(console_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
+add_executable(io_check unit/io_check.c)
+target_include_directories(io_check PRIVATE ../src/front ../src/io ${NK_INCLUDE})
+target_link_libraries(io_check PRIVATE nmd)
+set_target_properties(io_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
 add_executable(bus_check unit/bus_check.c)
 target_include_directories(bus_check PRIVATE ../src/console)
 target_link_libraries(bus_check PRIVATE nmd)

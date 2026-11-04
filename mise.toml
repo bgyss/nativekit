@@ -23,6 +23,11 @@ description = "Check that the nmd console entry point links to the kit"
 depends = ["build:null"]
 run = "cmake --build build/null --target console_check && build/null/tests/console_check"
 
+[tasks."test:md-io"]
+description = "Check public Mega Drive I/O configuration and host input mapping"
+depends = ["build:null"]
+run = "cmake --build build/null --target io_check && build/null/tests/io_check"
+
 [tasks."test:md-z80"]
 description = "Check Z80 reset, BUSREQ, memory map, bank window, and coroutine behavior"
 depends = ["build:null"]
