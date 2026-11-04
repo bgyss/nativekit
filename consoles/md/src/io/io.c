@@ -1,27 +1,95 @@
 /* The raw host masks are kept separate from the controller protocol state. */
 #include "io.h"
 
+#include "../console/md_internal.h"
 #include "nmd/cart.h"
 #include "nmd/hw.h"
+
+#define MD_IO_PAD_SETTLE_MCLK 112u /* Four 68000 NOPs at 7 master clocks per cycle. */
+#define MD_IO_TH_TIMEOUT_MCLK 56000u /* Candidate pad reset interval in master clocks. */
 
 typedef struct {
     uint8_t data;
     uint8_t control;
+    uint8_t sampled_th;
+    uint8_t pending_th;
+    uint8_t settle_pending;
+    uint8_t th_edges;
+    uint8_t sampled_edges;
+    uint64_t settle_clock;
+    uint64_t timeout_clock;
 } md_io_port;
 
 static md_io_port ports[2];
 static nmd_port_type pad_types[2];
 static uint32_t button_masks[2];
 
+static uint8_t md_io_th_level(int port)
+{
+    const md_io_port *state = &ports[port];
+
+    if (state->control & 0x40u)
+        return (uint8_t)((state->data & 0x40u) != 0);
+    return 1;
+}
+
+static void md_io_set_th(int port, uint8_t old_th)
+{
+    md_io_port *state = &ports[port];
+    uint8_t new_th = md_io_th_level(port);
+
+    if (old_th == new_th)
+        return;
+
+    state->pending_th = new_th;
+    state->settle_clock = md_clock + MD_IO_PAD_SETTLE_MCLK;
+    state->settle_pending = 1;
+    if (pad_types[port] != NMD_PORT_PAD6)
+        return;
+
+    if (md_clock >= state->timeout_clock) {
+        state->th_edges = 0;
+        state->sampled_edges = 0;
+    }
+    if (new_th && state->th_edges < 4u)
+        state->th_edges++;
+    state->timeout_clock = md_clock + MD_IO_TH_TIMEOUT_MCLK;
+}
+
+static void md_io_update_timing(int port)
+{
+    md_io_port *state = &ports[port];
+
+    if (state->settle_pending && md_clock >= state->settle_clock) {
+        state->sampled_th = state->pending_th;
+        state->sampled_edges = state->th_edges;
+        state->settle_pending = 0;
+    }
+    if (pad_types[port] == NMD_PORT_PAD6 && md_clock >= state->timeout_clock) {
+        state->th_edges = 0;
+        state->sampled_edges = 0;
+    }
+}
+
 static uint8_t md_io_pad_pins(int port, int th)
 {
     uint32_t buttons = button_masks[port];
-    uint8_t pins = th ? 0x3Fu : 0x33u;
+    const md_io_port *state = &ports[port];
+    int extended = pad_types[port] == NMD_PORT_PAD6 && th && state->sampled_edges == 3u;
+    int recognized = pad_types[port] == NMD_PORT_PAD6 && !th && state->sampled_edges == 2u;
+    int after_extra = pad_types[port] == NMD_PORT_PAD6 && !th && state->sampled_edges == 3u;
+    uint8_t pins;
 
     switch (pad_types[port]) {
     case NMD_PORT_PAD3:
     case NMD_PORT_PAD6:
-        break; /* Both pad types share these ordinary phases. */
+        if (recognized)
+            pins = 0x30u;
+        else if (after_extra)
+            pins = 0x3Fu;
+        else
+            pins = th ? 0x3Fu : 0x33u;
+        break;
     default:
         return 0x3Fu;
     }
@@ -31,31 +99,51 @@ static uint8_t md_io_pad_pins(int port, int th)
             pins &= (uint8_t)~0x20u;
         if (buttons & NMD_BUTTON_B)
             pins &= (uint8_t)~0x10u;
-        if (buttons & NMD_BUTTON_RIGHT)
-            pins &= (uint8_t)~0x08u;
-        if (buttons & NMD_BUTTON_LEFT)
-            pins &= (uint8_t)~0x04u;
+        if (extended) {
+            if (buttons & NMD_BUTTON_MODE)
+                pins &= (uint8_t)~0x08u;
+            if (buttons & NMD_BUTTON_X)
+                pins &= (uint8_t)~0x04u;
+            if (buttons & NMD_BUTTON_Y)
+                pins &= (uint8_t)~0x02u;
+            if (buttons & NMD_BUTTON_Z)
+                pins &= (uint8_t)~0x01u;
+        } else {
+            if (buttons & NMD_BUTTON_RIGHT)
+                pins &= (uint8_t)~0x08u;
+            if (buttons & NMD_BUTTON_LEFT)
+                pins &= (uint8_t)~0x04u;
+            if (buttons & NMD_BUTTON_DOWN)
+                pins &= (uint8_t)~0x02u;
+            if (buttons & NMD_BUTTON_UP)
+                pins &= (uint8_t)~0x01u;
+        }
     } else {
         if (buttons & NMD_BUTTON_START)
             pins &= (uint8_t)~0x20u;
         if (buttons & NMD_BUTTON_A)
             pins &= (uint8_t)~0x10u;
+        if (!recognized && !after_extra) {
+            if (buttons & NMD_BUTTON_DOWN)
+                pins &= (uint8_t)~0x02u;
+            if (buttons & NMD_BUTTON_UP)
+                pins &= (uint8_t)~0x01u;
+        }
     }
-    if (buttons & NMD_BUTTON_DOWN)
-        pins &= (uint8_t)~0x02u;
-    if (buttons & NMD_BUTTON_UP)
-        pins &= (uint8_t)~0x01u;
 
     return pins;
 }
 
 static uint8_t md_io_data_read(int port)
 {
-    const md_io_port *state = &ports[port];
-    uint8_t th = (state->control & 0x40u) ? (state->data & 0x40u) : 0x40u;
-    uint8_t pad = md_io_pad_pins(port, th != 0);
-    uint8_t value = (uint8_t)((state->data & state->control & 0x3Fu) |
-                              (pad & (uint8_t)~state->control & 0x3Fu));
+    md_io_port *state = &ports[port];
+    uint8_t pad;
+    uint8_t value;
+
+    md_io_update_timing(port);
+    pad = md_io_pad_pins(port, state->sampled_th != 0);
+    value = (uint8_t)((state->data & state->control & 0x3Fu) |
+                      (pad & (uint8_t)~state->control & 0x3Fu));
 
     if (state->control & 0x40u)
         value |= state->data & 0x40u;
@@ -72,6 +160,13 @@ void md_io_reset(const nmd_cart *cart)
     for (port = 0; port < 2; port++) {
         ports[port].data = 0;
         ports[port].control = 0;
+        ports[port].sampled_th = 1;
+        ports[port].pending_th = 1;
+        ports[port].settle_pending = 0;
+        ports[port].th_edges = 0;
+        ports[port].sampled_edges = 0;
+        ports[port].settle_clock = 0;
+        ports[port].timeout_clock = 0;
         button_masks[port] = 0;
         if (cart && cart->ports[port] == NMD_PORT_PAD3)
             pad_types[port] = NMD_PORT_PAD3;
@@ -135,18 +230,42 @@ void md_io_write8(uint32_t addr, uint8_t value)
         return; /* The high byte lane is not connected to these registers. */
 
     switch (reg) {
-    case 0x03u:
+    case 0x03u: {
+        uint8_t old_th;
+
+        md_io_update_timing(0);
+        old_th = md_io_th_level(0);
         ports[0].data = value;
+        md_io_set_th(0, old_th);
         break;
-    case 0x05u:
+    }
+    case 0x05u: {
+        uint8_t old_th;
+
+        md_io_update_timing(1);
+        old_th = md_io_th_level(1);
         ports[1].data = value;
+        md_io_set_th(1, old_th);
         break;
-    case 0x09u:
+    }
+    case 0x09u: {
+        uint8_t old_th;
+
+        md_io_update_timing(0);
+        old_th = md_io_th_level(0);
         ports[0].control = value;
+        md_io_set_th(0, old_th);
         break;
-    case 0x0Bu:
+    }
+    case 0x0Bu: {
+        uint8_t old_th;
+
+        md_io_update_timing(1);
+        old_th = md_io_th_level(1);
         ports[1].control = value;
+        md_io_set_th(1, old_th);
         break;
+    }
     default:
         break;
     }

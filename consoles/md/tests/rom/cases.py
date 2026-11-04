@@ -37,6 +37,9 @@ class Case:
     z80_accesses: tuple[Operation, ...] = ()
     rom_size: int = 32768
     rom_data: tuple[tuple[int, int], ...] = ()
+    pad1: str = "6"
+    pad2: str = "6"
+    input_frames: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = ()
 
 
 def _vdp_reg(index, value):
@@ -236,6 +239,43 @@ def _psg_tone3_noise_switch_case():
                 capture_audio=True, capture_frames=1)
 
 
+def _io_pad6_sequence_case():
+    operations = [
+        Operation(POLL, 2, 0xC00004, 0x0008, compare_mask=0x0008),
+        Operation(READ, 1, 0xA10003, 0x7F, compare_mask=0x7F),  # Settle the idle TH pull-up.
+        Operation(WRITE, 1, 0xA10003, 0x40),  # Preload TH high while it is an input.
+        Operation(WRITE, 1, 0xA10009, 0x40),  # Drive TH high without an initial edge.
+        Operation(READ, 1, 0xA10003, 0x7F, compare_mask=0x7F),
+        Operation(READ, 1, 0xA10005, 0x6F, compare_mask=0x7F),
+        Operation(WRITE, 1, 0xA10003, 0x00),
+        *(Operation(READ, 1, 0xFF0000) for _ in range(3)),
+        Operation(READ, 1, 0xA10003, 0x33, compare_mask=0x7F),
+        Operation(WRITE, 1, 0xA10003, 0x40),
+        *(Operation(READ, 1, 0xFF0000) for _ in range(3)),
+        Operation(READ, 1, 0xA10003, 0x7F, compare_mask=0x7F),
+        Operation(WRITE, 1, 0xA10003, 0x00),
+        *(Operation(READ, 1, 0xFF0000) for _ in range(3)),
+        Operation(READ, 1, 0xA10003, 0x33, compare_mask=0x7F),
+        Operation(WRITE, 1, 0xA10003, 0x40),
+        *(Operation(READ, 1, 0xFF0000) for _ in range(3)),
+        Operation(READ, 1, 0xA10003, 0x7F, compare_mask=0x7F),
+        Operation(WRITE, 1, 0xA10003, 0x00),
+        *(Operation(READ, 1, 0xFF0000) for _ in range(3)),
+        Operation(READ, 1, 0xA10003, 0x30, compare_mask=0x7F),
+        Operation(WRITE, 1, 0xA10003, 0x40),
+        *(Operation(READ, 1, 0xFF0000) for _ in range(3)),
+        Operation(READ, 1, 0xA10003, 0x70, compare_mask=0x7F),
+        Operation(WRITE, 1, 0xA10003, 0x00),
+        *(Operation(READ, 1, 0xFF0000) for _ in range(3)),
+        Operation(READ, 1, 0xA10003, 0x3F, compare_mask=0x7F),
+    ]
+    return Case("io_pad6_sequence", tuple(operations), pad1="6", pad2="3",
+                input_frames=((
+                    ("MODE", "X", "Y", "Z"),
+                    ("A", "B"),
+                ),))
+
+
 def _ym_write_register(bank, address, value):
     port = 0xA04000 + (bank * 2)
     return (Operation(WRITE, 1, port, address),
@@ -410,6 +450,7 @@ def all_cases():
         Operation(READ, 1, 0xFF0010),
     )), _z80_bank_window_case(), _z80_psg_tone_case(), _z80_psg_noise_case(),
     _psg_data_only_volume_case(), _psg_tone3_noise_switch_case(),
+    _io_pad6_sequence_case(),
     *_ym_sound_cases(), Case("tas_write", (
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),

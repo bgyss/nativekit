@@ -1,4 +1,5 @@
 /* Execute the binary step table built from tests/rom/cases.py on nmd. */
+#include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
@@ -71,6 +72,19 @@ static uint32_t read_be32(const uint8_t *p)
 static uint64_t read_be64(const uint8_t *p)
 {
     return (uint64_t)read_be32(p) << 32 | read_be32(p + 4);
+}
+
+static int parse_u32_arg(const char *text, uint32_t *value)
+{
+    char *end;
+    unsigned long parsed;
+
+    errno = 0;
+    parsed = strtoul(text, &end, 0);
+    if (errno || end == text || *end || parsed > UINT32_MAX)
+        return 0;
+    *value = (uint32_t)parsed;
+    return 1;
 }
 
 static int parse_steps_header(const uint8_t *steps, size_t size, uint16_t *count,
@@ -810,6 +824,8 @@ int main(int argc, char **argv)
     const char *mix_path = NULL, *mix_reference_path = NULL;
     const char *mix_ym_source_path = NULL, *mix_psg_source_path = NULL;
     const char *region = "U";
+    const char *pad1 = "6", *pad2 = "6";
+    uint32_t button_masks[2] = { 0, 0 };
     unsigned frames = 2;
     unsigned psg_frames = 0;
     unsigned psg_source_frames = 0;
@@ -870,7 +886,21 @@ int main(int argc, char **argv)
             psg_frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--region") && i + 1 < argc)
             region = argv[++i];
-        else if (!strcmp(argv[i], "--frames") && i + 1 < argc)
+        else if (!strcmp(argv[i], "--pad1") && i + 1 < argc)
+            pad1 = argv[++i];
+        else if (!strcmp(argv[i], "--pad2") && i + 1 < argc)
+            pad2 = argv[++i];
+        else if (!strcmp(argv[i], "--buttons1") && i + 1 < argc) {
+            if (!parse_u32_arg(argv[++i], &button_masks[0])) {
+                fprintf(stderr, "testcart: invalid --buttons1 mask\n");
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--buttons2") && i + 1 < argc) {
+            if (!parse_u32_arg(argv[++i], &button_masks[1])) {
+                fprintf(stderr, "testcart: invalid --buttons2 mask\n");
+                return 2;
+            }
+        } else if (!strcmp(argv[i], "--frames") && i + 1 < argc)
             frames = (unsigned)strtoul(argv[++i], NULL, 10);
         else {
             fprintf(stderr, "testcart: usage: testcart --rom ROM --steps TABLE [--picture-out PPM]\n");
@@ -879,6 +909,11 @@ int main(int argc, char **argv)
     }
     if (!rom_path || !steps_path) {
         fprintf(stderr, "testcart: usage: testcart --rom ROM --steps TABLE\n");
+        return 2;
+    }
+    if ((strcmp(pad1, "3") && strcmp(pad1, "6")) ||
+        (strcmp(pad2, "3") && strcmp(pad2, "6"))) {
+        fprintf(stderr, "testcart: pad types must be 3 or 6\n");
         return 2;
     }
     if (psg_path && (!(psg_rate > 0.0) || !psg_frames)) {
@@ -937,6 +972,8 @@ int main(int argc, char **argv)
 
     memset(&cart, 0, sizeof cart);
     cart.title = "nativemd testcart";
+    cart.ports[0] = !strcmp(pad1, "3") ? NMD_PORT_PAD3 : NMD_PORT_PAD6;
+    cart.ports[1] = !strcmp(pad2, "3") ? NMD_PORT_PAD3 : NMD_PORT_PAD6;
     if (!strcmp(region, "E"))
         cart.region = NMD_PAL;
     else if (!strcmp(region, "J") || !strcmp(region, "U"))
@@ -957,6 +994,7 @@ int main(int argc, char **argv)
         return 2;
     }
     nmd_power(&cart);
+    md_io_input(button_masks);
     md_bus_trace_hook = trace_bus;
     md_z80_bus_trace_hook = trace_z80;
     md_vdp_trace_hook = trace_vdp;

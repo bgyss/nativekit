@@ -19,6 +19,34 @@ static nmd_cart pad3_cart(void)
     return cart;
 }
 
+static nmd_cart pad6_cart(void)
+{
+    nmd_cart cart = { 0 };
+
+    cart.region = NMD_NTSC;
+    cart.ports[0] = NMD_PORT_PAD6;
+    cart.ports[1] = NMD_PORT_PAD6;
+    return cart;
+}
+
+static void wait_for_pad_settle(void)
+{
+    md_advance_to(md_clock + 84u);
+}
+
+static void pad6_precharge_th_high(void)
+{
+    nmd_bus_write8(0xA10003u, 0x40u);
+    nmd_bus_write8(0xA10009u, 0x40u);
+    wait_for_pad_settle();
+}
+
+static void pad6_write_th(uint8_t high)
+{
+    nmd_bus_write8(0xA10003u, high ? 0x40u : 0x00u);
+    wait_for_pad_settle();
+}
+
 static void test_nmd_cart_zero_defaults(void)
 {
     nmd_cart cart = { 0 };
@@ -91,9 +119,11 @@ static void test_io_3button_phase_reads(void)
 
     nmd_bus_write8(0xA10009u, 0x40u);
     nmd_bus_write8(0xA10003u, 0x40u);
+    wait_for_pad_settle();
     assert(nmd_bus_read8(0xA10003u) == 0x4Au);
 
     nmd_bus_write8(0xA10003u, 0x00u);
+    wait_for_pad_settle();
     assert(nmd_bus_read8(0xA10003u) == 0x02u);
 }
 
@@ -105,6 +135,7 @@ static void test_io_3button_ctrl_driven_output(void)
     nmd_power(&cart);
     nmd_bus_write8(0xA10009u, 0x43u);
     nmd_bus_write8(0xA10003u, 0x01u);
+    wait_for_pad_settle();
     assert(nmd_bus_read8(0xA10009u) == 0x43u);
     assert(nmd_bus_read8(0xA10003u) == 0x31u);
 
@@ -142,6 +173,120 @@ static void test_io_port_state_independent(void)
     assert((nmd_bus_read16(0xA10004u) & 0x00FFu) == 0x6Fu);
 }
 
+static void test_io_pad_data_settles_after_th_change(void)
+{
+    nmd_cart cart = pad6_cart();
+    const uint32_t buttons[2] = { NMD_BUTTON_C, 0 };
+
+    nmd_power(&cart);
+    md_io_input(buttons);
+    pad6_precharge_th_high();
+    assert((nmd_bus_read8(0xA10003u) & 0x20u) == 0);
+
+    nmd_bus_write8(0xA10003u, 0x00u);
+    assert((md_io_read8(0xA10003u) & 0x20u) == 0);
+    md_advance_to(md_clock + 83u);
+    assert((md_io_read8(0xA10003u) & 0x20u) == 0);
+    md_advance_to(md_clock + 1u);
+    assert((md_io_read8(0xA10003u) & 0x20u) != 0);
+
+    pad6_write_th(1);
+    pad6_write_th(0);
+    nmd_bus_write8(0xA10003u, 0x40u);
+    assert((md_io_read8(0xA10003u) & 0x3Fu) == 0x33u);
+    md_advance_to(md_clock + 83u);
+    assert((md_io_read8(0xA10003u) & 0x3Fu) == 0x33u);
+    md_advance_to(md_clock + 1u);
+    assert(md_io_read8(0xA10003u) == 0x5Fu);
+}
+
+static void test_io_6button_extended_phase(void)
+{
+    nmd_cart cart = pad6_cart();
+    const uint32_t buttons[2] = {
+        NMD_BUTTON_MODE | NMD_BUTTON_X | NMD_BUTTON_Y | NMD_BUTTON_Z,
+        NMD_BUTTON_A | NMD_BUTTON_B,
+    };
+
+    cart.ports[1] = NMD_PORT_PAD3;
+    nmd_power(&cart);
+    md_io_input(buttons);
+    pad6_precharge_th_high();
+    assert(nmd_bus_read8(0xA10003u) == 0x7Fu);
+    assert(nmd_bus_read8(0xA10005u) == 0x6Fu);
+
+    pad6_write_th(0);
+    assert(nmd_bus_read8(0xA10003u) == 0x33u);
+    pad6_write_th(1);
+    assert(nmd_bus_read8(0xA10003u) == 0x7Fu);
+    pad6_write_th(0);
+    assert(nmd_bus_read8(0xA10003u) == 0x33u);
+    pad6_write_th(1);
+    assert(nmd_bus_read8(0xA10003u) == 0x7Fu);
+    pad6_write_th(0);
+    assert(nmd_bus_read8(0xA10003u) == 0x30u);
+    pad6_write_th(1);
+    assert(nmd_bus_read8(0xA10003u) == 0x70u);
+    pad6_write_th(0);
+    assert(nmd_bus_read8(0xA10003u) == 0x3Fu);
+}
+
+static void test_io_6button_timeout_resets(void)
+{
+    nmd_cart cart = pad6_cart();
+    const uint32_t buttons[2] = { NMD_BUTTON_X, NMD_BUTTON_Y };
+    uint64_t edge_clock;
+    uint64_t timeout_clock;
+
+    nmd_power(&cart);
+    md_io_input(buttons);
+    pad6_precharge_th_high();
+    nmd_bus_write8(0xA10005u, 0x40u);
+    nmd_bus_write8(0xA1000Bu, 0x40u);
+    wait_for_pad_settle();
+    pad6_write_th(0);
+    pad6_write_th(1);
+    pad6_write_th(0);
+    pad6_write_th(1);
+    pad6_write_th(0);
+    edge_clock = md_clock;
+    pad6_write_th(1);
+    timeout_clock = edge_clock + 56000u;
+    assert((nmd_bus_read8(0xA10003u) & 0x04u) == 0);
+    assert((nmd_bus_read8(0xA10005u) & 0x02u) != 0);
+
+    md_advance_to(timeout_clock - 300u);
+    nmd_bus_write8(0xA10005u, 0x00u);
+    wait_for_pad_settle();
+    md_advance_to(timeout_clock);
+    assert((nmd_bus_read8(0xA10003u) & 0x04u) != 0);
+}
+
+static void test_io_buttons_sampled_per_frame(void)
+{
+    nmd_cart cart = pad6_cart();
+    const uint32_t first_frame[2] = { NMD_BUTTON_MODE | NMD_BUTTON_X, NMD_BUTTON_UP };
+    const uint32_t next_frame[2] = { NMD_BUTTON_MODE | NMD_BUTTON_Y | NMD_BUTTON_Z,
+                                     NMD_BUTTON_LEFT };
+
+    nmd_power(&cart);
+    nmd_console.input(1, first_frame);
+    pad6_precharge_th_high();
+    pad6_write_th(0);
+    pad6_write_th(1);
+    pad6_write_th(0);
+    pad6_write_th(1);
+    pad6_write_th(0);
+    pad6_write_th(1);
+    assert(nmd_bus_read8(0xA10003u) == 0x73u);
+    assert(md_io_button_mask(0) == first_frame[0]);
+
+    nmd_console.input(1, next_frame);
+    assert(md_io_button_mask(0) == next_frame[0]);
+    assert(md_io_button_mask(1) == next_frame[1]);
+    assert(nmd_bus_read8(0xA10003u) == 0x74u);
+}
+
 int main(void)
 {
     test_nmd_cart_zero_defaults();
@@ -150,5 +295,9 @@ int main(void)
     test_io_3button_phase_reads();
     test_io_3button_ctrl_driven_output();
     test_io_port_state_independent();
+    test_io_pad_data_settles_after_th_change();
+    test_io_6button_extended_phase();
+    test_io_6button_timeout_resets();
+    test_io_buttons_sampled_per_frame();
     return 0;
 }

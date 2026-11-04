@@ -24,6 +24,28 @@ AUDIO_PHASE_LIMIT = 8
 AUDIO_MEAN_ERROR_LIMIT = 32
 AUDIO_PEAK_ERROR_LIMIT = 600
 MD_SOUND_OUTPUT_RATE = 44100.0
+NMD_BUTTON_BITS = {
+    "UP": 1 << 0, "DOWN": 1 << 1, "LEFT": 1 << 2, "RIGHT": 1 << 3,
+    "B": 1 << 4, "C": 1 << 5, "A": 1 << 6, "START": 1 << 7,
+    "X": 1 << 8, "Y": 1 << 9, "Z": 1 << 10, "MODE": 1 << 11,
+}
+
+
+def _case_input_script(case):
+    script = {}
+    for frame_number, (port1, port2) in enumerate(case.input_frames, start=1):
+        ports = {}
+        if port1:
+            ports["1"] = list(port1)
+        if port2:
+            ports["2"] = list(port2)
+        if ports:
+            script[str(frame_number)] = ports
+    return script
+
+
+def _native_button_mask(names):
+    return sum(NMD_BUTTON_BITS[name] for name in names)
 
 
 def _target_addresses(case):
@@ -443,13 +465,23 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         except RuntimeError as error:
             return str(error)
         oracle_out = base / "oracle"
-        frames = (str(case.capture_frames) if case.render or capture_psg or capture_ym else "1")
-        candidate = subprocess.run([
+        frame_count = case.capture_frames if case.render or capture_psg or capture_ym else 1
+        frame_count = max(frame_count, len(case.input_frames))
+        frames = str(frame_count)
+        input_script = _case_input_script(case)
+        input_path = None
+        if input_script:
+            input_path = base / "input.json"
+            input_path.write_text(json.dumps(input_script, sort_keys=True))
+        candidate_command = [
             sys.executable, str(ROOT / "consoles/md/tests/oracle/run.py"),
             "--core", str(core), "--rom", str(rom), "--frames", frames,
-            "--region", case.region,
+            "--region", case.region, "--pad1", case.pad1, "--pad2", case.pad2,
             "--out", str(oracle_out), "--trace",
-        ], capture_output=True, text=True, timeout=90)
+        ]
+        if input_path:
+            candidate_command.extend(("--input", str(input_path)))
+        candidate = subprocess.run(candidate_command, capture_output=True, text=True, timeout=90)
         if candidate.returncode:
             return "candidate run failed: " + candidate.stderr.strip()[-500:]
 
@@ -497,7 +529,10 @@ def run_one(case, assembler, z80_assembler, core, testcart):
 
         native_picture = base / "native.ppm"
         native_command = [str(testcart), "--rom", str(rom), "--steps", str(steps)]
-        native_command.extend(("--region", case.region))
+        native_command.extend(("--region", case.region, "--pad1", case.pad1, "--pad2", case.pad2))
+        first_input = case.input_frames[0] if case.input_frames else ((), ())
+        native_command.extend(("--buttons1", str(_native_button_mask(first_input[0])),
+                               "--buttons2", str(_native_button_mask(first_input[1]))))
         native_psg = base / "native-psg.raw"
         if case.capture_audio:
             native_command.extend(("--psg-source-out", str(native_psg),
