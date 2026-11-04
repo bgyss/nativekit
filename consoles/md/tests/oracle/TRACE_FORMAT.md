@@ -56,3 +56,31 @@ also checks a one-byte write 5 H32 slots after the seed port write. These cover
 candidate paths only. These hooks do not cover all timing details or qualify
 hardware fidelity; separate resampled chip streams are not raw chip-clock
 captures. This is not a qualified oracle.
+
+## CPU statistics sidecar
+
+`run.py --trace --cpustats` writes `cpu.stats`, with one row for each CPU at
+each `retro_run` frame boundary (one VBlank interval):
+
+```text
+nmd-cpu-stats 1
+F FRAME m68k WORK_CLOCKS BUS_CLOCKS READ_COUNTS... WRITE_COUNTS...
+F FRAME z80  WORK_CLOCKS BUS_CLOCKS READ_COUNTS... WRITE_COUNTS...
+```
+
+M68K read/write counts follow `NMD_KIND_*` order; Z80 counts follow
+`NMD_Z80_KIND_*`. The sidecar records 68000 clocks in master clocks and Z80
+clocks in master-clock units. `--stats-only` keeps the full CPU callbacks but
+skips frame images, audio files, and the binary event trace.
+
+The candidate callback provides a per-CPU cumulative clock at access completion,
+not an access start/end pair. The sidecar subtracts nominal bus time from the
+interval since the previous CPU event: 28 master clocks per 68000 byte/word
+cycle, 56 for a longword, 45 for a Z80 memory cycle, 60 for Z80 I/O, and an
+additional 45 for the Z80 bank-window wait. Fetch intervals accrue as CPU work.
+A width-4 68000 data event contributes two access counts, matching nmd's two
+16-bit bus transfers for a longword.
+Read-only polls longer than 64 accesses and residual work gaps over 1,024
+master clocks are excluded. Dynamic device waits can remain in the residual;
+profiles fitted from these rows are candidate estimates, not hardware timing
+qualification.

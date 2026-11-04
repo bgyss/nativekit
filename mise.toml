@@ -84,6 +84,11 @@ run = "python3 consoles/md/tests/feature_check.py"
 description = "Check bounded survey statuses, title sanitization, and aggregation"
 run = "python3 consoles/md/tests/survey_check.py"
 
+[tasks."test:md-profile"]
+description = "Fit both nativemd processor profiles from candidate traces"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/profile_check.py"
+
 [tasks."build:null"]
 run = "cmake -S . -B build/null -DNK_CONSOLES=\"snes;md\" -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/null -j8"
 

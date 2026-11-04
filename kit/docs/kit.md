@@ -32,7 +32,9 @@ device, brings the players' devices to the console (`input`), writes the battery
 and draws the game's overlays. Headless, it runs as fast as it can and takes the
 script's buttons, shots and dumps. `--counts` writes each frame's accesses by the
 console's kinds (`access_kind`, `kind_count`, at most `NK_KINDS_MAX`), for the cost profile's
-fitter; a read in a run of more than 64 with no write between is left out. `--sound`
+fitter; a read in a run of more than 64 with no write between is left out. Consoles with
+independent processors can provide `count_group` so each processor keeps its own poll-read
+sequence; the default group is 0. `--sound`
 writes the console's samples as made. The table's fields are commented in `nk.h`;
 those marked optional may be NULL. Optional `kind_names` identify access kinds in error
 messages. `nk_quit()` ends the current frame; windowed runs save on quit, headless runs do not.

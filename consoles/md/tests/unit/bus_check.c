@@ -97,6 +97,9 @@ static void test_nmd_access_kind_reporting(void)
     assert(strcmp(nmd_console.kind_names[NMD_KIND_ROM], "rom") == 0);
     assert(strcmp(nmd_console.kind_names[NMD_KINDS + NMD_Z80_KIND_PSG], "z80 psg") == 0);
     assert(nmd_console.access_kind(0x01007F11u) == NMD_KINDS + NMD_Z80_KIND_PSG);
+    assert(nmd_console.count_group);
+    assert(nmd_console.count_group(0x00000000u) == 0);
+    assert(nmd_console.count_group(0x01007F11u) == 1);
 
     nmd_power(&cart);
     counted_reads = counted_writes = 0;

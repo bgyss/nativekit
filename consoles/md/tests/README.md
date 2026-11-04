@@ -21,6 +21,12 @@ synthetic bus operations on BlastEm and nmd. The interrupt fixture compares
 HINT line and relative-clock deltas because the candidate trace epoch starts
 at a different absolute clock. Candidate-only differences stay in `rom/KNOWN`.
 
+Run `mise run test:md-profile` to verify per-VBlank CPU statistics, 68000/Z80
+weight fitting, generated C compilation, source-hash checks, and the native
+`--counts` handoff. The candidate stats sidecar and its clock-splitting limits
+are documented in [`oracle/TRACE_FORMAT.md`](oracle/TRACE_FORMAT.md); it is
+exploratory profile evidence, not hardware qualification.
+
 ## Stage 2 ROM matrix
 
 `rom/cases.py` defines the named 68000 bus, VDP port, DMA, and Mode 5 render

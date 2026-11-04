@@ -28,6 +28,32 @@ Feature evidence contains clocks, device and port addresses, and selected
 register values. It omits transferred DMA and DAC payload values, save-memory
 bytes, input paths, and ROM files.
 
+## Cost profiles
+
+`nmd-profile` fits separate 68000 and Z80 access costs from candidate CPU
+statistics. An optional JSON input span uses one-based frame numbers and the
+same button names as `oracle/run.py`:
+
+```sh
+python3 consoles/md/tools/nmd-profile measure game.bin \
+  --out build/game-profile --frames 3600 --input game-input.json
+```
+
+The output directory receives `profile.txt`, `profile.c`, and `report.txt`.
+The C table uses the public `nmd_cost_profile` type; assign its symbol to the
+cartridge's `cost_profile` field. Reports store ROM hashes, not ROM paths or
+contents. `--decomp 'build/game'` also runs the native build with `--counts`;
+when measuring multiple ROMs, the native count comparison uses the first ROM.
+Add `--source game-src` to record a source-tree hash, then check it later with
+`nmd-profile check build/game-profile/profile.txt --source game-src`.
+
+Profiles use candidate event-clock deltas minus nominal bus times. Dynamic
+device waits may remain in the fitted work, so these profiles are exploratory
+candidate estimates and do not qualify hardware timing. `md1va6` runs require
+`--system-dir` with the candidate's TMSS system files. Run
+`mise run test:md-profile` for the fit, stale-source, privacy, and native count
+checks.
+
 ## Bounded library survey
 
 ```sh

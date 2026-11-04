@@ -2,7 +2,9 @@
 """Smoke-test the candidate runner with a newly generated cartridge."""
 import hashlib
 import json
+import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import struct
@@ -19,6 +21,7 @@ YM_PORT_M68K_ADDR_TAG = 0x80000000
 runner = root / "consoles/md/tests/oracle/run.py"
 extension = "dylib" if sys.platform == "darwin" else "so"
 core = root / "build/toolchains/blastem" / ("libblastem." + extension)
+compiler = shlex.split(os.environ.get("CC", "/usr/bin/clang" if sys.platform == "darwin" else "cc"))
 
 with tempfile.TemporaryDirectory() as temp:
     base = pathlib.Path(temp)
@@ -103,7 +106,7 @@ void retro_set_input_poll(void *p) { (void)p; }
 void retro_set_input_state(void *p) { (void)p; }
 """)
     link_flag = "-dynamiclib" if sys.platform == "darwin" else "-shared"
-    subprocess.run(["cc", link_flag, "-fPIC", str(fake_source), "-o", str(fake_library)], check=True)
+    subprocess.run([*compiler, link_flag, "-fPIC", str(fake_source), "-o", str(fake_library)], check=True)
     result = subprocess.run([sys.executable, str(runner), "--core", str(fake_library), "--rom", str(cart),
                              "--frames", "1", "--out", str(base / "unsupported")],
                             capture_output=True, text=True, timeout=10)

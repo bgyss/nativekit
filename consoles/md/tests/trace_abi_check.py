@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Exercise the candidate hook ABI independently of any emulator."""
 import ctypes as c
+import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import tempfile
 
 root = pathlib.Path(__file__).resolve().parent
+compiler = shlex.split(os.environ.get("CC", "/usr/bin/clang" if sys.platform == "darwin" else "cc"))
 with tempfile.TemporaryDirectory() as temp:
     library = pathlib.Path(temp) / ("trace.dylib" if sys.platform == "darwin" else "trace.so")
-    subprocess.run(["cc", "-std=c11", "-fPIC", "-dynamiclib" if sys.platform == "darwin" else "-shared",
+    subprocess.run([*compiler, "-std=c11", "-fPIC", "-dynamiclib" if sys.platform == "darwin" else "-shared",
                     str(root / "oracle/trace_abi.c"), "-o", str(library)], check=True, capture_output=True)
     sink = c.CDLL(str(library))
     sink.nmd_trace_capabilities.restype = c.c_uint64
@@ -19,7 +22,7 @@ with tempfile.TemporaryDirectory() as temp:
                 "NMD_TRACE_HAS_YM_PORT", "NMD_TRACE_HAS_Z80_CPU", "NMD_TRACE_HAS_VDP_DMA_68K",
                 "NMD_TRACE_HAS_CHIP_AUDIO", "NMD_TRACE_HAS_VDP_DMA_FILL", "NMD_TRACE_HAS_VDP_DMA_COPY",
                 "NMD_TRACE_HAS_VDP_HINT_LINE", "NMD_TRACE_HAS_CHIP_AUDIO_SOURCE"]
-    subprocess.run(["cc", "-std=c11", "-fPIC", "-dynamiclib" if sys.platform == "darwin" else "-shared",
+    subprocess.run([*compiler, "-std=c11", "-fPIC", "-dynamiclib" if sys.platform == "darwin" else "-shared",
                     *["-D" + feature for feature in features], str(root / "oracle/trace_abi.c"),
                     "-o", str(instrumented)], check=True, capture_output=True)
     instrumented_sink = c.CDLL(str(instrumented))

@@ -112,6 +112,11 @@ static void counts_hooks(void (*rd)(uint32_t addr, uint8_t value),
     md_bus_counts_hooks(rd, wr);
 }
 
+static int count_group(uint32_t addr)
+{
+    return (addr & 0xFF000000u) == MD_Z80_COUNT_MARKER;
+}
+
 const nk_console nmd_console = {
     .name = "nativemd",
     .env = "NMD",
@@ -134,6 +139,7 @@ const nk_console nmd_console = {
     .input = input,
     .counts_hooks = counts_hooks,
     .access_kind = nmd_access_kind,
+    .count_group = count_group,
     .kind_count = NMD_KINDS + NMD_Z80_KINDS,
     .kind_names = kind_names,
 };

@@ -279,6 +279,14 @@ class FeatureCheck(unittest.TestCase):
         self.assertEqual(features["vdp_mode"]["status"], "unavailable")
         self.assertIn("scope", features["vdp_mode"]["reason"])
 
+    def test_cpu_stats_manifest_does_not_change_trace_features(self):
+        events = [control(10, 0, 0x10), control(20, 1, 0x04)]
+        original = manifest(events)
+        profiled = manifest(events, cpu_stats_file="cpu.stats", cpu_stats_format=1,
+                            cpu_stats_frames=4,
+                            cpu_stats_method="per-CPU event clock deltas; exploratory")
+        self.assertEqual(extract_features(profiled, events), extract_features(original, events))
+
     def test_mapper_and_sram_evidence_needs_window_metadata(self):
         events = [
             Event(100, M68K, WRITE, 1, 0xA13000, 3),

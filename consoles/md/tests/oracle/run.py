@@ -6,7 +6,7 @@ import hashlib
 import json
 import pathlib
 import sys
-from trace import Event, Writer, M68K, Z80, YM2612, PSG, READ, WRITE
+from trace import Event, Writer, CPUStats, write_cpu_stats, M68K, Z80, YM2612, PSG, READ, WRITE
 
 TRACE_M68K_CPU = 1 << 0
 TRACE_VDP_PORT = 1 << 1
@@ -99,6 +99,10 @@ def main():
                         help="known SRAM byte range as START:END, used by feature-only tracing")
     parser.add_argument("--trace", action="store_true",
                         help="require the candidate trace ABI and record its available CPU/device events")
+    parser.add_argument("--cpustats", action="store_true",
+                        help="write per-frame CPU work, bus clocks, and access counts")
+    parser.add_argument("--stats-only", action="store_true",
+                        help="skip frame, audio, and binary trace files while collecting CPU stats")
     parser.add_argument("--feature-only", action="store_true",
                         help="filter CPU events to survey features and skip frame/audio files")
     args = parser.parse_args()
@@ -108,6 +112,14 @@ def main():
         parser.error("--system-dir must name an existing directory")
     if args.feature_only and not args.trace:
         parser.error("--feature-only requires --trace")
+    if args.cpustats and not args.trace:
+        parser.error("--cpustats requires --trace")
+    if args.cpustats and args.feature_only:
+        parser.error("--cpustats requires an unfiltered trace")
+    if args.stats_only and not args.cpustats:
+        parser.error("--stats-only requires --cpustats")
+    if args.stats_only and args.feature_only:
+        parser.error("--stats-only cannot be combined with --feature-only")
     buttons = {"A": 0, "X": 1, "MODE": 2, "START": 3, "UP": 4, "DOWN": 5,
                "LEFT": 6, "RIGHT": 7, "B": 8, "Y": 9, "Z": 10, "C": 11}
     script = {}
@@ -160,6 +172,7 @@ def main():
     trace_error = []
     trace_writer = None
     trace_file = None
+    cpu_stats = None
     emit_error = None
     audio_stream_counts = {}
     audio_source_stream_counts = {}
@@ -178,6 +191,10 @@ def main():
         actual_capabilities = trace_capabilities()
         if trace_version() != 2 or actual_capabilities & TRACE_M68K_CPU != TRACE_M68K_CPU:
             raise RuntimeError("core lacks 68000 CPU-access trace capability")
+        if args.cpustats and actual_capabilities & TRACE_Z80_CPU != TRACE_Z80_CPU:
+            raise RuntimeError("core lacks Z80 CPU-access trace capability")
+        if args.cpustats:
+            cpu_stats = CPUStats()
         trace_cb_type = c.CFUNCTYPE(None, c.c_void_p, c.c_uint64, c.c_uint8, c.c_uint8,
                                     c.c_uint8, c.c_uint32, c.c_uint32)
 
@@ -186,7 +203,11 @@ def main():
             if args.feature_only and not feature_trace_event(device, address, args.sram_window):
                 return
             try:
-                trace_writer.emit(Event(clock, device, operation, width, address, value))
+                event = Event(clock, device, operation, width, address, value)
+                if trace_writer:
+                    trace_writer.emit(event)
+                if cpu_stats:
+                    cpu_stats.add(event)
             except (OSError, ValueError) as exc:
                 trace_error.append(str(exc))
 
@@ -196,8 +217,9 @@ def main():
             raise RuntimeError("core refused trace ABI version 2")
         emit_error.restype = c.c_int
         reset_trace()
-        trace_file = (args.out / "bus.trace").open("w+b")
-        trace_writer = Writer(trace_file)
+        if not args.stats_only:
+            trace_file = (args.out / "bus.trace").open("w+b")
+            trace_writer = Writer(trace_file)
         trace_capability_names = ["m68k_cpu_access"]
         if actual_capabilities & TRACE_Z80_CPU:
             trace_capability_names.append("z80_cpu_access")
@@ -281,7 +303,7 @@ def main():
                 not 0 < height <= 4096 or pitch < width * 4):
             error.append("missing or unsupported frame")
             return
-        if args.feature_only:
+        if args.feature_only or args.stats_only:
             frame_count[0] += 1
             frame_sizes.append([width, height])
             return
@@ -302,13 +324,13 @@ def main():
 
     @c.CFUNCTYPE(c.c_size_t, c.POINTER(c.c_int16), c.c_size_t)
     def audio_batch(data, frames):
-        if not args.feature_only:
+        if not args.feature_only and not args.stats_only:
             audio.extend(c.string_at(data, frames * 4))
         return frames
 
     @c.CFUNCTYPE(None, c.c_int16, c.c_int16)
     def audio_sample(left, right):
-        if not args.feature_only:
+        if not args.feature_only and not args.stats_only:
             audio.extend(int(left).to_bytes(2, sys.byteorder, signed=True))
             audio.extend(int(right).to_bytes(2, sys.byteorder, signed=True))
 
@@ -340,8 +362,12 @@ def main():
     info = AVInfo()
     core.retro_get_system_av_info(c.byref(info))
     for frame_number in range(1, args.frames + 1):
+        if cpu_stats:
+            cpu_stats.begin_frame(frame_number)
         current_input[0] = script.get(frame_number, {})
         core.retro_run()
+        if cpu_stats:
+            cpu_stats.end_frame()
         if args.trace and emit_error():
             trace_error.append("core trace error")
             break
@@ -357,18 +383,22 @@ def main():
                            ", ".join(sorted(key.decode() for key in set(options) - queried)))
     if error or frame_count[0] != args.frames:
         raise RuntimeError("; ".join(error) or "frame count mismatch")
-    if info.timing.sample_rate <= 0 or (not args.feature_only and not audio):
+    if info.timing.sample_rate <= 0 or (not args.feature_only and not args.stats_only and not audio):
         raise RuntimeError("missing audio or invalid sample rate")
-    if not args.feature_only:
+    if not args.feature_only and not args.stats_only:
         (args.out / "audio.raw").write_bytes(audio)
-    if args.trace and not args.feature_only and actual_capabilities & TRACE_CHIP_AUDIO:
+    if cpu_stats:
+        with (args.out / "cpu.stats").open("w") as stats_file:
+            write_cpu_stats(stats_file, cpu_stats.rows())
+    if (args.trace and not args.feature_only and not args.stats_only and
+            actual_capabilities & TRACE_CHIP_AUDIO):
         for device, filename in ((YM2612, "ym2612.raw"), (PSG, "psg.raw")):
             samples = chip_audio[device]
             if len(samples) != len(audio):
                 raise RuntimeError(f"{filename} has {len(samples) // 4} frames; mixed audio has {len(audio) // 4}")
             (args.out / filename).write_bytes(samples)
             audio_stream_counts[device] = len(samples) // 4
-    if (args.trace and not args.feature_only and
+    if (args.trace and not args.feature_only and not args.stats_only and
             actual_capabilities & TRACE_CHIP_AUDIO_SOURCE):
         for device, filename in ((YM2612_SOURCE, "ym2612-source.raw"),
                                  (PSG_SOURCE, "psg-source.raw")):
@@ -384,7 +414,8 @@ def main():
     manifest = {"core_sha256": digest.hexdigest(), "frames": frame_count[0],
                 "need_fullpath": bool(system_info.need_fullpath), "sample_rate": info.timing.sample_rate,
                 "frame_sizes": frame_sizes,
-                "capture_mode": "feature-only" if args.feature_only else "full",
+                "capture_mode": ("cpu-stats-only" if args.stats_only else
+                                 "feature-only" if args.feature_only else "full"),
                 "audio_format": "s16-native-endian-stereo", "pixel_format": "XRGB8888",
                 "options": {k.decode(): v.decode() for k, v in options.items()},
                 "queried_options": sorted(key.decode() for key in queried),
@@ -393,9 +424,16 @@ def main():
                 "input_semantics": "one-based frame snapshots; unspecified ports and frames released",
                 "qualification": "exploratory; remaining core options use defaults"}
     if args.trace:
-        manifest["trace_file"] = "bus.trace"
+        if trace_writer:
+            manifest["trace_file"] = "bus.trace"
         manifest["trace_capabilities"] = trace_capability_names
-        manifest["trace_events"] = trace_writer.count
+        if trace_writer:
+            manifest["trace_events"] = trace_writer.count
+        if cpu_stats:
+            manifest["cpu_stats_file"] = "cpu.stats"
+            manifest["cpu_stats_format"] = 1
+            manifest["cpu_stats_frames"] = args.frames
+            manifest["cpu_stats_method"] = "per-CPU event clock deltas minus nominal bus clocks; exploratory"
         if args.feature_only:
             manifest["trace_scope"] = "survey-feature-filter-v1"
             manifest["trace_filters"] = {

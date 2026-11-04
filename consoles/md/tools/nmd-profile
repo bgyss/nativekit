@@ -1,0 +1,524 @@
+#!/usr/bin/env python3
+"""Fit a native Mega Drive cost profile from exploratory candidate traces.
+
+`measure ROM... --out DIR` runs the pinned BlastEm candidate and fits the
+68000 and Z80 access weights. The candidate clock deltas are split into
+nominal bus time and residual work; this is an estimate, not hardware
+qualification. Input spans use the oracle runner's one-based JSON format.
+
+`check PROFILE --source DIR` reports whether a source tree still matches the
+hash recorded by a profile made with `--decomp` and `--source`.
+"""
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parents[3]
+ORACLE_DIR = ROOT / "consoles/md/tests/oracle"
+sys.path.insert(0, str(ROOT / "kit/tools"))
+sys.path.insert(0, str(ORACLE_DIR))
+import nk_profile  # noqa: E402
+from trace import (CPUStatsRow, M68K_KIND_COUNT, M68K_KIND_NAMES, Z80_KIND_COUNT,
+                   Z80_KIND_NAMES, read_cpu_stats)
+
+TOOL_VERSION = "1.0"
+PROFILE_VERSION = 1
+NMD_KINDS = M68K_KIND_COUNT
+NMD_Z80_KINDS = Z80_KIND_COUNT
+ACTIVE_FRAME_SHARE = 0.05
+MIN_ACCESS_COUNT = 1000
+M68K_BUS_CLOCKS = 28
+Z80_TSTATE_CLOCKS = 15
+FRAME_CLOCKS = {"J": 3420 * 262, "U": 3420 * 262, "E": 3420 * 312}
+BUTTON_NAMES = ("A", "X", "MODE", "START", "UP", "DOWN", "LEFT", "RIGHT",
+                "B", "Y", "Z", "C")
+
+
+def candidate_core_default():
+    configured = os.environ.get("NMD_ORACLE_CORE")
+    if configured:
+        return pathlib.Path(configured)
+    extension = "dylib" if sys.platform == "darwin" else "so"
+    return ROOT / "build/toolchains/blastem" / ("libblastem." + extension)
+
+
+def file_sha256(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def source_hash(directory):
+    """Hash sorted relative file names and contents, independent of walk order."""
+    directory = pathlib.Path(directory)
+    if not directory.is_dir():
+        raise ValueError("source path must be a directory")
+    digest = hashlib.sha256()
+    for root, dirs, files in os.walk(directory, followlinks=False):
+        dirs[:] = sorted(name for name in dirs if not (pathlib.Path(root) / name).is_symlink())
+        for name in sorted(files):
+            path = pathlib.Path(root) / name
+            if path.is_symlink() or not path.is_file():
+                continue
+            relative = path.relative_to(directory).as_posix().encode("utf-8")
+            digest.update(relative + b"\0")
+            with path.open("rb") as source:
+                for block in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(block)
+    return digest.hexdigest()
+
+
+def fit_cpu(frame_rows, kind_count, min_accesses=MIN_ACCESS_COUNT, active_clocks=0):
+    """Fit one processor's read/write rows with the shared exact NNLS fitter."""
+    normalized = []
+    totals = [0] * (2 * kind_count)
+    for row in frame_rows:
+        if isinstance(row, CPUStatsRow):
+            frame, counts, work, bus = row.frame, row.counts, row.work_clocks, row.bus_clocks
+        else:
+            frame, counts, work, bus = row
+        if (len(counts) != 2 * kind_count or any(value < 0 for value in counts) or
+                work < 0 or bus < 0):
+            raise ValueError("invalid processor statistics row")
+        normalized.append((frame, list(counts), work, bus))
+        for index, count in enumerate(counts):
+            totals[index] += count
+    measured = [count >= min_accesses for count in totals]
+    weights, active_rows = nk_profile.fit_weights(normalized, measured,
+                                                  [0.0] * (2 * kind_count), active_clocks)
+    return {
+        "weights": weights,
+        "totals": totals,
+        "measured": measured,
+        "rows": active_rows,
+        "errors": nk_profile.errors(active_rows, weights),
+        "baseline_errors": nk_profile.errors(active_rows, [0.0] * (2 * kind_count)),
+    }
+
+
+def profile_tenths(m68k_fit, z80_fit):
+    """Convert fitted master clocks to the public fixed-point profile units."""
+    def convert(values, divisor):
+        result = [int(round(value * 10.0 / divisor)) for value in values]
+        if any(value < 0 or value > 0xFFFFFFFF for value in result):
+            raise ValueError("fitted cost does not fit the public uint32 profile field")
+        return result
+
+    m68k = convert(m68k_fit["weights"], 1)
+    z80 = convert(z80_fit["weights"], Z80_TSTATE_CLOCKS)
+    return ([m68k[:NMD_KINDS], m68k[NMD_KINDS:]],
+            [z80[:NMD_Z80_KINDS], z80[NMD_Z80_KINDS:]])
+
+
+def _check_profile_rows(m68k_tenths, z80_tenths):
+    if (len(m68k_tenths) != 2 or any(len(row) != NMD_KINDS for row in m68k_tenths) or
+            len(z80_tenths) != 2 or any(len(row) != NMD_Z80_KINDS for row in z80_tenths)):
+        raise ValueError("profile rows do not match the public nmd access kinds")
+    values = [value for row in m68k_tenths + z80_tenths for value in row]
+    if any(not isinstance(value, int) or not 0 <= value <= 0xFFFFFFFF for value in values):
+        raise ValueError("profile weights must be non-negative uint32 tenths")
+
+
+def write_profile(path, rom_hashes, candidate_sha256, model, region,
+                  m68k_tenths, z80_tenths, source_sha256="-", checked=False,
+                  count_ratios=None):
+    _check_profile_rows(m68k_tenths, z80_tenths)
+    lines = ["nmd-cost-profile %d" % PROFILE_VERSION,
+             "tool nmd-profile %s" % TOOL_VERSION,
+             "candidate-sha256 %s" % candidate_sha256,
+             "model %s" % model,
+             "region %s" % region]
+    lines.extend("rom-sha256 %s" % digest for digest in rom_hashes)
+    lines.extend(("source-sha256 %s" % (source_sha256 or "-"),
+                  "checked %s" % ("yes" if checked else "no")))
+    for cpu, names, rows in (("m68k", M68K_KIND_NAMES, m68k_tenths),
+                             ("z80", Z80_KIND_NAMES, z80_tenths)):
+        for direction, values in zip(("read", "write"), rows):
+            for name, value in zip(names, values):
+                lines.append("cpu %s %s %s %.1f" % (cpu, direction, name, value / 10.0))
+    for label, ratio in count_ratios or ():
+        lines.append("count-ratio %s %s" % (label, ratio))
+    pathlib.Path(path).write_text("\n".join(lines) + "\n")
+
+
+def _c_values(values):
+    return ", ".join(str(value) for value in values)
+
+
+def c_identifier(name):
+    value = re.sub(r"[^A-Za-z0-9_]", "_", name)
+    if not value:
+        value = "profile"
+    if not value[0].isalpha():
+        value = "nmd_" + value
+    return value
+
+
+def write_c(path, name, m68k_tenths, z80_tenths):
+    _check_profile_rows(m68k_tenths, z80_tenths)
+    symbol = c_identifier(name) + "_cost_profile"
+    lines = ["/* Generated by nmd-profile %s. */" % TOOL_VERSION,
+             '#include "nmd/nmd.h"',
+             "",
+             "const nmd_cost_profile %s = {" % symbol,
+             "    .version = NMD_COST_PROFILE_VERSION,",
+             "    .m68k_tenths = {",
+             "        { %s }," % _c_values(m68k_tenths[0]),
+             "        { %s }," % _c_values(m68k_tenths[1]),
+             "    },",
+             "    .z80_tenths = {",
+             "        { %s }," % _c_values(z80_tenths[0]),
+             "        { %s }," % _c_values(z80_tenths[1]),
+             "    },",
+             "};"]
+    pathlib.Path(path).write_text("\n".join(lines) + "\n")
+
+
+def _cpu_report(cpu, names, fit, tenths):
+    lines = ["%s: fitted weights (%s besides modeled bus time)" %
+             (cpu.upper(), "master clocks" if cpu == "m68k" else "Z80 T-states")]
+    for direction, offset in (("read", 0), ("write", len(names))):
+        for index, name in enumerate(names):
+            total = fit["totals"][offset + index]
+            weight = tenths[offset + index] / 10.0
+            status = "measured" if fit["measured"][offset + index] else "below access threshold; set to 0"
+            lines.append("  %-5s %-18s %7.1f  (%d accesses; %s)" %
+                         (direction, name, weight, total, status))
+    lines.extend(("  active frames: %d" % len(fit["rows"]),
+                  "  fitted error: %s" % nk_profile.fmt_err(fit["errors"]),
+                  "  zero-profile error: %s" % nk_profile.fmt_err(fit["baseline_errors"])))
+    return lines
+
+
+def write_report(path, rom_hashes, candidate_sha256, model, region, frames,
+                 span_count, m68k_fit, z80_fit, m68k_tenths, z80_tenths,
+                 count_differences=None):
+    lines = ["nmd-profile %s report" % TOOL_VERSION,
+             "",
+             "ROM SHA-256 values:"]
+    lines.extend("  %s" % digest for digest in rom_hashes)
+    lines.extend(("candidate SHA-256: %s" % candidate_sha256,
+                  "model: %s; region: %s" % (model, region),
+                  "frames per span: %d; spans per ROM: %d" % (frames, span_count),
+                  "",
+                  "Method: per-CPU candidate clock deltas minus nominal bus clocks. Fetch intervals",
+                  "accrue as CPU work; read-only polls over 64 accesses and residual gaps over 1,024",
+                  "master clocks are omitted. Dynamic device waits may remain in the residual. This",
+                  "candidate-derived fit is exploratory and does not qualify hardware timing.",
+                  ""))
+    lines.extend(_cpu_report("m68k", M68K_KIND_NAMES, m68k_fit,
+                             m68k_tenths[0] + m68k_tenths[1]))
+    lines.append("")
+    lines.extend(_cpu_report("z80", Z80_KIND_NAMES, z80_fit,
+                             z80_tenths[0] + z80_tenths[1]))
+    if count_differences is not None:
+        lines.extend(("", "native --counts comparison (native frame N is aligned to candidate frame N",
+                      "for no-input runs and N+1 for scripted input spans):"))
+        if len(rom_hashes) > 1:
+            lines.append("  comparison uses the first ROM in the measurement list")
+        lines.extend("  %s decomp/original %s" % (name, ratio)
+                     for name, ratio in count_differences["ratios"])
+        lines.append("  frames with count differences: %d" % len(count_differences["mismatches"]))
+    pathlib.Path(path).write_text("\n".join(lines) + "\n")
+
+
+def check_profile(profile_path, source_dir, output=None):
+    if output is None:
+        output = sys.stdout
+    expected = None
+    for line in pathlib.Path(profile_path).read_text().splitlines():
+        fields = line.split()
+        if fields and fields[0] == "source-sha256" and len(fields) == 2:
+            expected = fields[1]
+            break
+    if not expected or expected == "-":
+        output.write("nmd-profile: profile was not checked against source\n")
+        return 0
+    if source_hash(source_dir) != expected:
+        output.write("nmd-profile: warning: source tree is stale; its contents changed since measurement\n")
+        return 1
+    output.write("nmd-profile: source matches the checked profile hash\n")
+    return 0
+
+
+def _read_input(path, frames, pads):
+    raw = json.loads(pathlib.Path(path).read_text())
+    if not isinstance(raw, dict):
+        raise ValueError("input must be an object of frame numbers")
+    script = {}
+    for key, ports in raw.items():
+        if not isinstance(key, str) or not key.isdecimal() or str(int(key)) != key or not 1 <= int(key) <= frames:
+            raise ValueError("input frame numbers must be canonical and in range")
+        if not isinstance(ports, dict) or any(port not in ("1", "2") for port in ports):
+            raise ValueError("input ports must be 1 or 2")
+        frame = {}
+        for port, names in ports.items():
+            if not isinstance(names, list) or any(not isinstance(name, str) or name not in BUTTON_NAMES
+                                                  for name in names):
+                raise ValueError("input contains an unknown button")
+            pad = pads[int(port) - 1]
+            if pad == "3" and any(name in ("X", "Y", "Z", "MODE") for name in names):
+                raise ValueError("three-button pads do not have X, Y, Z or MODE")
+            frame[int(port) - 1] = set(names)
+        script[int(key)] = frame
+    return script
+
+
+def _native_script(script, frames):
+    """Translate the oracle JSON snapshots to the kit's frame input script."""
+    snapshots = []
+    for frame_number in range(1, frames + 1):
+        ports = script.get(frame_number, {})
+        names = []
+        for port in (0, 1):
+            for name in BUTTON_NAMES:
+                if name in ports.get(port, set()):
+                    names.append(("2." if port else "") + name)
+        snapshots.append(tuple(names))
+    lines = []
+    at = 0
+    while at < len(snapshots):
+        end = at + 1
+        while end < len(snapshots) and snapshots[end] == snapshots[at]:
+            end += 1
+        count = end - at
+        if snapshots[at]:
+            lines.append("hold %s %d" % ("+".join(snapshots[at]), count))
+        else:
+            lines.append("wait %d" % count)
+        at = end
+    return "\n".join(lines) + "\n"
+
+
+def run_reference(core, rom, frames, input_path, outdir, model, region, pads, system_dir):
+    command = [sys.executable, str(ORACLE_DIR / "run.py"), "--core", str(core),
+               "--rom", str(rom), "--frames", str(frames), "--out", str(outdir),
+               "--model", model, "--region", region, "--pad1", pads[0], "--pad2", pads[1],
+               "--trace", "--cpustats", "--stats-only"]
+    if system_dir:
+        command.extend(("--system-dir", str(system_dir)))
+    if input_path:
+        command.extend(("--input", str(input_path)))
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError("candidate statistics run failed: " + result.stderr.strip()[-500:])
+    manifest = json.loads((outdir / "manifest.json").read_text())
+    if manifest.get("cpu_stats_frames") != frames or manifest.get("cpu_stats_file") != "cpu.stats":
+        raise RuntimeError("candidate did not record one CPU statistics span per frame")
+    with (outdir / "cpu.stats").open("r") as stats_file:
+        rows = read_cpu_stats(stats_file)
+    if len(rows) != 2 * frames or any(row.frame != index // 2 + 1
+                                      for index, row in enumerate(rows)):
+        raise RuntimeError("candidate CPU statistics do not cover every VBlank")
+    return rows
+
+
+def _native_counts(path):
+    counts = {}
+    for line in pathlib.Path(path).read_text().splitlines():
+        fields = line.split()
+        if not fields or fields[0] != "F":
+            continue
+        if len(fields) != 2 + NMD_KINDS + NMD_Z80_KINDS + NMD_KINDS + NMD_Z80_KINDS:
+            raise RuntimeError("native --counts row has the wrong number of kinds")
+        counts[int(fields[1])] = [int(value) for value in fields[2:]]
+    return counts
+
+
+def run_decomp(build, frames, input_script, outdir):
+    counts_path = outdir / "counts.txt"
+    command = shlex.split(build) + ["--headless", "--out", str(outdir), "--counts", str(counts_path)]
+    if input_script:
+        script_path = outdir / "input.script"
+        script_path.write_text(input_script)
+        command.extend(("--script", str(script_path)))
+        command.extend(("--frames", str(frames + 1)))
+    else:
+        command.extend(("--frames", str(frames)))
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError("native --counts run failed: " + result.stderr.strip()[-500:])
+    return _native_counts(counts_path)
+
+
+def _candidate_counts(rows):
+    by_frame = {}
+    for row in rows:
+        by_frame.setdefault(row.frame, {})[row.cpu] = row.counts
+    result = {}
+    for frame, cpus in by_frame.items():
+        if set(cpus) != {"m68k", "z80"}:
+            continue
+        m68k = cpus["m68k"]
+        z80 = cpus["z80"]
+        result[frame] = (m68k[:NMD_KINDS] + z80[:NMD_Z80_KINDS] +
+                         m68k[NMD_KINDS:] + z80[NMD_Z80_KINDS:])
+    return result
+
+
+def compare_counts(reference_rows, native_frames, input_span=False):
+    reference = _candidate_counts(reference_rows)
+    totals_native = [0] * (2 * (NMD_KINDS + NMD_Z80_KINDS))
+    totals_reference = [0] * len(totals_native)
+    mismatches = []
+    offset = 1 if input_span else 0
+    for frame, expected in sorted(reference.items()):
+        actual = native_frames.get(frame + offset)
+        if actual is None:
+            continue
+        for index, value in enumerate(expected):
+            totals_reference[index] += value
+        for index, value in enumerate(actual):
+            totals_native[index] += value
+        if expected != actual:
+            mismatches.append((frame, expected, actual))
+    names = (["m68k." + name for name in M68K_KIND_NAMES] +
+             ["z80." + name for name in Z80_KIND_NAMES])
+    ratios = []
+    for direction, base in (("read", 0), ("write", len(names))):
+        for index, name in enumerate(names):
+            ref = totals_reference[base + index]
+            dec = totals_native[base + index]
+            ratio = ("%.4f" % (dec / ref) if ref else
+                     "n/a" if not dec else "no-original-accesses")
+            ratios.append((direction + "." + name.replace(" ", "_") , ratio))
+    return {"ratios": ratios, "mismatches": mismatches,
+            "reference_totals": totals_reference, "native_totals": totals_native}
+
+
+def measure(args):
+    if args.frames < 1:
+        raise ValueError("frame count must be positive")
+    if not args.rom or any(not rom.is_file() or rom.stat().st_size == 0 for rom in args.rom):
+        raise ValueError("every ROM must be an existing non-empty file")
+    if args.source and not args.source.is_dir():
+        raise ValueError("--source must name an existing directory")
+    if args.source and not args.decomp:
+        raise ValueError("--source requires --decomp")
+    if args.model == "md1va6" and not args.system_dir:
+        raise ValueError("--model md1va6 requires --system-dir")
+    if args.system_dir and not args.system_dir.is_dir():
+        raise ValueError("--system-dir must name an existing directory")
+    core = args.core or candidate_core_default()
+    if not core.is_file():
+        raise ValueError("candidate core is missing; run `mise run tools:md` or set NMD_ORACLE_CORE")
+    outdir = args.out
+    if outdir.exists() and any(outdir.iterdir()):
+        raise ValueError("output directory must be empty")
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    pads = (args.pad1, args.pad2)
+    input_scripts = []
+    for path in args.input or []:
+        input_scripts.append((path, _read_input(path, args.frames, pads)))
+    spans = [(None, None)] + input_scripts
+    all_rows = []
+    first_rom_rows = {}
+    decomp_comparisons = []
+    core_digest = file_sha256(core)
+    rom_hashes = [file_sha256(rom) for rom in args.rom]
+    frame_clocks = FRAME_CLOCKS[args.region]
+
+    with tempfile.TemporaryDirectory(prefix="nmd-profile-") as workspace:
+        for rom_index, rom in enumerate(args.rom):
+            for span_index, (input_path, input_data) in enumerate(spans):
+                run_dir = pathlib.Path(workspace) / ("candidate-%d-%d" % (rom_index, span_index))
+                run_dir.mkdir()
+                rows = run_reference(core, rom, args.frames, input_path, run_dir,
+                                     args.model, args.region, pads, args.system_dir)
+                all_rows.extend(rows)
+                if rom_index == 0:
+                    first_rom_rows[span_index] = rows
+        m68k_rows = [row for row in all_rows if row.cpu == "m68k"]
+        z80_rows = [row for row in all_rows if row.cpu == "z80"]
+        m68k_fit = fit_cpu(m68k_rows, NMD_KINDS,
+                           active_clocks=ACTIVE_FRAME_SHARE * frame_clocks)
+        z80_fit = fit_cpu(z80_rows, NMD_Z80_KINDS,
+                          active_clocks=ACTIVE_FRAME_SHARE * frame_clocks)
+
+        if args.decomp:
+            for span_index, (_, input_data) in enumerate(spans):
+                frames = args.frames
+                input_script = _native_script(input_data, frames) if input_data is not None else None
+                run_dir = pathlib.Path(workspace) / ("decomp-%d" % span_index)
+                run_dir.mkdir()
+                native = run_decomp(args.decomp, frames, input_script, run_dir)
+                decomp_comparisons.append(compare_counts(first_rom_rows[span_index], native,
+                                                         input_span=input_data is not None))
+
+    m68k_tenths, z80_tenths = profile_tenths(m68k_fit, z80_fit)
+    count_differences = None
+    count_ratios = []
+    if decomp_comparisons:
+        reference_totals = [sum(item["reference_totals"][index] for item in decomp_comparisons)
+                            for index in range(2 * (NMD_KINDS + NMD_Z80_KINDS))]
+        native_totals = [sum(item["native_totals"][index] for item in decomp_comparisons)
+                         for index in range(2 * (NMD_KINDS + NMD_Z80_KINDS))]
+        names = (["m68k." + name for name in M68K_KIND_NAMES] +
+                 ["z80." + name for name in Z80_KIND_NAMES])
+        for direction, base in (("read", 0), ("write", len(names))):
+            for index, name in enumerate(names):
+                ref = reference_totals[base + index]
+                dec = native_totals[base + index]
+                count_ratios.append((direction + "." + name.replace(" ", "_"),
+                                     "%.4f" % (dec / ref) if ref else
+                                     "n/a" if not dec else "no-original-accesses"))
+        mismatches = [mismatch for item in decomp_comparisons for mismatch in item["mismatches"]]
+        count_differences = {"ratios": count_ratios, "mismatches": mismatches}
+
+    source_digest = source_hash(args.source) if args.source else "-"
+    name = c_identifier(args.name or args.rom[0].stem.lower())
+    write_profile(outdir / "profile.txt", rom_hashes, core_digest, args.model, args.region,
+                  m68k_tenths, z80_tenths, source_sha256=source_digest,
+                  checked=bool(args.decomp), count_ratios=count_ratios)
+    write_c(outdir / "profile.c", name, m68k_tenths, z80_tenths)
+    write_report(outdir / "report.txt", rom_hashes, core_digest, args.model, args.region,
+                 args.frames, len(spans), m68k_fit, z80_fit, m68k_tenths, z80_tenths,
+                 count_differences=count_differences)
+    print((outdir / "report.txt").read_text(), end="")
+
+
+def main():
+    parser = argparse.ArgumentParser(prog="nmd-profile", description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    measure_parser = sub.add_parser("measure", help="fit both processor cost profiles from candidate runs")
+    measure_parser.add_argument("rom", nargs="+", type=pathlib.Path)
+    measure_parser.add_argument("--out", required=True, type=pathlib.Path)
+    measure_parser.add_argument("--frames", type=int, default=3600)
+    measure_parser.add_argument("--input", action="append", type=pathlib.Path,
+                                help="JSON frame/button span; may be repeated")
+    measure_parser.add_argument("--core", type=pathlib.Path, help="pinned candidate libretro core")
+    measure_parser.add_argument("--model", choices=("md1va3", "md1va6"), default="md1va3")
+    measure_parser.add_argument("--region", choices=("J", "U", "E"), default="U")
+    measure_parser.add_argument("--pad1", choices=("3", "6"), default="6")
+    measure_parser.add_argument("--pad2", choices=("3", "6"), default="6")
+    measure_parser.add_argument("--system-dir", type=pathlib.Path,
+                                help="candidate system files required for md1va6 TMSS runs")
+    measure_parser.add_argument("--decomp", help="native build command to run with --counts")
+    measure_parser.add_argument("--source", type=pathlib.Path,
+                                help="source tree hashed after the native count comparison")
+    measure_parser.add_argument("--name", help="C identifier prefix for the generated profile")
+    check_parser = sub.add_parser("check", help="compare the checked source hash")
+    check_parser.add_argument("profile", type=pathlib.Path)
+    check_parser.add_argument("--source", required=True, type=pathlib.Path)
+    args = parser.parse_args()
+    if args.command == "measure":
+        measure(args)
+    else:
+        raise SystemExit(check_profile(args.profile, args.source))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, ValueError, json.JSONDecodeError) as exc:
+        sys.exit("nmd-profile: " + str(exc))

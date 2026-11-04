@@ -49,3 +49,14 @@ target_include_directories(sound_check PRIVATE ../src/sound ../src/console)
 target_compile_definitions(sound_check PRIVATE NMD_TESTING)
 target_link_libraries(sound_check PRIVATE nmd)
 set_target_properties(sound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(profile_decomp_fixture unit/profile_decomp_fixture.c)
+target_link_libraries(profile_decomp_fixture PRIVATE nmd)
+set_target_properties(profile_decomp_fixture PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_custom_target(md_profile_check
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/profile_check.py
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  DEPENDS profile_decomp_fixture
+  VERBATIM)

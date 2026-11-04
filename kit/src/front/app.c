@@ -142,8 +142,8 @@ void nk_quit(void) { quitting = 1; }
    out, as the profile's measure of the original leaves it out. */
 static FILE *counts_f;
 static uint64_t counts[2][NK_KINDS_MAX];
-static uint8_t pending_kind[65];
-static unsigned pending_n;
+static uint8_t pending_kind[NK_KINDS_MAX][65];
+static unsigned pending_n[NK_KINDS_MAX];
 
 /* an access's kind, one of the console's kind_count */
 static int count_kind(uint32_t addr)
@@ -163,22 +163,33 @@ static int count_kind(uint32_t addr)
     return k;
 }
 
+/* Independent processors must not end one another's read-poll sequence. */
+static int count_group(uint32_t addr)
+{
+    int group = c->count_group ? c->count_group(addr) : 0;
+    if (group < 0 || group >= NK_KINDS_MAX)
+        nk_fatal("an access count group %d, not one of 0 to %d", group, NK_KINDS_MAX - 1);
+    return group;
+}
+
 static void count_read(uint32_t addr, uint8_t value)
 {
+    int group = count_group(addr);
     (void)value;
-    if (pending_n < 65)
-        pending_kind[pending_n] = (uint8_t)count_kind(addr);
-    pending_n++;
+    if (pending_n[group] < 65)
+        pending_kind[group][pending_n[group]] = (uint8_t)count_kind(addr);
+    pending_n[group]++;
 }
 
 static void count_write(uint32_t addr, uint8_t value)
 {
+    int group = count_group(addr);
     unsigned k;
     (void)value;
-    if (pending_n <= 64)
-        for (k = 0; k < pending_n; k++)
-            counts[0][pending_kind[k]]++;
-    pending_n = 0;
+    if (pending_n[group] <= 64)
+        for (k = 0; k < pending_n[group]; k++)
+            counts[0][pending_kind[group][k]]++;
+    pending_n[group] = 0;
     counts[1][count_kind(addr)]++;
 }
 
