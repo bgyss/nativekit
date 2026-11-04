@@ -8,6 +8,11 @@
 - "Observed" describes captured evidence, not feature use; boolean `enabled` values show the final setting and `ever_enabled` shows whether it was enabled during the run.
 - ROM paths and contents are not included in this report.
 
+This is a bounded exploratory report from the candidate trace runner. It does
+not qualify hardware timing, title compatibility, or nmd support for any listed
+game. See the [nativemd contract](contract.md) for the implemented scope and
+the limits of candidate-derived evidence.
+
 ## Run status counts
 
 | Scenario | Completed | Invalid | Unsupported | Incomplete | Failed |

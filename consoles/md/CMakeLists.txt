@@ -2,7 +2,7 @@
 if(NOT TARGET nk_app)
   message(FATAL_ERROR "nativemd: configure from the repository root")
 endif()
-project(nativemd VERSION 0.1.0 LANGUAGES C)
+project(nativemd VERSION 1.0.0 LANGUAGES C)
 set(NMD_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(nmd STATIC src/console/bus.c src/console/dispatch.c src/z80/z80.c

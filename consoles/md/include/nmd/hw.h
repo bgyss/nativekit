@@ -2,6 +2,8 @@
 #ifndef NMD_HW_H
 #define NMD_HW_H
 
+#include "nmd/version.h"
+
 #define NMD_BUTTON_UP    (1u << 0)
 #define NMD_BUTTON_DOWN  (1u << 1)
 #define NMD_BUTTON_LEFT  (1u << 2)

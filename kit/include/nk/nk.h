@@ -95,11 +95,11 @@ typedef struct nk_console {
        kind (0 to kind_count - 1) and the number of kinds (NK_KINDS_MAX at most) */
     void     (*counts_hooks)(void (*rd)(uint32_t addr, uint8_t v), void (*wr)(uint32_t addr, uint8_t v));
     int      (*access_kind)(uint32_t addr);
-    int      (*count_group)(uint32_t addr);      /* optional poll group 0..NK_KINDS_MAX-1; default 0 */
     int      kind_count;
     const char *const *kind_names;      /* optional names in access-kind order */
 
     void     (*at_exit)(void);          /* optional: its own checks' reports */
+    int      (*count_group)(uint32_t addr);      /* optional poll group 0..NK_KINDS_MAX-1; default 0 */
 } nk_console;
 
 /* power on, open what the arguments ask for and run until the window

@@ -7,6 +7,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "nmd/version.h"
 #include "nmd/z80.h"
 
 typedef enum {

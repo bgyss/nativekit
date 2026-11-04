@@ -7,7 +7,7 @@
 # builds the static library nshvc a game links with its C. Options as
 # consoles/snes/CMakeLists.txt describes them.
 cmake_minimum_required(VERSION 3.16)
-project(nativekit VERSION 0.2.0 LANGUAGES C)
+project(nativekit VERSION 1.0.0 LANGUAGES C)
 
 if(APPLE)
   enable_language(OBJC)

@@ -16,8 +16,8 @@ The candidate BlastEm traces and generated reports are exploratory evidence;
 they do not qualify hardware accuracy or title compatibility.
 
 Run `mise run test:md-bus` for native bus checks, `mise run test:md-interrupt`
-for scheduler and interrupt checks, and `mise run test:md-rom` for shared
-synthetic bus operations on BlastEm and nmd. The interrupt fixture compares
+for scheduler and interrupt checks, and `mise run test:md-rom` for the full
+59-case synthetic matrix on BlastEm and nmd. The interrupt fixture compares
 HINT line and relative-clock deltas because the candidate trace epoch starts
 at a different absolute clock. Candidate-only differences stay in `rom/KNOWN`.
 
@@ -26,6 +26,12 @@ weight fitting, generated C compilation, source-hash checks, and the native
 `--counts` handoff. The candidate stats sidecar and its clock-splitting limits
 are documented in [`oracle/TRACE_FORMAT.md`](oracle/TRACE_FORMAT.md); it is
 exploratory profile evidence, not hardware qualification.
+
+Run `mise run test:md-consumer` to build the separate CMake consumer and execute
+it headless. `mise run test:md-golden-check` plants pixel, bus-trace, and PCM
+changes in the comparator. After `mise run test:md-rom` passes, record the
+synthetic-only baseline with `mise run golden:md-record`; compare it later with
+`mise run golden:md-compare`.
 
 ## Stage 2 ROM matrix
 
@@ -65,3 +71,11 @@ BlastEm shares the hardware divergence. Focus a case with, for example:
 ```sh
 mise run test:md-rom -- --only sound_ym_algorithm_0
 ```
+
+## Stage 4 controller and model cases
+
+The full matrix includes the six-button TH sequence with scripted input on both
+ports, the md1va3 version register, and md1va6 TMSS unlock and VDP access. Unit
+checks also cover three-button phases, independent port state, per-frame input
+updates, version bits, open TMSS behavior, and locked VDP failures. The six
+candidate-only differences in `rom/KNOWN` remain individually named and reasoned.

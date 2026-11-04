@@ -13,11 +13,12 @@ Windows, headless). A console fills one table and calls the kit's main. The kit 
 console, and the build fails if it does. Its documents are
 [`kit/docs/kit.md`](kit/docs/kit.md) (its parts and how a console uses them) and
 [`kit/docs/contract-discipline.md`](kit/docs/contract-discipline.md) (its versioning, and
-the standards every console here keeps). It is at 0.2.0.
+the standards every console here keeps). It is at 1.0.0.
 
 | console | folder | |
 |---|---|---|
-| **nativeshvc**, the Super Famicom / Super Nintendo | [`consoles/snes/`](consoles/snes/) | the first; its README follows |
+| **nativeshvc**, the Super Famicom / Super Nintendo | [`consoles/snes/`](consoles/snes/) | the original native console; see below |
+| **nativemd**, the Sega Mega Drive / Genesis | [`consoles/md/`](consoles/md/) | a native C console for the 68000 and Z80; see [its guide](consoles/md/docs/nativemd.md) |
 
 nativeshvc was created by Jeffrey Wilbur ([github.com/jeff-strutb/nativeshvc](https://github.com/jeff-strutb/nativeshvc)),
 and nativekit is extracted from it: this repository
@@ -35,8 +36,8 @@ Built from this folder, with CMake and C11:
 cmake -S . -B build/macos -DNK_HOST=macos -DNK_RENDER=metal && cmake --build build/macos
 ```
 
-makes nativeshvc's library `nshvc`, the kit folded in; a game adds this folder with
-`add_subdirectory` and links `nshvc`.
+makes the selected console libraries (`nshvc` and `nmd`), each with the kit folded in; a
+game adds this folder with `add_subdirectory` and links the console it targets.
 
 From a fresh clone:
 
@@ -55,6 +56,14 @@ install cmake (3.16 or later), python3 and the compilers yourself. `mise run bui
 macOS set (the headless, macOS, Metal, GL, Vulkan, x86_64, iOS, Windows cross and no-host
 builds); `build:ios` needs Xcode with the iOS SDK, and Linux is untested. The checks are
 in [`consoles/snes/tests/README.md`](consoles/snes/tests/README.md).
+
+### nativemd
+
+Build the headless Mega Drive console with `mise run build:null`, and run its focused checks
+with `mise run test:md-bus`, `mise run test:md-rom`, and `mise run test:md-profile`. A separate
+consumer project is checked with `mise run test:md-consumer`; its synthetic output baseline is
+compared with `mise run golden:md-compare`. See [`consoles/md/docs/nativemd.md`](consoles/md/docs/nativemd.md)
+for the supported hardware scope, cost profiles, and current evidence limits.
 
 ### For ports from nativeshvc
 

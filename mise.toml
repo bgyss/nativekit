@@ -89,6 +89,24 @@ description = "Fit both nativemd processor profiles from candidate traces"
 depends = ["build:null", "tools:md"]
 run = "python3 consoles/md/tests/profile_check.py"
 
+[tasks."test:md-consumer"]
+description = "Build and run a separate nativekit/nmd consumer project"
+run = "python3 consoles/md/tests/consumer/run.py"
+
+[tasks."test:md-golden-check"]
+description = "Check that the MD synthetic golden comparator detects output changes"
+run = "python3 consoles/md/tests/golden_check.py"
+
+[tasks."golden:md-record"]
+description = "Record the nativemd synthetic output baseline after the reference matrix passes"
+depends = ["test:md-rom"]
+run = "python3 consoles/md/tests/golden.py record build/golden/md"
+
+[tasks."golden:md-compare"]
+description = "Compare nativemd synthetic outputs with the recorded baseline"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/golden.py compare build/golden/md"
+
 [tasks."build:null"]
 run = "cmake -S . -B build/null -DNK_CONSOLES=\"snes;md\" -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/null -j8"
 

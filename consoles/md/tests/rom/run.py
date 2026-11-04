@@ -5,10 +5,12 @@ import hashlib
 import json
 import os
 import pathlib
+import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from collections import Counter
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -484,9 +486,23 @@ def _weave_fields(first_path, second_path, width, field_height, output_path):
     output_path.write_bytes(f"P6\n{width} {field_height * 2}\n255\n".encode() + frame)
 
 
-def run_one(case, assembler, z80_assembler, core, testcart):
+@contextmanager
+def _case_workspace(case):
+    work_root = os.environ.get("NMD_ROM_WORKDIR")
+    if work_root:
+        base = pathlib.Path(work_root) / case.name
+        if base.exists():
+            shutil.rmtree(base)
+        base.mkdir(parents=True)
+        yield base
+        return
     with tempfile.TemporaryDirectory(prefix="nmd-rom-") as temp:
-        base = pathlib.Path(temp)
+        yield pathlib.Path(temp)
+
+
+def run_one(case, assembler, z80_assembler, core, testcart):
+    with _case_workspace(case) as base:
+        record_streams = os.environ.get("NMD_ROM_RECORD_STREAMS") == "1"
         capture_psg = case.capture_audio or case.capture_mixed_audio
         capture_ym = case.capture_ym_audio or case.capture_mixed_audio
         try:
@@ -520,6 +536,9 @@ def run_one(case, assembler, z80_assembler, core, testcart):
         if system_dir:
             candidate_command.extend(("--system-dir", str(system_dir)))
         candidate = subprocess.run(candidate_command, capture_output=True, text=True, timeout=90)
+        if record_streams:
+            (base / "candidate.stdout").write_text(candidate.stdout)
+            (base / "candidate.stderr").write_text(candidate.stderr)
         if candidate.returncode:
             return "candidate run failed: " + candidate.stderr.strip()[-500:]
 
@@ -600,6 +619,9 @@ def run_one(case, assembler, z80_assembler, core, testcart):
             native_command.extend(("--picture-out", str(native_picture)))
         native = subprocess.run(native_command,
                                 capture_output=True, text=True, timeout=30)
+        if record_streams:
+            (base / "native.stdout").write_text(native.stdout)
+            (base / "native.stderr").write_text(native.stderr)
         if native.returncode:
             return "native testcart failed: " + native.stderr.strip()[-500:]
 

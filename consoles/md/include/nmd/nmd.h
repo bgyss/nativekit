@@ -4,6 +4,7 @@
 #ifndef NMD_NMD_H
 #define NMD_NMD_H
 
+#include "nmd/version.h"
 #include "nmd/cart.h"
 #include "nmd/hw.h"
 #include "nmd/machine.h"

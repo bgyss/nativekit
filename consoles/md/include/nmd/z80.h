@@ -4,6 +4,8 @@
 
 #include <stdint.h>
 
+#include "nmd/version.h"
+
 typedef struct nmd_z80_state {
     uint8_t a, f, b, c, d, e, h, l;
     uint8_t i, r, iff1, iff2, im;

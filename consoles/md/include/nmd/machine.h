@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include "nmd/version.h"
+
 typedef struct nmd_cpu_state {
     uint32_t d[8];
     uint32_t a[8];
