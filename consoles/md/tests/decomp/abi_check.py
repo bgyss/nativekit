@@ -45,12 +45,12 @@ class Event(c.Structure):
     ]
 
 
-def build_library(directory, instrumented):
-    library = pathlib.Path(directory) / ("decomp-instrumented." + extension if instrumented
-                                         else "decomp-empty." + extension)
+def build_library(directory, enabled_capabilities):
+    name = "decomp-empty" if not enabled_capabilities else "decomp-" + "-".join(enabled_capabilities)
+    library = pathlib.Path(directory) / (name + "." + extension)
     command = [*compiler, "-std=c11", "-fPIC", link_flag, "-I", str(abi_dir)]
-    if instrumented:
-        command.extend("-DNMD_DECOMP_HAS_" + name for name in capabilities)
+    if enabled_capabilities:
+        command.extend("-DNMD_DECOMP_HAS_" + name for name in enabled_capabilities)
     command.extend([str(source), "-o", str(library)])
     subprocess.run(command, check=True, capture_output=True, text=True)
     return c.CDLL(str(library))
@@ -70,15 +70,21 @@ def configure(library):
 
 
 with tempfile.TemporaryDirectory() as temporary:
-    empty = build_library(temporary, False)
+    empty = build_library(temporary, [])
     callback_type = configure(empty)
     assert empty.nmd_decomp_abi_version() == 1
     assert empty.nmd_decomp_capabilities() == 0
 
-    instrumented = build_library(temporary, True)
+    instrumented = build_library(temporary, capabilities)
     configure(instrumented)
     assert instrumented.nmd_decomp_abi_version() == 1
     assert instrumented.nmd_decomp_capabilities() == 0xFFF
+
+    m68k_only = build_library(temporary, [
+        "M68K_INSTRUCTION", "M68K_STATE", "FLOW_EDGE", "FETCH_PROVENANCE",
+    ])
+    configure(m68k_only)
+    assert m68k_only.nmd_decomp_capabilities() == 0x53
 
     events = []
 

@@ -1,0 +1,121 @@
+diff --git a/Makefile b/Makefile
+index 18e1448..453883e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -278,0 +279,4 @@ CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++CFLAGS+=-DNMD_DECOMP_HAS_M68K_INSTRUCTION
++CFLAGS+=-DNMD_DECOMP_HAS_M68K_STATE
++CFLAGS+=-DNMD_DECOMP_HAS_FLOW_EDGE
++CFLAGS+=-DNMD_DECOMP_HAS_FETCH_PROVENANCE
+@@ -318 +322 @@ endif
+-COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o trace_abi.o $(M68KOBJS) \
++COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o trace_abi.o decomp_abi.o $(M68KOBJS) \
+diff --git a/cpu_dsl.py b/cpu_dsl.py
+index 08d825e..30d8961 100755
+--- a/cpu_dsl.py
++++ b/cpu_dsl.py
+@@ -2761,0 +2762,2 @@ class Program:
++					if self.prefix == 'm68k_':
++						bodyPieces.append('\n\t\t\tm68k_decomp_begin_instruction(context);')
+@@ -2762,0 +2765,2 @@ class Program:
++					if self.prefix == 'm68k_':
++						bodyPieces.append('\n\t\tm68k_decomp_complete_instruction(context);')
+@@ -2773,0 +2778,2 @@ class Program:
++				if self.prefix == 'm68k_':
++					bodyPieces.append('\n\t\tm68k_decomp_begin_instruction(context);')
+@@ -2774,0 +2781,2 @@ class Program:
++				if self.prefix == 'm68k_':
++					bodyPieces.append('\n\t\tm68k_decomp_complete_instruction(context);')
+diff --git a/link.T b/link.T
+index fda72e5..e7783ee 100644
+--- a/link.T
++++ b/link.T
+@@ -2 +2 @@
+-	global: retro_* nmd_trace_*;
++	global: retro_* nmd_trace_* nmd_decomp_*;
+diff --git a/m68k.cpu b/m68k.cpu
+index 54e5416..8f943a6 100644
+--- a/m68k.cpu
++++ b/m68k.cpu
+@@ -19,0 +20,2 @@ declare
++	void m68k_decomp_begin_instruction(m68k_context *context);
++	void m68k_decomp_complete_instruction(m68k_context *context);
+@@ -67,0 +70,2 @@ regs
++	decomp_instruction_pc 32
++	decomp_instruction_opcode 16
+diff --git a/m68k_util.c b/m68k_util.c
+index ca58189..6a0eb07 100644
+--- a/m68k_util.c
++++ b/m68k_util.c
+@@ -2,0 +3 @@
++#include "decomp_abi.h"
+@@ -11,0 +13,66 @@ void m68k_trace_mark_fetch(m68k_context *context)
++void m68k_decomp_begin_instruction(m68k_context *context)
++{
++	context->decomp_instruction_pc = context->pc - 2;
++	context->decomp_instruction_opcode = context->prefetch;
++}
++
++static void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state)
++{
++	memcpy(state->d, context->dregs, sizeof state->d);
++	memcpy(state->a, context->aregs, sizeof state->a);
++	state->other_sp = context->other_sp;
++	state->cycles = context->cycles;
++	state->target_cycle = context->target_cycle;
++	state->sync_cycle = context->sync_cycle;
++	state->int_cycle = context->int_cycle;
++	state->prefetch = context->prefetch;
++	state->status = context->status;
++	state->ccr = context->ccr;
++	state->xflag = context->xflag;
++	state->nflag = context->nflag;
++	state->zflag = context->zflag;
++	state->vflag = context->vflag;
++	state->cflag = context->cflag;
++	state->trace_pending = context->trace_pending;
++	state->stopped = context->stopped;
++	state->int_priority = context->int_priority;
++	state->int_pending_num = context->int_pending_num;
++	state->int_pending = context->int_pending;
++	state->int_num = context->int_num;
++	state->int_ack = context->int_ack;
++}
++
++void m68k_decomp_complete_instruction(m68k_context *context)
++{
++	struct nmd_decomp_event event = {0};
++	uint32_t address_mask = context->opts->gen.address_mask;
++	uint32_t pc = context->decomp_instruction_pc & address_mask;
++	uint32_t next_pc = (context->pc - 2) & address_mask;
++	uint16_t opcode = context->decomp_instruction_opcode;
++
++	event.struct_size = sizeof event;
++	event.kind = NMD_DECOMP_INSTRUCTION;
++	event.cpu = NMD_DECOMP_M68K;
++	event.master_clock = context->cycles;
++	event.pc = pc;
++	event.next_pc = next_pc;
++	event.payload.instruction.fetched_length = 2;
++	event.payload.instruction.fetched_bytes[0] = opcode >> 8;
++	event.payload.instruction.fetched_bytes[1] = opcode;
++	event.payload.instruction.opcode = opcode;
++	m68k_decomp_copy_state(context, &event.payload.instruction.state.m68k);
++	nmd_decomp_publish(&event);
++
++	event = (struct nmd_decomp_event){0};
++	event.struct_size = sizeof event;
++	event.kind = NMD_DECOMP_FLOW_EDGE;
++	event.cpu = NMD_DECOMP_M68K;
++	event.master_clock = context->cycles;
++	event.pc = pc;
++	event.next_pc = next_pc;
++	event.payload.flow.previous_pc = pc;
++	event.payload.flow.current_pc = next_pc;
++	event.payload.flow.target_known = 1;
++	nmd_decomp_publish(&event);
++}
++
+@@ -276,0 +344,2 @@ void m68k_reset(m68k_context *context)
++	context->decomp_instruction_pc = 0;
++	context->decomp_instruction_opcode = 0;

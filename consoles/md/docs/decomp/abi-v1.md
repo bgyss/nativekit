@@ -33,9 +33,14 @@ Event IDs are:
 Each event begins with `struct_size`, kind, CPU, flags, sequence, common
 master-clock value, epoch, current PC and next PC. The 256-byte inline payload
 union holds the relevant CPU snapshot or typed bus, flow, interrupt, or stop
-data. An instruction payload contains up to 16 fetched bytes, the leading
-opcode word and the matching CPU state snapshot. Instruction snapshots include
-the CPU hidden/prefetch and pending interrupt fields needed by the execution
+data. The instruction payload has capacity for up to 16 fetched bytes, the
+leading opcode word and the matching CPU state snapshot. The current 68000 path
+reports its actual prefetched opcode word; extension-word provenance is not
+inferred from a bus access. An instruction event describes the just-completed
+instruction: its `pc` and fetched bytes identify the pre-instruction address
+and encoding, while `next_pc` and the snapshot reflect the post-instruction
+boundary before another guest instruction. Instruction snapshots include the
+CPU hidden/prefetch and pending interrupt fields needed by the execution
 boundary. The pinned context fields and their semantics are audited against
 live synthetic execution before a capability is claimed.
 
@@ -65,7 +70,7 @@ are independent and may be combined:
 | `1 << 3` | Z80 state snapshots |
 | `1 << 4` | Dynamic flow edges |
 | `1 << 5` | Reset, exception and interrupt entry/return events |
-| `1 << 6` | Fetch-byte and operand/data provenance |
+| `1 << 6` | Observed instruction opcode/prefetch bytes marked as code fetch; extension-word provenance is not claimed by this bit |
 | `1 << 7` | CPU bus start/completion intervals |
 | `1 << 8` | Shared master-clock epoch |
 | `1 << 9` | Synchronized machine checkpoint |

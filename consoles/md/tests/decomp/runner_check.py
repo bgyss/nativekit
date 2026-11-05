@@ -128,6 +128,22 @@ with tempfile.TemporaryDirectory() as temporary:
     assert result.returncode != 0 and "libretro" in result.stderr.lower()
     assert "scenario input frame" not in result.stderr.lower()
 
+    matching_scenario = json.loads(scenario.read_text())
+    matching_metadata = runner._make_identity(capable_no_libretro, rom, matching_scenario, 3)
+    estimate_file = base / "matching-estimate.json"
+    estimate_file.write_text(json.dumps({
+        "status": "complete", "metadata": matching_metadata, "frames": 3,
+        "estimated_seconds": 0.0, "estimated_bytes": 0,
+    }))
+    capture_out = base / "capture-with-estimate"
+    result = subprocess.run([
+        sys.executable, str(runner_path), "--mode", "capture", "--core", str(capable_no_libretro),
+        "--rom", str(rom), "--scenario", str(scenario), "--frames", "3",
+        "--estimate-file", str(estimate_file), "--out", str(capture_out),
+    ], capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0 and "libretro" in result.stderr.lower(), result.stderr
+    assert not (capture_out / "capture.nmdh").exists()
+
     timed_out = runner.supervise_child(
         [sys.executable, "-c", "import time; time.sleep(2)"], timeout_seconds=0.05)
     assert timed_out.timed_out and timed_out.returncode != 0

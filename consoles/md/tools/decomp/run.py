@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -681,6 +682,7 @@ def _worker(args):
             "events": nmdh_writer.count,
             "event_counts": event_counts,
             "instruction_counts": instruction_counts,
+            "nmdt_records": nmdt_writer.count,
             "elapsed_seconds": elapsed,
             "stream_bytes": stream_sizes,
             "nmdh_bytes": nmdh_path.stat().st_size,
@@ -745,11 +747,20 @@ def _run_parent(args):
         if not args.estimate_file or not Path(args.estimate_file).is_file():
             raise RunnerError("capture requires a matching preflight estimate file")
         estimate = json.loads(Path(args.estimate_file).read_text())
-        nmdh_trace.validate_identity(estimate, {"metadata": metadata, "frames": args.frames})
+        if not isinstance(estimate, dict) or not isinstance(estimate.get("metadata"), dict):
+            raise RunnerError("invalid preflight estimate document")
+        nmdh_trace.validate_identity(estimate["metadata"], metadata)
+        if type(estimate.get("frames")) is not int or estimate["frames"] != args.frames:
+            raise RunnerError("preflight estimate frame count mismatch")
         if estimate.get("status") != "complete":
             raise RunnerError("preflight estimate is incomplete")
-        if (estimate.get("estimated_seconds", args.max_seconds + 1) > args.max_seconds or
-                estimate.get("estimated_bytes", args.max_bytes + 1) > args.max_bytes):
+        estimated_seconds = estimate.get("estimated_seconds")
+        estimated_bytes = estimate.get("estimated_bytes")
+        if (type(estimated_seconds) not in (int, float) or
+                not math.isfinite(estimated_seconds) or estimated_seconds < 0 or
+                type(estimated_bytes) is not int or estimated_bytes < 0):
+            raise RunnerError("invalid preflight resource estimate")
+        if (estimated_seconds > args.max_seconds or estimated_bytes > args.max_bytes):
             raise RunnerError("preflight estimate exceeds the capture resource limits")
         worker_mode = "capture"
         worker_frames = args.frames
