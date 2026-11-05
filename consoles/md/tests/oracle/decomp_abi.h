@@ -154,11 +154,11 @@ struct nmd_decomp_stop {
 struct nmd_decomp_handoff {
     struct nmd_decomp_stop stop;
     uint64_t master_clock;
-    uint32_t z80_master_clock;
-    uint32_t vdp_clock;
-    uint32_t ym_clock;
-    uint32_t psg_clock;
-    uint32_t io_clock;
+    uint64_t z80_master_clock;
+    uint64_t vdp_clock;
+    uint64_t ym_clock;
+    uint64_t psg_clock;
+    uint64_t io_clock;
     struct nmd_decomp_m68k_state m68k;
     struct nmd_decomp_z80_state z80;
 };
@@ -225,5 +225,10 @@ void nmd_decomp_set_stop_metadata(uint32_t criterion, uint64_t value,
                                   uint64_t instruction_count);
 void nmd_decomp_fill_stop(struct nmd_decomp_stop *stop);
 void nmd_decomp_mark_handed_off(void);
+uint64_t nmd_decomp_clock(uint32_t local_clock);
+uint64_t nmd_decomp_clock_epoch(void);
+void nmd_decomp_adjust_clock(uint32_t deduction);
+void nmd_decomp_request_test_rebase(void);
+int nmd_decomp_take_test_rebase(void);
 
 #endif

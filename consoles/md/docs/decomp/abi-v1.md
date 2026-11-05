@@ -48,6 +48,12 @@ For Z80 state, `main` and `alt` use the pinned context order `[B,C,D,E,H,L,F,A]`
 Flag fields are the candidate core's raw representations, not a packed F byte:
 `zflag`, `pvflag`, `nflag`, `chflags` and `last_flag_result` are preserved as
 stored so replay checks can compare the exact internal state.
+BUS_ACCESS is emitted after the mapped handler returns, with `start_clock`
+before the CPU access cycles and `completion_clock` after any handler wait.
+Widths describe physical transfers: a 68000 longword is two word events.
+Provenance is FETCH for marked instruction fetches, OPERAND for unmarked CPU
+reads, and DATA for writes and I/O data transfers. No idle-cycle interval is
+implied.
 
 The callback returns `NMD_DECOMP_CONTINUE` (`0`), `NMD_DECOMP_STOP` (`1`) or
 `NMD_DECOMP_REPLACE` (`2`). STOP and REPLACE are valid only on an
@@ -65,10 +71,10 @@ exception-entry path, so no Z80 `EXCEPTION` event is emitted.
 The `STOP` and `REPLACE` event payload is a complete handoff record. It contains
 the requested stop criterion and value, action reason, triggering CPU's
 instruction count, synchronized master clock, copies of both CPU snapshots,
-and the VDP, YM, PSG and IO scheduler clocks. The CPU-local `cycles` fields
-remain in their own units; `z80_master_clock` is the Z80 cycle converted to
-the common master clock. The event's master clock and `stop_clock` name the
-same scheduler boundary. Criterion IDs are 1=PC, 2=return sentinel,
+and the VDP, YM, PSG and IO scheduler clocks. Both copied CPU `cycles` fields
+are expressed in MCLK units; `z80_master_clock` adds the shared epoch offset.
+The event's master clock and `stop_clock` name the same scheduler boundary.
+Criterion IDs are 1=PC, 2=return sentinel,
 3=interrupt, and 4=instruction budget; frame limit is a natural post-frame
 return and is recorded by the runner without a CPU callback action.
 
@@ -112,7 +118,10 @@ remain explicit gaps unless separate synthetic controls prove them.
 
 Sequence numbers start at one for each reset capture and increase monotonically
 across both CPUs. Clock and epoch values use the synchronized Genesis master
-clock. A STOP/REPLACE action is honored after the current instruction and
+clock. Sequence is callback publication order; nested scheduler sync can
+publish an event with an earlier cross-CPU timestamp, so merge by
+`master_clock` and use `sequence` as the tie-breaker. Per-CPU clocks stay
+monotonic across epoch rebases. A STOP/REPLACE action is honored after the current instruction and
 before the next guest instruction; the scheduler must then synchronize both
 CPUs, VDP, sound and IO before returning to the runner. The returned snapshot
 includes the triggering CPU's immutable instruction event and both machine
@@ -149,7 +158,7 @@ The metadata JSON contains `abi_version`, the 64-bit `capabilities` mask,
 `patch_sha256`, `abi_sha256` and `runner_sha256`, plus pinned core revision and
 machine `options`. It never records local paths. The runner
 scenario is version 1 and names region, model, both controller types, frame
-inputs, required capabilities, and a CPU stop criterion/action. Estimate mode
+inputs, required capabilities, and a CPU stop criterion/action. Synthetic fixtures may also set `test_rebase_frame` to force the real local-cycle adjustment path at that frame boundary; the option is hashed into the scenario identity and is not intended for title captures. Estimate mode
 captures a bounded three-frame sample and reports projected seconds and bytes
 for the requested frame count. Capture mode requires an estimate with the same
 ROM/scenario/core/patch/ABI/runner identities and frame count. The default

@@ -18,6 +18,9 @@ static uint64_t stop_clock;
 static uint64_t stop_value;
 static uint64_t stop_instruction_count;
 static int stop_metadata_set;
+static uint64_t master_clock_offset;
+static uint64_t master_clock_epoch;
+static int test_rebase_requested;
 
 uint32_t nmd_decomp_abi_version(void)
 {
@@ -94,6 +97,9 @@ void nmd_decomp_reset(void)
     stop_value = 0;
     stop_instruction_count = 0;
     stop_metadata_set = 0;
+    master_clock_offset = 0;
+    master_clock_epoch = 0;
+    test_rebase_requested = 0;
 }
 
 int nmd_decomp_error(void)
@@ -169,6 +175,43 @@ void nmd_decomp_mark_handed_off(void)
 {
     if (stop_pending)
         handed_off = 1;
+}
+
+uint64_t nmd_decomp_clock(uint32_t local_clock)
+{
+    if (UINT64_MAX - master_clock_offset < local_clock) {
+        failed = 1;
+        return UINT64_MAX;
+    }
+    return master_clock_offset + local_clock;
+}
+
+uint64_t nmd_decomp_clock_epoch(void)
+{
+    return master_clock_epoch;
+}
+
+void nmd_decomp_adjust_clock(uint32_t deduction)
+{
+    if (UINT64_MAX - master_clock_offset < deduction ||
+        master_clock_epoch == UINT64_MAX) {
+        failed = 1;
+        return;
+    }
+    master_clock_offset += deduction;
+    master_clock_epoch += 1;
+}
+
+void nmd_decomp_request_test_rebase(void)
+{
+    test_rebase_requested = 1;
+}
+
+int nmd_decomp_take_test_rebase(void)
+{
+    int requested = test_rebase_requested;
+    test_rebase_requested = 0;
+    return requested;
 }
 
 static int valid_event(const struct nmd_decomp_event *event)

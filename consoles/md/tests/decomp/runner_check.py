@@ -197,6 +197,22 @@ with tempfile.TemporaryDirectory() as temporary:
         assert "master_clock" in str(exc)
     else:
         raise AssertionError("non-frame stop accepted without a master-clock capability")
+    rebase_scenario = {
+        "version": 1, "region": "U", "model": "md1va3", "pad1": "3", "pad2": "3",
+        "input": {},
+        "required_capabilities": ["m68k_instruction", "m68k_state"],
+        "stop": {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"},
+        "test_rebase_frame": 1,
+    }
+    assert runner._validate_scenario(rebase_scenario, 1)["test_rebase_frame"] == 1
+    for invalid_rebase_frame in (0, 2, True):
+        try:
+            runner._validate_scenario({**rebase_scenario,
+                                       "test_rebase_frame": invalid_rebase_frame}, 1)
+        except runner.RunnerError as exc:
+            assert "test_rebase_frame" in str(exc)
+        else:
+            raise AssertionError("out-of-range synthetic rebase frame was accepted")
 
     timed_out = runner.supervise_child(
         [sys.executable, "-c", "import time; time.sleep(2)"], timeout_seconds=0.05)

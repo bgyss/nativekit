@@ -284,3 +284,83 @@ z80_nmi:
         "z80_nmi_vector": 0x66,
     }
     return rom_path, expected
+
+
+def build_bus_fixture(directory, m68k_assembler, z80_assembler):
+    """Write a cartridge with byte/word/long 68000 and Z80 memory/I/O traffic."""
+    directory = Path(directory)
+    z80_code = _assemble(z80_assembler, directory, "bus-z80", """\
+        org 0
+        ld sp,$1ff0
+        ld a,$5a
+        ld ($0100),a
+        ld a,($0100)
+        out ($10),a
+        in a,($10)
+z80_loop:
+        jr z80_loop
+""")
+    m68k_lines = [
+        "        move.w #0,$a11200",
+        "        move.w #$0100,$a11100",
+        "        move.w #$0100,$a11200",
+    ]
+    for offset, value in enumerate(z80_code):
+        m68k_lines.append("        move.b #$%02x,$%08x" % (value, 0xA00000 + offset))
+    m68k_lines.extend((
+        "        move.w #0,$a11100",
+        "        move.b #$12,$00ff0101",
+        "        move.w #$3456,$00ff0102",
+        "        move.l #$789abcde,$00ff0104",
+        "        move.b $00ff0101,d0",
+        "        move.w $00ff0102,d1",
+        "        move.l $00ff0104,d2",
+        "        move.w #$8154,$c00004",
+    ))
+    for _ in range(12):
+        m68k_lines.append("        move.w #$1234,$c00000")
+    m68k_lines.extend(("bus_loop: addq.l #1,d4", "        bra.s bus_loop"))
+    m68k_code = _assemble(m68k_assembler, directory, "bus-m68k",
+                          "\n".join(m68k_lines) + "\n")
+    if len(m68k_code) >= 0x600:
+        raise RuntimeError("M68K bus fixture overlaps the Z80 setup/data region")
+
+    rom = bytearray(0x8000)
+    rom[0:4] = (0x00FFFF00).to_bytes(4, "big")
+    rom[4:8] = (0x200).to_bytes(4, "big")
+    for offset in range(8, 0x100, 4):
+        rom[offset:offset + 4] = (0x200).to_bytes(4, "big")
+    rom[0x100:0x110] = b"SEGA GENESIS    "
+    rom[0x120:0x150] = b"NATIVEKIT SYNTHETIC".ljust(48, b" ")
+    rom[0x150:0x180] = b"NATIVEKIT SYNTHETIC".ljust(48, b" ")
+    rom[0x1F0:0x200] = b"JUE             "
+    rom[0x200:0x200 + len(m68k_code)] = m68k_code
+    rom_path = directory / "nmdh-bus-synthetic.bin"
+    rom_path.write_bytes(rom)
+
+    scenario = {
+        "version": 1,
+        "region": "U",
+        "model": "md1va3",
+        "pad1": "3",
+        "pad2": "3",
+        "input": {},
+        "required_capabilities": [
+            "m68k_instruction", "m68k_state", "z80_instruction", "z80_state",
+            "flow_edge", "fetch_provenance", "master_clock", "bus_intervals",
+        ],
+        "stop": {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"},
+        "test_rebase_frame": 1,
+    }
+    scenario_path = directory / "nmdh-bus-synthetic.json"
+    scenario_path.write_text(json.dumps(scenario, sort_keys=True, separators=(",", ":")))
+    expected = {
+        "m68k_code_bytes": len(m68k_code),
+        "z80_code_bytes": len(z80_code),
+        "m68k_ram": 0xFF0100,
+        "z80_ram": 0x0100,
+        "z80_io": 0x0010,
+        "vdp_data": 0xC00000,
+        "main_pc": 0x200,
+    }
+    return rom_path, scenario_path, expected

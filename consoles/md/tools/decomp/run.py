@@ -151,6 +151,10 @@ def _validate_scenario(scenario, frames):
             pad = scenario["pad1"] if port == "1" else scenario["pad2"]
             if pad == "3" and any(button in ("X", "Y", "Z", "MODE") for button in buttons):
                 raise RunnerError("three-button pads do not have X, Y, Z or MODE")
+    if "test_rebase_frame" in scenario:
+        rebase_frame = scenario["test_rebase_frame"]
+        if type(rebase_frame) is not int or not 1 <= rebase_frame <= frames:
+            raise RunnerError("test_rebase_frame must name a frame within the bounded scenario")
     stop = scenario.get("stop")
     if not isinstance(stop, dict) or stop.get("cpu") not in ("m68k", "z80"):
         raise RunnerError("scenario stop must name m68k or z80")
@@ -221,6 +225,8 @@ def _preflight_core(core_path, scenario):
             core.nmd_decomp_set_stop_metadata
             core.nmd_decomp_should_stop_cpu
             core.nmd_decomp_mark_handed_off
+        if "test_rebase_frame" in scenario:
+            core.nmd_decomp_request_test_rebase
     except (OSError, AttributeError) as exc:
         raise RunnerError("core is missing required NMDH ABI symbols") from exc
     abi_version.restype = c.c_uint32
@@ -354,9 +360,9 @@ class StopEvent(c.Structure):
 class Handoff(c.Structure):
     _fields_ = [
         ("stop", StopEvent), ("master_clock", c.c_uint64),
-        ("z80_master_clock", c.c_uint32), ("vdp_clock", c.c_uint32),
-        ("ym_clock", c.c_uint32), ("psg_clock", c.c_uint32),
-        ("io_clock", c.c_uint32), ("m68k", M68KState), ("z80", Z80State),
+        ("z80_master_clock", c.c_uint64), ("vdp_clock", c.c_uint64),
+        ("ym_clock", c.c_uint64), ("psg_clock", c.c_uint64),
+        ("io_clock", c.c_uint64), ("m68k", M68KState), ("z80", Z80State),
     ]
 
 
@@ -694,6 +700,9 @@ def _worker(args):
         core.nmd_decomp_register.restype = c.c_int
         core.nmd_decomp_set_stop_metadata.argtypes = [c.c_uint32, c.c_uint64, c.c_uint64]
         core.nmd_decomp_set_stop_metadata.restype = None
+        if "test_rebase_frame" in scenario:
+            core.nmd_decomp_request_test_rebase.argtypes = []
+            core.nmd_decomp_request_test_rebase.restype = None
         core.nmd_decomp_reset()
         if not core.nmd_decomp_register(1, on_decomp, None):
             raise RunnerError("core refused NMDH ABI version 1")
@@ -711,6 +720,8 @@ def _worker(args):
         frame_limit = args.frames
         for frame_number in range(1, frame_limit + 1):
             current_input[0] = inputs.get(frame_number, {})
+            if scenario.get("test_rebase_frame") == frame_number:
+                core.nmd_decomp_request_test_rebase()
             core.retro_run()
             frame_count += 1
             if trace_errors:

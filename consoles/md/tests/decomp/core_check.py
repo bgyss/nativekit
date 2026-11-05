@@ -10,7 +10,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fixtures import build_handoff_fixture, build_m68k_fixture, build_z80_fixture
+from fixtures import build_bus_fixture, build_handoff_fixture, build_m68k_fixture, build_z80_fixture
 
 sys.path.insert(0, str(root / "consoles/md/tools/decomp"))
 import trace as nmdh_trace
@@ -315,7 +315,7 @@ def _assert_handoff(events, manifest, action, cpu, criterion, target=None):
         raise AssertionError("handoff reason or master-clock snapshot is wrong")
     if payload["handoff"]["m68k"]["cycles"] > event["master_clock"]:
         raise AssertionError("68000 snapshot is ahead of the synchronized clock")
-    if payload["handoff"]["z80"]["cycles"] * 15 > event["master_clock"]:
+    if payload["handoff"]["z80"]["cycles"] > event["master_clock"]:
         raise AssertionError("Z80 snapshot is ahead of the synchronized clock")
     if target is not None and manifest["trigger_event"]["next_pc"] != target:
         raise AssertionError("stop trigger did not match the requested post-instruction boundary")
@@ -404,9 +404,149 @@ def run_handoff_case():
                identities["abi_sha256"], identities["runner_sha256"]))
 
 
+def assert_bus_trace(events, expected):
+    accesses = [event for event in events if event["kind"] == 3]
+    if not accesses:
+        raise AssertionError("no NMDH bus interval events")
+
+    previous_epoch = 0
+    previous_sequence = 0
+    last_clock_by_cpu = {1: 0, 2: 0}
+    for event in events:
+        if event["sequence"] != previous_sequence + 1:
+            raise AssertionError("NMDH event ordering is not contiguous")
+        previous_sequence = event["sequence"]
+        if event["master_clock"] < last_clock_by_cpu[event["cpu"]]:
+            raise AssertionError("NMDH per-CPU master clock regressed: " +
+                                 repr((event["cpu"], last_clock_by_cpu[event["cpu"]],
+                                       event["master_clock"], event["epoch"])))
+        if event["epoch"] < previous_epoch:
+            raise AssertionError("NMDH master-clock epoch regressed")
+        last_clock_by_cpu[event["cpu"]] = event["master_clock"]
+        previous_epoch = event["epoch"]
+        if event["kind"] == 3:
+            bus = event["payload"]
+            if bus["start_clock"] > bus["completion_clock"]:
+                raise AssertionError("bus interval starts after completion")
+            if event["master_clock"] != bus["completion_clock"]:
+                raise AssertionError("BUS_ACCESS event clock differs from completion clock")
+
+    def has(cpu, address, width, operation, provenance=None):
+        return any(
+            event["cpu"] == cpu and event["payload"]["address"] == address and
+            event["payload"]["width"] == width and
+            event["payload"]["operation"] == operation and
+            (provenance is None or event["payload"]["provenance"] == provenance)
+            for event in accesses)
+
+    ram = expected["m68k_ram"]
+    for address, width in ((ram + 1, 1), (ram + 2, 2), (ram + 4, 2), (ram + 6, 2)):
+        if not has(1, address, width, 2):
+            raise AssertionError("missing 68000 byte/word/long write interval at %08x" % address)
+    for address, width in ((ram + 1, 1), (ram + 2, 2), (ram + 4, 2), (ram + 6, 2)):
+        if not has(1, address, width, 1):
+            raise AssertionError("missing 68000 byte/word/long read interval at %08x" % address)
+    if not has(1, expected["main_pc"], 2, 1, 1):
+        raise AssertionError("68000 opcode fetch provenance is missing")
+    if not any(event["cpu"] == 1 and event["payload"]["provenance"] in (2, 3)
+               for event in accesses):
+        raise AssertionError("68000 operand/data provenance is missing")
+    if not has(2, expected["z80_ram"], 1, 2):
+        raise AssertionError("Z80 RAM write interval is missing")
+    if not has(2, expected["z80_ram"], 1, 1):
+        raise AssertionError("Z80 RAM read interval is missing")
+    if not has(2, expected["z80_io"], 1, 2) or not has(2, expected["z80_io"], 1, 1):
+        raise AssertionError("Z80 I/O read/write interval is missing")
+
+    waits = [event for event in accesses if event["cpu"] == 1 and
+             event["payload"]["address"] == expected["vdp_data"] and
+             event["payload"]["operation"] == 2 and
+             event["payload"]["completion_clock"] - event["payload"]["start_clock"] > 28]
+    if not waits:
+        raise AssertionError("fixture did not observe a 68000 VDP wait-state interval")
+    if not any(event["epoch"] > 0 for event in events):
+        raise AssertionError("forced counter rebase did not advance the NMDH clock epoch")
+
+
+def expect_bad_bus_trace(events, expected, mutate, label):
+    altered = copy.deepcopy(events)
+    mutate(altered)
+    try:
+        assert_bus_trace(altered, expected)
+    except AssertionError:
+        return
+    raise AssertionError("planted bus " + label + " mismatch was accepted")
+
+
+def run_bus_case():
+    if not CORE.is_file() or not ASSEMBLER.is_file():
+        raise AssertionError("pinned test core and vasm must be built before the bus case")
+    z80_assembler = root / "build/toolchains/vasm/vasmz80_oldstyle"
+    if not z80_assembler.is_file():
+        raise AssertionError("pinned Z80 vasm must be built before the bus case")
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        rom_path, scenario_path, expected = build_bus_fixture(
+            directory, ASSEMBLER, z80_assembler)
+        estimate_dir = directory / "bus-estimate"
+        estimate = subprocess.run([
+            sys.executable, str(RUNNER), "--mode", "estimate", "--core", str(CORE),
+            "--rom", str(rom_path), "--scenario", str(scenario_path), "--frames", "2",
+            "--out", str(estimate_dir),
+        ], capture_output=True, text=True, timeout=450)
+        if estimate.returncode:
+            raise AssertionError("bus preflight failed: " + estimate.stderr.strip())
+        capture_dir = directory / "bus-capture"
+        capture = subprocess.run([
+            sys.executable, str(RUNNER), "--mode", "capture", "--core", str(CORE),
+            "--rom", str(rom_path), "--scenario", str(scenario_path), "--frames", "2",
+            "--estimate-file", str(estimate_dir / "estimate.json"), "--out", str(capture_dir),
+        ], capture_output=True, text=True, timeout=450)
+        if capture.returncode:
+            raise AssertionError("bus candidate capture failed: " + capture.stderr.strip())
+        events = list(nmdh_trace.read_nmdh(capture_dir / "capture.nmdh"))
+        manifest = json.loads((capture_dir / "manifest.json").read_text())
+        assert_bus_trace(events, expected)
+
+        accesses = [index for index, event in enumerate(events) if event["kind"] == 3]
+        first_bus = accesses[0]
+        expect_bad_bus_trace(events, expected,
+                             lambda altered: altered[first_bus]["payload"].__setitem__(
+                                 "start_clock", altered[first_bus]["payload"]["completion_clock"] + 1),
+                             "interval")
+        completion_index = next(index for index, event in enumerate(events)
+                                if event["kind"] == 3 and
+                                event["payload"]["start_clock"] > 0)
+        expect_bad_bus_trace(events, expected,
+                             lambda altered: altered[completion_index]["payload"].__setitem__(
+                                 "completion_clock",
+                                 altered[completion_index]["payload"]["start_clock"] - 1),
+                             "completion")
+        epoch_index = next(index for index, event in enumerate(events)
+                           if event["epoch"] > 0) + 1
+        expect_bad_bus_trace(events, expected,
+                             lambda altered: altered[epoch_index].__setitem__("epoch", 0),
+                             "epoch")
+        swapped = copy.deepcopy(events)
+        swapped[first_bus], swapped[first_bus + 1] = swapped[first_bus + 1], swapped[first_bus]
+        try:
+            assert_bus_trace(swapped, expected)
+        except AssertionError:
+            pass
+        else:
+            raise AssertionError("planted bus event-order mismatch was accepted")
+        identities = manifest["metadata"]["identities"]
+        print("bus synthetic: frames=%d events=%d intervals=%d epochs=%s rom_sha256=%s scenario_sha256=%s core_sha256=%s patch_sha256=%s abi_sha256=%s runner_sha256=%s" %
+              (manifest["frames_run"], len(events), len(accesses),
+               sorted({event["epoch"] for event in events}),
+               identities["rom_sha256"], identities["scenario_sha256"],
+               identities["core_sha256"], identities["patch_sha256"],
+               identities["abi_sha256"], identities["runner_sha256"]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", choices=("m68k", "z80", "handoff"), required=True)
+    parser.add_argument("--case", choices=("m68k", "z80", "handoff", "bus"), required=True)
     args = parser.parse_args()
     if args.case == "m68k":
         run_m68k_case()
@@ -414,6 +554,8 @@ def main():
         run_z80_case()
     elif args.case == "handoff":
         run_handoff_case()
+    elif args.case == "bus":
+        run_bus_case()
     print("decomp core %s checks: ok" % args.case)
 
 

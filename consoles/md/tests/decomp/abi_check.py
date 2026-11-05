@@ -81,6 +81,12 @@ def configure(library):
     library.nmd_decomp_set_stop_metadata.argtypes = [c.c_uint32, c.c_uint64, c.c_uint64]
     library.nmd_decomp_fill_stop.argtypes = [c.POINTER(Stop)]
     library.nmd_decomp_mark_handed_off.argtypes = []
+    library.nmd_decomp_clock.argtypes = [c.c_uint32]
+    library.nmd_decomp_clock.restype = c.c_uint64
+    library.nmd_decomp_clock_epoch.restype = c.c_uint64
+    library.nmd_decomp_adjust_clock.argtypes = [c.c_uint32]
+    library.nmd_decomp_request_test_rebase.argtypes = []
+    library.nmd_decomp_take_test_rebase.restype = c.c_int
     return callback_type
 
 
@@ -182,5 +188,17 @@ with tempfile.TemporaryDirectory() as temporary:
             stop.stop_clock) == (4, 2, 0x1234, 17, 720)
     empty.nmd_decomp_mark_handed_off()
     assert empty.nmd_decomp_should_stop_cpu(1, 0) == 1
+    empty.nmd_decomp_reset()
+    assert empty.nmd_decomp_clock(100) == 100
+    assert empty.nmd_decomp_clock_epoch() == 0
+    empty.nmd_decomp_adjust_clock(40)
+    assert empty.nmd_decomp_clock(100) == 140
+    assert empty.nmd_decomp_clock_epoch() == 1
+    empty.nmd_decomp_request_test_rebase()
+    assert empty.nmd_decomp_take_test_rebase() == 1
+    assert empty.nmd_decomp_take_test_rebase() == 0
+    empty.nmd_decomp_reset()
+    assert empty.nmd_decomp_clock(100) == 100
+    assert empty.nmd_decomp_clock_epoch() == 0
 
 print("decomp ABI checks: ok")

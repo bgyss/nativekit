@@ -75,6 +75,7 @@ The test-core state extension is versioned by the core/patch identity. It adds o
 ### Timing coverage
 
 NMDH v1 reports CPU bus start and completion clocks and instruction-boundary clocks. It must publish capability bits separately for bus intervals, code-fetch provenance, CPU-state capture, interrupt events, synchronized checkpoints, and controlled stop/replacement. The ABI must not claim exact idle-cycle or per-microcycle coverage unless a synthetic negative-control proves it. Unsupported timing detail remains a named capability gap for D05, not an implicit estimate.
+Clock epochs add the offset whenever the pinned core rebases its local counters; NMDH event master clocks stay in one global MCLK timeline. Sequence records callback publication order. Nested CPU synchronization can publish a later sequence with an earlier cross-CPU timestamp, so a merged time view sorts by `master_clock` and uses sequence as a tie-breaker; timestamps must remain monotonic within each CPU.
 
 ## Synthetic verification
 

@@ -179,20 +179,27 @@
 
 **Files:**
 - Modify: `tools/toolchains/patches/blastem/0002-nmd-decomp-hooks.patch`
+- Modify: ABI header/source for shared clock conversion, epochs and a synthetic rebase control
+- Modify: decomp runner for the fixture-only rebase request
+- Modify: ABI/runner checks for clock and rebase APIs
 - Modify: `consoles/md/tests/decomp/fixtures.py`
 - Modify: `consoles/md/tests/decomp/core_check.py`
 - Modify: `consoles/md/docs/decomp/abi-v1.md`
+- Modify: `docs/superpowers/specs/2026-11-04-nmd-decomp-abi-design.md` (publication order versus shared-clock ordering)
 
 **Interfaces:**
 - `BUS_ACCESS` records CPU, read/write/fetch/operand provenance, width, address, value, start clock, completion clock and epoch.
 - NMDH uses a shared master-clock epoch for interleaving both CPUs; NMDT v2 keeps its present per-device completion-event semantics.
+- Event sequence is callback publication order. Nested CPU synchronization may publish a later sequence with an earlier cross-CPU timestamp; merge by shared master clock and use sequence as the tie-breaker, while requiring per-CPU clocks to stay monotonic.
+- Longword 68000 accesses are emitted as two physical 16-bit bus-cycle records.
+- Synthetic bus scenarios may set `test_rebase_frame` to exercise the real counter-rebase path; this fixture-only control is part of the scenario identity.
 - Advertise start/end coverage only for instrumented CPU bus intervals. Do not advertise idle-cycle or per-microcycle coverage.
 
-- [ ] **Step 1: Add failing interval/provenance assertions.** Test byte/word/long 68000 accesses, Z80 memory/I/O, an observed wait-state access, and fetch versus operand/data. Assert start is not after completion and event ordering is stable across a counter-rebase boundary.
-- [ ] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case bus`.** Expected: fail because NMDH bus start clocks and common epochs are not emitted.
-- [ ] **Step 3: Instrument the access helpers before and after their mapped handler/stall paths.** Derive common clocks from the synchronized scheduler state; preserve NMDT hooks unchanged; set only verified capability bits and document the explicit timing gaps.
-- [ ] **Step 4: Rebuild and rerun the bus case.** Expected: synthetic expected intervals and fetch/data provenance pass; planted bad start/end, epoch and ordering values fail validation; NMDT v2 comparison remains byte-for-byte at the format/reader level.
-- [ ] **Step 5: Commit** `nativemd: record NMDH bus intervals`.
+- [x] **Step 1: Add failing interval/provenance assertions.** Test byte/word/long 68000 accesses, Z80 memory/I/O, an observed wait-state access, and fetch versus operand/data. Assert start is not after completion and event ordering is stable across a counter-rebase boundary.
+- [x] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case bus`.** Expected: fail in preflight because the baseline core lacks `bus_intervals`.
+- [x] **Step 3: Instrument the access helpers before and after their mapped handler/stall paths.** Convert local clocks through one versioned offset/epoch, derive interval endpoints around the actual mapped handlers, preserve NMDT hooks unchanged, set only verified capability bits, and document the explicit timing gaps.
+- [x] **Step 4: Rebuild and rerun the bus case.** Expected: synthetic expected intervals and fetch/data provenance pass; planted bad start/end, epoch and ordering values fail validation; NMDT v2 comparison remains byte-for-byte at the format/reader level.
+- [x] **Step 5: Commit** `nativemd: record NMDH bus intervals`.
 
 ### Task 7: Prove complete synchronized checkpoint replay
 
