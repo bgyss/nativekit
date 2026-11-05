@@ -95,10 +95,12 @@ reference execution; that does not resume a REPLACE decision point.
 The file uses little-endian integers. The 12-byte fixed header is `NMDH`,
 u16 version (`1`), u16 flags (`0`), and u32 metadata length, followed by at
 most 16,384 bytes of canonical UTF-8 JSON identity/capability metadata. Each
-event record is a u32 length followed by at most 4,096 bytes of typed event
-payload. The 48-byte footer is `NHEN`, u64 record count, u8 completion status,
-three zero reserved bytes and SHA-256 of the complete header and records before
-the footer.
+event record is a u32 length followed by at most 4,096 bytes of canonical
+UTF-8 JSON. Event JSON has `struct_size`, `kind`, `cpu`, `flags`, `sequence`,
+`master_clock`, `epoch`, `pc`, `next_pc` and an event-specific `payload`. The
+48-byte footer is `NHEN`, u64 record count, u8 completion status, three zero
+reserved bytes and SHA-256 of the complete header and records before the
+footer.
 
 Completion status `0` means complete. Status `1` is timeout, `2` storage
 limit, `3` core error and `4` cancellation; these statuses are never accepted
@@ -107,10 +109,22 @@ unknown events/capabilities, digest or count mismatches, nonzero reserved
 bytes, missing/incomplete footers and trailing data. Missing footer means the
 worker was interrupted or failed. D01 does not split a capture into chunks.
 
-The metadata records SHA-256 identities for ROM bytes, canonical scenario,
-core binary, patch set, ABI source/header and runner, plus core revision,
-capabilities and machine options. It never records local paths. Capture mode
-requires a same-identity preflight estimate for the requested frame count.
+The metadata JSON contains `abi_version`, the 64-bit `capabilities` mask,
+`identities` with `rom_sha256`, `scenario_sha256`, `core_sha256`,
+`patch_sha256`, `abi_sha256` and `runner_sha256`, plus pinned core revision and
+machine `options`. It never records local paths. The runner
+scenario is version 1 and names region, model, both controller types, frame
+inputs, required capabilities, and a CPU stop criterion/action. Estimate mode
+captures a bounded three-frame sample and reports projected seconds and bytes
+for the requested frame count. Capture mode requires an estimate with the same
+ROM/scenario/core/patch/ABI/runner identities and frame count. The default
+limits are 420 seconds and 268,435,456 bytes for the capture; a timeout or
+storage overflow leaves a `.partial` file and an explicit incomplete status.
+The scenario capability list must include both instruction and state bits for
+its stop CPU. Non-frame stops also require controlled-stop; interrupt stops
+require interrupt events; REPLACE requires the handoff bit. The runner also
+keeps the existing NMDT v2 bus stream in a separate file; the NMDT format is
+unchanged.
 
 ## Status
 
