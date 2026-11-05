@@ -410,6 +410,22 @@ def _load_inputs(scenario, frames):
     return current
 
 
+def instruction_stop_matches(stop, event, instruction_count, pending_interrupt=False):
+    """Match a requested stop against the instruction just completed."""
+    cpu_id = TRACE_M68K if stop["cpu"] == "m68k" else TRACE_Z80
+    if event["cpu"] != cpu_id:
+        return False
+    if stop["criterion"] == "interrupt":
+        return event["kind"] == EVENT_INSTRUCTION and pending_interrupt
+    if event["kind"] != EVENT_INSTRUCTION:
+        return False
+    if stop["criterion"] in ("pc", "return_sentinel"):
+        return event["next_pc"] == stop["value"]
+    if stop["criterion"] == "instruction_budget":
+        return instruction_count >= stop["value"]
+    return False
+
+
 class LimitedStream:
     """File wrapper that bounds NMDT writes while allowing its header seek."""
 
@@ -548,23 +564,6 @@ def _worker(args):
     def input_state(port, device, index, button):
         return int(device == 1 and index == 0 and button in current_input[0].get(port, set()))
 
-    def should_stop(event):
-        stop = scenario["stop"]
-        cpu_name = "m68k" if event.cpu == TRACE_M68K else "z80"
-        if cpu_name != stop["cpu"]:
-            return False
-        if stop["criterion"] == "interrupt":
-            if event.kind == EVENT_INTERRUPT:
-                stop_state["pending_interrupt"] = True
-            return event.kind == EVENT_INSTRUCTION and stop_state["pending_interrupt"]
-        if event.kind != EVENT_INSTRUCTION:
-            return False
-        if stop["criterion"] in ("pc", "return_sentinel") and event.pc == stop["value"]:
-            return True
-        if stop["criterion"] == "instruction_budget":
-            return instruction_counts[cpu_name] >= stop["value"]
-        return False
-
     @c.CFUNCTYPE(c.c_int, c.c_void_p, c.POINTER(DecompEvent))
     def on_decomp(user, event_pointer):
         try:
@@ -573,9 +572,16 @@ def _worker(args):
             event_counts[str(event.kind)] = event_counts.get(str(event.kind), 0) + 1
             if event.kind == EVENT_INSTRUCTION:
                 instruction_counts[name] += 1
-            nmdh_writer.write_event(_event_dict(event))
+            event_record = _event_dict(event)
+            nmdh_writer.write_event(event_record)
+            if (event.kind == EVENT_INTERRUPT and
+                    name == scenario["stop"]["cpu"] and
+                    scenario["stop"]["criterion"] == "interrupt"):
+                stop_state["pending_interrupt"] = True
             if (not estimate_mode and not stop_state["triggered"] and
-                    should_stop(event)):
+                    instruction_stop_matches(scenario["stop"], event_record,
+                                             instruction_counts[name],
+                                             stop_state["pending_interrupt"])):
                 stop_state["triggered"] = True
                 stop_state["action"] = (ACTION_REPLACE if scenario["stop"]["action"] == "replace"
                                          else ACTION_STOP)

@@ -129,13 +129,14 @@
 - [x] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case m68k`.** Expected: fail because the baseline core exports no NMDH ABI or 68000 instruction/state capability.
 - [x] **Step 3: Extend the BlastEm patch and build stamps.** Patch `cpu_dsl.py` to wrap the complete opcode body in both generated 68000 execution-loop variants; add the minimal context fields and prototypes in `m68k.cpu`, and snapshot/fetch helpers in `m68k_util.c`. Add the NMDH object and exports; include `cpu_dsl.py`, `decomp_abi.c`, `.h` and all BlastEm patches in `setup.sh` patch/source stamps and copied sources. Fix estimate identity validation in `run.py` as exposed by this actual-core run, and pin it in `runner_check.py`. Preserve all NMDT v2 calls and fields.
 - [x] **Step 4: Run `mise run tools:md` and `python3 consoles/md/tests/decomp/core_check.py --case m68k`.** Expected: the real pinned core reports the required 68000 capability and the synthetic ROM's event/state assertions pass; planted PC, opcode-word, register and condition-code mismatches fail.
-- [ ] **Step 5: Commit** `nativemd: trace 68000 instruction boundaries`.
+- [x] **Step 5: Commit** `nativemd: trace 68000 instruction boundaries`.
 
 ### Task 4: Instrument Z80 instruction and state events
 
 **Files:**
 - Modify: `tools/toolchains/patches/blastem/0002-nmd-decomp-hooks.patch`
 - Modify: `consoles/md/tools/decomp/run.py` (match target/return stops against post-instruction `next_pc`)
+- Modify: `consoles/md/tests/decomp/runner_check.py` (pin next-PC stop matching)
 - Modify: `consoles/md/tests/decomp/fixtures.py`
 - Modify: `consoles/md/tests/decomp/core_check.py`
 
@@ -144,11 +145,11 @@
 - Z80 snapshots contain main and alternate registers, AF/BC/DE/HL, IX/IY, SP/PC/WZ, I/R, IM/IFF state, flags, reset/BUSREQ/BUSACK, pending interrupt state and relevant cycles.
 - Z80 instruction events use the fetched-byte sequence from actual core reads, not a static decoder's guessed extent.
 
-- [ ] **Step 1: Add failing Z80 assertions.** The fixture starts the Z80 through the real Genesis bus path, copies code into Z80 RAM and checks immediate, branch, CALL/RET, alternate-register and flag state, WZ visibility, and concurrent 68000 activity.
-- [ ] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case z80`.** Expected: fail because Z80 instruction/state capabilities are absent.
-- [ ] **Step 3: Instrument `z80.cpu`, `z80.h` and `z80_util.c` through the candidate patch.** Emit instruction boundaries and fetched-byte provenance; copy the full state into NMDH payloads without exposing internal pointers.
-- [ ] **Step 4: Rebuild with `mise run tools:md` and rerun the Z80 case.** Expected: both CPU traces pass on real synthetic instructions; a planted wrong WZ/register/PC observation is rejected by the fixture checker.
-- [ ] **Step 5: Commit** `nativemd: trace Z80 instruction boundaries`.
+- [x] **Step 1: Add failing Z80 assertions.** The fixture starts the Z80 through the real Genesis bus path, copies code into Z80 RAM and checks immediate, branch, CALL/RET, alternate-register and flag state, WZ visibility, and concurrent 68000 activity.
+- [x] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case z80`.** Expected: fail because Z80 instruction/state capabilities are absent.
+- [x] **Step 3: Instrument `z80.cpu`, `z80_util.c` and the generated dispatch path through the candidate patch.** Add state fields to `z80.cpu` so the generated `z80.h` receives them; hook each main-table dispatch after a completed instruction, append actual prefix fetches at non-main tables, and copy the full state into NMDH payloads without exposing internal pointers.
+- [x] **Step 4: Rebuild with `mise run tools:md` and rerun the Z80 case.** Expected: both CPU traces pass on real synthetic instructions; a planted wrong WZ/register/PC observation is rejected by the fixture checker.
+- [x] **Step 5: Commit** `nativemd: trace Z80 instruction boundaries`.
 
 ### Task 5: Add flow, interrupt and synchronized stop handoff
 

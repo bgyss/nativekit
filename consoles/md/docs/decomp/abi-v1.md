@@ -44,6 +44,11 @@ CPU hidden/prefetch and pending interrupt fields needed by the execution
 boundary. The pinned context fields and their semantics are audited against
 live synthetic execution before a capability is claimed.
 
+For Z80 state, `main` and `alt` use the pinned context order `[B,C,D,E,H,L,F,A]`.
+Flag fields are the candidate core's raw representations, not a packed F byte:
+`zflag`, `pvflag`, `nflag`, `chflags` and `last_flag_result` are preserved as
+stored so replay checks can compare the exact internal state.
+
 The callback returns `NMD_DECOMP_CONTINUE` (`0`), `NMD_DECOMP_STOP` (`1`) or
 `NMD_DECOMP_REPLACE` (`2`). STOP and REPLACE are valid only on an
 `INSTRUCTION` event; the core rejects any other action as a trace error and

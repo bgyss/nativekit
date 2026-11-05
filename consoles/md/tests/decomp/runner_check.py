@@ -144,6 +144,15 @@ with tempfile.TemporaryDirectory() as temporary:
     assert result.returncode != 0 and "libretro" in result.stderr.lower(), result.stderr
     assert not (capture_out / "capture.nmdh").exists()
 
+    instruction_event = {"kind": 1, "cpu": 1, "pc": 0x200, "next_pc": 0x206}
+    pc_stop = {"cpu": "m68k", "criterion": "pc", "action": "stop", "value": 0x206}
+    sentinel_stop = {"cpu": "m68k", "criterion": "return_sentinel",
+                     "action": "replace", "value": 0x206}
+    assert runner.instruction_stop_matches(pc_stop, instruction_event, 1, False)
+    assert runner.instruction_stop_matches(sentinel_stop, instruction_event, 1, False)
+    assert not runner.instruction_stop_matches({**pc_stop, "value": 0x200},
+                                               instruction_event, 1, False)
+
     timed_out = runner.supervise_child(
         [sys.executable, "-c", "import time; time.sleep(2)"], timeout_seconds=0.05)
     assert timed_out.timed_out and timed_out.returncode != 0
