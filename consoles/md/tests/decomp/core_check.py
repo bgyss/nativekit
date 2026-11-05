@@ -544,9 +544,87 @@ def run_bus_case():
                identities["abi_sha256"], identities["runner_sha256"]))
 
 
+def _checkpoint_scenario(stop, boundary):
+    required = [
+        "m68k_instruction", "m68k_state", "z80_instruction", "z80_state",
+        "flow_edge", "reset_exception_interrupt", "fetch_provenance",
+        "master_clock", "sync_checkpoint",
+    ]
+    if boundary == "stop":
+        required.append("controlled_stop")
+    checkpoint_test = {"boundary": boundary, "continuation_frames": 1}
+    if boundary == "post_frame":
+        checkpoint_test["frame"] = 1
+    return {
+        "version": 1, "region": "U", "model": "md1va3", "pad1": "3", "pad2": "3",
+        "input": {}, "required_capabilities": required, "stop": stop,
+        "checkpoint_test": checkpoint_test,
+    }
+
+
+def _run_checkpoint_replay(directory, rom_path, stop, boundary, label):
+    scenario = _checkpoint_scenario(stop, boundary)
+    scenario_path = directory / (label + ".json")
+    scenario_path.write_text(json.dumps(scenario, sort_keys=True, separators=(",", ":")))
+    estimate_dir = directory / (label + "-estimate")
+    estimate = subprocess.run([
+        sys.executable, str(RUNNER), "--mode", "estimate", "--core", str(CORE),
+        "--rom", str(rom_path), "--scenario", str(scenario_path), "--frames", "2",
+        "--out", str(estimate_dir),
+    ], capture_output=True, text=True, timeout=450)
+    if estimate.returncode:
+        raise AssertionError("%s estimate failed: %s" % (label, estimate.stderr.strip()))
+    capture_dir = directory / (label + "-capture")
+    capture = subprocess.run([
+        sys.executable, str(RUNNER), "--mode", "capture", "--core", str(CORE),
+        "--rom", str(rom_path), "--scenario", str(scenario_path), "--frames", "2",
+        "--estimate-file", str(estimate_dir / "estimate.json"), "--out", str(capture_dir),
+    ], capture_output=True, text=True, timeout=450)
+    if capture.returncode:
+        raise AssertionError("%s checkpoint replay failed: %s" % (label, capture.stderr.strip()))
+    return json.loads((capture_dir / "manifest.json").read_text())
+
+
+def run_checkpoint_case():
+    if not CORE.is_file() or not ASSEMBLER.is_file():
+        raise AssertionError("pinned test core and vasm must be built before the checkpoint case")
+    z80_assembler = root / "build/toolchains/vasm/vasmz80_oldstyle"
+    if not z80_assembler.is_file():
+        raise AssertionError("pinned Z80 vasm must be built before the checkpoint case")
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        rom_path, _, expected = build_z80_fixture(directory, ASSEMBLER, z80_assembler)
+        post_frame = _run_checkpoint_replay(
+            directory, rom_path,
+            {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"},
+            "post_frame", "checkpoint-frame")
+        stop = _run_checkpoint_replay(
+            directory, rom_path,
+            {"cpu": "z80", "criterion": "pc", "action": "stop",
+             "value": expected["wz_instruction_pc"] + 3},
+            "stop", "checkpoint-handoff")
+        for label, manifest in (("post-frame", post_frame), ("handoff", stop)):
+            replay = manifest.get("checkpoint_replay")
+            if not isinstance(replay, dict) or replay.get("status") != "ok":
+                raise AssertionError("%s checkpoint replay report is missing or incomplete" % label)
+            for field in ("nmdh_equal", "nmdt_equal", "cpu_snapshots_equal",
+                          "video_equal", "audio_equal", "final_state_equal"):
+                if replay.get(field) is not True:
+                    raise AssertionError("%s checkpoint replay mismatch: %s" % (label, field))
+        if stop["checkpoint_replay"]["checkpoint_snapshot"]["z80"]["wz"] != 0x7F11:
+            raise AssertionError("synchronized checkpoint omitted the Z80 WZ value")
+        for label, manifest in (("post-frame", post_frame), ("handoff", stop)):
+            identities = manifest["metadata"]["identities"]
+            print("checkpoint %s: rom_sha256=%s scenario_sha256=%s core_sha256=%s patch_sha256=%s abi_sha256=%s runner_sha256=%s state_sha256=%s" %
+                  (label, identities["rom_sha256"], identities["scenario_sha256"],
+                   identities["core_sha256"], identities["patch_sha256"],
+                   identities["abi_sha256"], identities["runner_sha256"],
+                   manifest["checkpoint_replay"]["checkpoint_state_sha256"]))
+        print("checkpoint synthetic: post-frame and synchronized-stop replay equal")
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", choices=("m68k", "z80", "handoff", "bus"), required=True)
+    parser.add_argument("--case", choices=("m68k", "z80", "handoff", "bus", "checkpoint"), required=True)
     args = parser.parse_args()
     if args.case == "m68k":
         run_m68k_case()
@@ -556,6 +634,8 @@ def main():
         run_handoff_case()
     elif args.case == "bus":
         run_bus_case()
+    elif args.case == "checkpoint":
+        run_checkpoint_case()
     print("decomp core %s checks: ok" % args.case)
 
 

@@ -184,6 +184,24 @@ def _validate_scenario(scenario, frames):
         raise RunnerError("interrupt stop requires reset_exception_interrupt")
     if stop["action"] == "replace" and not (required & (1 << 11)):
         raise RunnerError("REPLACE action requires replace_handoff")
+    checkpoint_test = scenario.get("checkpoint_test")
+    if checkpoint_test is not None:
+        if not isinstance(checkpoint_test, dict) or checkpoint_test.get("boundary") not in (
+                "post_frame", "stop"):
+            raise RunnerError("checkpoint_test must select post_frame or stop")
+        continuation_frames = checkpoint_test.get("continuation_frames")
+        if type(continuation_frames) is not int or not 1 <= continuation_frames <= 2:
+            raise RunnerError("checkpoint_test continuation_frames must be 1 or 2")
+        if not (required & (1 << 9)):
+            raise RunnerError("checkpoint_test requires sync_checkpoint")
+        if checkpoint_test["boundary"] == "post_frame":
+            frame = checkpoint_test.get("frame")
+            if (stop["criterion"] != "frame_limit" or type(frame) is not int or
+                    frame < 1 or frame + continuation_frames > frames):
+                raise RunnerError("post-frame checkpoint range must fit a frame_limit scenario")
+        elif (stop["criterion"] == "frame_limit" or stop["action"] != "stop" or
+              continuation_frames + 1 > frames):
+            raise RunnerError("stop checkpoint requires a STOP boundary and remaining replay frames")
     return scenario
 
 
@@ -239,6 +257,18 @@ def _preflight_core(core_path, scenario):
     if capabilities & required != required:
         missing = [name for name, bit in NMDH_CAPABILITIES.items() if required & bit and not capabilities & bit]
         raise RunnerError("core lacks required capability: " + ", ".join(missing))
+    if "checkpoint_test" in scenario:
+        try:
+            core.nmd_decomp_resume_stop
+            core.nmd_decomp_test_snapshot
+            core.nmd_decomp_get_checkpoint_state
+            core.nmd_decomp_set_checkpoint_state
+            core.nmd_trace_get_checkpoint_state
+            core.nmd_trace_set_checkpoint_state
+            core.nmd_decomp_get_libretro_audio_checkpoint_state
+            core.nmd_decomp_set_libretro_audio_checkpoint_state
+        except AttributeError as exc:
+            raise RunnerError("core is missing required NMDH checkpoint state symbols") from exc
     try:
         trace_version = core.nmd_trace_version
         trace_capabilities = core.nmd_trace_capabilities
@@ -254,13 +284,15 @@ def _preflight_core(core_path, scenario):
     return capabilities
 
 
-def _require_libretro_api(core_path):
-    required = (
+def _require_libretro_api(core_path, checkpoint_test=False):
+    required = [
         "retro_set_environment", "retro_set_video_refresh", "retro_set_audio_sample",
         "retro_set_audio_sample_batch", "retro_set_input_poll", "retro_set_input_state",
         "retro_init", "retro_get_system_info", "retro_load_game", "retro_get_system_av_info",
         "retro_run", "retro_unload_game", "retro_deinit",
-    )
+    ]
+    if checkpoint_test:
+        required.extend(("retro_serialize_size", "retro_serialize", "retro_unserialize"))
     try:
         core = c.CDLL(str(Path(core_path).resolve()))
         for symbol in required:
@@ -388,6 +420,62 @@ def _state_dict(state):
             for name, value in ((name, getattr(state, name)) for name, _ in state._fields_)}
 
 
+def _handoff_dict(data):
+    stop = data.stop
+    return {
+        "criterion": STOP_CRITERION_NAMES.get(stop.criterion, "unknown"),
+        "reason": stop.reason, "value": stop.value,
+        "instruction_count": stop.instruction_count, "stop_clock": stop.stop_clock,
+        "handoff": {**_machine_snapshot_dict(data), "stop_clock": stop.stop_clock},
+    }
+
+
+def _machine_snapshot_dict(data):
+    return {
+        "master_clock": data.master_clock,
+        "z80_master_clock": data.z80_master_clock,
+        "vdp_clock": data.vdp_clock, "ym_clock": data.ym_clock,
+        "psg_clock": data.psg_clock, "io_clock": data.io_clock,
+        "m68k": _state_dict(data.m68k), "z80": _state_dict(data.z80),
+    }
+
+
+def _snapshot_differences(before, after, prefix=""):
+    differences = []
+    for key in sorted(set(before) | set(after)):
+        path = prefix + "." + key if prefix else key
+        left = before.get(key) if isinstance(before, dict) else None
+        right = after.get(key) if isinstance(after, dict) else None
+        if isinstance(left, dict) and isinstance(right, dict):
+            differences.extend(_snapshot_differences(left, right, path))
+        elif left != right:
+            differences.append((path, left, right))
+    return differences
+
+
+def checkpoint_envelope(state, metadata, boundary):
+    return {
+        "version": 1, "boundary": boundary, "metadata": metadata,
+        "state": state, "state_sha256": hashlib.sha256(state).hexdigest(),
+    }
+
+
+def validate_checkpoint_envelope(checkpoint, expected_metadata):
+    if not isinstance(checkpoint, dict) or checkpoint.get("version") != 1:
+        raise RunnerError("unsupported checkpoint envelope version")
+    if checkpoint.get("boundary") not in ("post_frame", "stop"):
+        raise RunnerError("invalid checkpoint boundary")
+    if not isinstance(checkpoint.get("metadata"), dict):
+        raise RunnerError("checkpoint is missing its input identities")
+    nmdh_trace.validate_identity(checkpoint["metadata"], expected_metadata)
+    state = checkpoint.get("state")
+    if not isinstance(state, bytes) or not state:
+        raise RunnerError("checkpoint has no serialized state bytes")
+    if checkpoint.get("state_sha256") != hashlib.sha256(state).hexdigest():
+        raise RunnerError("checkpoint state digest mismatch")
+    return state
+
+
 def _event_dict(event):
     kind = event.kind
     if kind == EVENT_INSTRUCTION:
@@ -414,20 +502,7 @@ def _event_dict(event):
                    "phase": data.phase, "stack_pointer": data.stack_pointer}
     elif kind in (EVENT_STOP, EVENT_REPLACE):
         data = event.payload.handoff
-        stop = data.stop
-        payload = {
-            "criterion": STOP_CRITERION_NAMES.get(stop.criterion, "unknown"),
-            "reason": stop.reason, "value": stop.value,
-            "instruction_count": stop.instruction_count, "stop_clock": stop.stop_clock,
-            "handoff": {
-                "master_clock": data.master_clock,
-                "stop_clock": stop.stop_clock,
-                "z80_master_clock": data.z80_master_clock,
-                "vdp_clock": data.vdp_clock, "ym_clock": data.ym_clock,
-                "psg_clock": data.psg_clock, "io_clock": data.io_clock,
-                "m68k": _state_dict(data.m68k), "z80": _state_dict(data.z80),
-            },
-        }
+        payload = _handoff_dict(data)
     else:
         data = event.payload.stop
         payload = {"criterion": data.criterion, "reason": data.reason,
@@ -506,7 +581,7 @@ def _worker(args):
     metadata = _make_identity(core_path, rom_path, scenario, capabilities)
     if metadata != expected_metadata:
         raise RunnerError("capture identities changed after preflight")
-    _require_libretro_api(core_path)
+    _require_libretro_api(core_path, "checkpoint_test" in scenario)
 
     output.mkdir(parents=True, exist_ok=True)
     estimate_mode = args.worker_mode == "estimate"
@@ -527,6 +602,7 @@ def _worker(args):
         "pending_interrupt": False, "triggered": False, "request_sent": False,
         "action": 0, "trigger_event": None, "handoff_event": None,
     }
+    replay_state = {"active": False}
     current_input = [{}]
     video_hash = hashlib.sha256()
     audio_hash = hashlib.sha256()
@@ -591,21 +667,37 @@ def _worker(args):
             trace_errors.append("missing or unsupported video frame")
             return
         for y in range(height):
-            video_hash.update(c.string_at(data + y * pitch, width * 4))
-        video_frames[0] += 1
+            pixels = c.string_at(data + y * pitch, width * 4)
+            if replay_state["active"]:
+                replay_state["video_hash"].update(pixels)
+            else:
+                video_hash.update(pixels)
+        if replay_state["active"]:
+            replay_state["video_frames"] += 1
+        else:
+            video_frames[0] += 1
 
     @c.CFUNCTYPE(c.c_size_t, c.POINTER(c.c_int16), c.c_size_t)
     def audio_batch(data, frames):
         if frames and data:
-            audio_hash.update(c.string_at(data, frames * 4))
-            audio_frames[0] += frames
+            samples = c.string_at(data, frames * 4)
+            if replay_state["active"]:
+                replay_state["audio_hash"].update(samples)
+                replay_state["audio_frames"] += frames
+            else:
+                audio_hash.update(samples)
+                audio_frames[0] += frames
         return frames
 
     @c.CFUNCTYPE(None, c.c_int16, c.c_int16)
     def audio_sample(left, right):
-        audio_hash.update(int(left).to_bytes(2, sys.byteorder, signed=True))
-        audio_hash.update(int(right).to_bytes(2, sys.byteorder, signed=True))
-        audio_frames[0] += 1
+        target = replay_state["audio_hash"] if replay_state["active"] else audio_hash
+        target.update(int(left).to_bytes(2, sys.byteorder, signed=True))
+        target.update(int(right).to_bytes(2, sys.byteorder, signed=True))
+        if replay_state["active"]:
+            replay_state["audio_frames"] += 1
+        else:
+            audio_frames[0] += 1
 
     @c.CFUNCTYPE(None)
     def input_poll():
@@ -620,10 +712,17 @@ def _worker(args):
         try:
             event = event_pointer.contents
             name = "m68k" if event.cpu == TRACE_M68K else "z80"
+            event_record = _event_dict(event)
+            if replay_state["active"]:
+                replay_state["nmdh_hash"].update(nmdh_trace.canonical_json(event_record))
+                replay_state["nmdh_hash"].update(b"\n")
+                replay_state["nmdh_events"] += 1
+                if event.kind == EVENT_INSTRUCTION:
+                    replay_state["instruction_counts"][name] += 1
+                return ACTION_CONTINUE
             event_counts[str(event.kind)] = event_counts.get(str(event.kind), 0) + 1
             if event.kind == EVENT_INSTRUCTION:
                 instruction_counts[name] += 1
-            event_record = _event_dict(event)
             nmdh_writer.write_event(event_record)
             if (event.kind == EVENT_INTERRUPT and
                     name == scenario["stop"]["cpu"] and
@@ -659,7 +758,14 @@ def _worker(args):
                  c.c_uint32, c.c_uint32)
     def on_nmdt(user, clock, device, operation, width, address, value):
         try:
-            nmdt_writer.emit(nmdt_trace.Event(clock, device, operation, width, address, value))
+            record = (int(clock), int(device), int(operation), int(width),
+                      int(address), int(value))
+            if replay_state["active"]:
+                replay_state["nmdt_hash"].update(nmdh_trace.canonical_json(record))
+                replay_state["nmdt_hash"].update(b"\n")
+                replay_state["nmdt_records"] += 1
+            else:
+                nmdt_writer.emit(nmdt_trace.Event(*record))
         except Exception as exc:
             trace_errors.append("NMDT callback failed: " + str(exc))
 
@@ -703,6 +809,17 @@ def _worker(args):
         if "test_rebase_frame" in scenario:
             core.nmd_decomp_request_test_rebase.argtypes = []
             core.nmd_decomp_request_test_rebase.restype = None
+        if "checkpoint_test" in scenario:
+            core.nmd_decomp_resume_stop.argtypes = []
+            core.nmd_decomp_resume_stop.restype = c.c_int
+            core.nmd_decomp_test_snapshot.argtypes = [c.POINTER(Handoff)]
+            core.nmd_decomp_test_snapshot.restype = c.c_int
+            core.retro_serialize_size.argtypes = []
+            core.retro_serialize_size.restype = c.c_size_t
+            core.retro_serialize.argtypes = [c.c_void_p, c.c_size_t]
+            core.retro_serialize.restype = c.c_bool
+            core.retro_unserialize.argtypes = [c.c_void_p, c.c_size_t]
+            core.retro_unserialize.restype = c.c_bool
         core.nmd_decomp_reset()
         if not core.nmd_decomp_register(1, on_decomp, None):
             raise RunnerError("core refused NMDH ABI version 1")
@@ -718,6 +835,68 @@ def _worker(args):
         core.retro_get_system_av_info(c.byref(av_info))
         inputs = _load_inputs(scenario, args.frames)
         frame_limit = args.frames
+        checkpoint_test = scenario.get("checkpoint_test")
+        checkpoint_replay = None
+        checkpoint_reached = False
+        checkpoint_frame_count = None
+
+        def serialized_machine_state():
+            state_size = core.retro_serialize_size()
+            if not state_size or state_size > args.max_bytes:
+                raise RunnerError("checkpoint state size is invalid or exceeds max_bytes")
+            state_buffer = c.create_string_buffer(state_size)
+            if not core.retro_serialize(c.cast(state_buffer, c.c_void_p), state_size):
+                raise RunnerError("Libretro retro_serialize failed at a safe boundary")
+            return state_buffer.raw
+
+        def machine_snapshot():
+            snapshot = Handoff()
+            if not core.nmd_decomp_test_snapshot(c.byref(snapshot)):
+                raise RunnerError("core could not expose a synchronized machine snapshot")
+            return _machine_snapshot_dict(snapshot)
+
+        def replay_branch(first_frame, replay_frames):
+            replay_state.clear()
+            replay_state.update({
+                "active": True,
+                "nmdh_hash": hashlib.sha256(),
+                "nmdh_events": 0,
+                "nmdt_hash": hashlib.sha256(),
+                "nmdt_records": 0,
+                "instruction_counts": {"m68k": 0, "z80": 0},
+                "video_hash": hashlib.sha256(),
+                "video_frames": 0,
+                "audio_hash": hashlib.sha256(),
+                "audio_frames": 0,
+            })
+            try:
+                for replay_index in range(replay_frames):
+                    frame_number = first_frame + replay_index
+                    current_input[0] = inputs.get(frame_number, {})
+                    core.retro_run()
+                    if trace_errors:
+                        raise RunnerError("checkpoint replay callback error: " +
+                                          "; ".join(trace_errors))
+                    if core.nmd_decomp_error() or core.nmd_trace_error():
+                        raise RunnerError("core reported an error during checkpoint replay")
+                endpoint_state = serialized_machine_state()
+                endpoint_snapshot = machine_snapshot()
+                return {
+                    "nmdh_sha256": replay_state["nmdh_hash"].hexdigest(),
+                    "nmdh_events": replay_state["nmdh_events"],
+                    "nmdt_sha256": replay_state["nmdt_hash"].hexdigest(),
+                    "nmdt_records": replay_state["nmdt_records"],
+                    "instruction_counts": dict(replay_state["instruction_counts"]),
+                    "video_sha256": replay_state["video_hash"].hexdigest(),
+                    "video_frames": replay_state["video_frames"],
+                    "audio_sha256": replay_state["audio_hash"].hexdigest(),
+                    "audio_frames": replay_state["audio_frames"],
+                    "endpoint_state_sha256": hashlib.sha256(endpoint_state).hexdigest(),
+                    "endpoint_snapshot": endpoint_snapshot,
+                }, endpoint_state
+            finally:
+                replay_state["active"] = False
+
         for frame_number in range(1, frame_limit + 1):
             current_input[0] = inputs.get(frame_number, {})
             if scenario.get("test_rebase_frame") == frame_number:
@@ -726,11 +905,84 @@ def _worker(args):
             frame_count += 1
             if trace_errors:
                 raise RunnerError("capture callback error: " + "; ".join(trace_errors))
-            if not estimate_mode and stop_state["triggered"]:
+            if (checkpoint_test and checkpoint_test["boundary"] == "post_frame" and
+                    frame_number == checkpoint_test["frame"]):
+                checkpoint_reached = True
+                checkpoint_frame_count = frame_count
                 break
+            if not estimate_mode and stop_state["triggered"]:
+                if checkpoint_test and checkpoint_test["boundary"] == "stop":
+                    checkpoint_reached = True
+                    checkpoint_frame_count = frame_count
+                break
+        if not estimate_mode and checkpoint_test:
+            if not checkpoint_reached:
+                raise RunnerError("checkpoint boundary was not reached")
+            checkpoint_state = serialized_machine_state()
+            checkpoint_snapshot = machine_snapshot()
+            boundary = checkpoint_test["boundary"]
+            checkpoint = checkpoint_envelope(checkpoint_state, metadata, boundary)
+            validate_checkpoint_envelope(checkpoint, metadata)
+            if boundary == "stop" and not core.nmd_decomp_resume_stop():
+                raise RunnerError("core refused test-only continuation from STOP")
+
+            first_replay_frame = checkpoint_frame_count + 1
+            branch_a, endpoint_a = replay_branch(
+                first_replay_frame, checkpoint_test["continuation_frames"])
+            restore_state = validate_checkpoint_envelope(checkpoint, metadata)
+            restore_buffer = c.create_string_buffer(restore_state, len(restore_state))
+            if not core.retro_unserialize(c.cast(restore_buffer, c.c_void_p), len(restore_state)):
+                raise RunnerError("Libretro retro_unserialize rejected a valid checkpoint")
+            if core.nmd_decomp_error() or core.nmd_trace_error():
+                raise RunnerError("core rejected serialized NMDH/NMDT checkpoint state")
+            restored_snapshot = machine_snapshot()
+            restore_snapshot_equal = restored_snapshot == checkpoint_snapshot
+            if boundary == "stop" and not core.nmd_decomp_resume_stop():
+                raise RunnerError("core refused test-only continuation after STOP restore")
+            branch_b, endpoint_b = replay_branch(
+                first_replay_frame, checkpoint_test["continuation_frames"])
+
+            checkpoint_replay = {
+                "status": "ok",
+                "boundary": boundary,
+                "checkpoint_state_sha256": checkpoint["state_sha256"],
+                "checkpoint_snapshot": checkpoint_snapshot,
+                "restored_snapshot_equal": restore_snapshot_equal,
+                "nmdh_equal": (branch_a["nmdh_sha256"] == branch_b["nmdh_sha256"] and
+                               branch_a["nmdh_events"] == branch_b["nmdh_events"]),
+                "nmdt_equal": (branch_a["nmdt_sha256"] == branch_b["nmdt_sha256"] and
+                               branch_a["nmdt_records"] == branch_b["nmdt_records"]),
+                "cpu_snapshots_equal": branch_a["endpoint_snapshot"] == branch_b["endpoint_snapshot"],
+                "video_equal": (branch_a["video_sha256"] == branch_b["video_sha256"] and
+                                branch_a["video_frames"] == branch_b["video_frames"]),
+                "audio_equal": (branch_a["audio_sha256"] == branch_b["audio_sha256"] and
+                                branch_a["audio_frames"] == branch_b["audio_frames"]),
+                "final_state_equal": (hashlib.sha256(endpoint_a).digest() ==
+                                      hashlib.sha256(endpoint_b).digest()),
+                "branch_a": branch_a,
+                "branch_b": branch_b,
+            }
+            if not restore_snapshot_equal:
+                differences = _snapshot_differences(checkpoint_snapshot, restored_snapshot)
+                raise RunnerError("checkpoint restore snapshot mismatch: " + repr(differences))
+            for key in ("nmdh_equal", "nmdt_equal", "cpu_snapshots_equal",
+                        "video_equal", "audio_equal", "final_state_equal"):
+                if not checkpoint_replay[key]:
+                    fields = {
+                        "nmdh_equal": ("nmdh_sha256", "nmdh_events"),
+                        "nmdt_equal": ("nmdt_sha256", "nmdt_records"),
+                        "cpu_snapshots_equal": ("endpoint_snapshot",),
+                        "video_equal": ("video_sha256", "video_frames"),
+                        "audio_equal": ("audio_sha256", "audio_frames"),
+                        "final_state_equal": ("endpoint_state_sha256",),
+                    }[key]
+                    details = {field: (branch_a[field], branch_b[field]) for field in fields}
+                    raise RunnerError("checkpoint replay mismatch: %s %r" % (key, details))
         if not estimate_mode:
             criterion = scenario["stop"]["criterion"]
-            if criterion == "frame_limit":
+            if checkpoint_test:
+                stop_state["triggered"] = True
+            elif criterion == "frame_limit":
                 stop_state["triggered"] = frame_count == args.frames
                 stop_state["action"] = ACTION_STOP if stop_state["triggered"] else 0
             elif stop_state["request_sent"] and not stop_state["handoff_event"]:
@@ -770,6 +1022,7 @@ def _worker(args):
             "stop_value": scenario["stop"].get("value"),
             "trigger_event": stop_state["trigger_event"],
             "handoff_event": stop_state["handoff_event"],
+            "checkpoint_replay": checkpoint_replay,
         }
         (output / "worker-result.json").write_bytes(nmdh_trace.canonical_json(result))
         output_manifest = {"format": "NMDH v1 capture", "metadata": metadata, **result,

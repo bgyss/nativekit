@@ -128,3 +128,25 @@ void nmd_trace_emit(uint32_t local_clock, uint8_t device, uint8_t operation,
 }
 
 int nmd_trace_error(void) { return failed; }
+
+void nmd_trace_get_checkpoint_state(struct nmd_trace_checkpoint_state *state)
+{
+    if (!state)
+        return;
+    state->version = 1;
+    state->failed = (uint32_t)failed;
+    state->epoch = epoch;
+    memcpy(state->last, last, sizeof last);
+}
+
+int nmd_trace_set_checkpoint_state(const struct nmd_trace_checkpoint_state *state)
+{
+    if (!state || state->version != 1 || state->failed > 1) {
+        failed = 1;
+        return 0;
+    }
+    failed = (int)state->failed;
+    epoch = state->epoch;
+    memcpy(last, state->last, sizeof last);
+    return 1;
+}

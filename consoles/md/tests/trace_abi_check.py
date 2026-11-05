@@ -64,6 +64,12 @@ with tempfile.TemporaryDirectory() as temp:
     sink.nmd_trace_emit.argtypes = [c.c_uint32, c.c_uint8, c.c_uint8, c.c_uint8, c.c_uint32, c.c_uint32]
     sink.nmd_trace_adjust.argtypes = [c.c_uint64]
     sink.nmd_trace_error.restype = c.c_int
+    class TraceCheckpoint(c.Structure):
+        _fields_ = [("version", c.c_uint32), ("failed", c.c_uint32),
+                    ("epoch", c.c_uint64), ("last", c.c_uint64 * 6)]
+    sink.nmd_trace_get_checkpoint_state.argtypes = [c.POINTER(TraceCheckpoint)]
+    sink.nmd_trace_set_checkpoint_state.argtypes = [c.POINTER(TraceCheckpoint)]
+    sink.nmd_trace_set_checkpoint_state.restype = c.c_int
     assert sink.nmd_trace_version() == 2
     assert sink.nmd_trace_register(1, receive, None) == 0
     assert sink.nmd_trace_register(2, receive, None) == 1
@@ -79,11 +85,23 @@ with tempfile.TemporaryDirectory() as temp:
     sink.nmd_trace_emit(10, 3, 5, 1, 120, 1)
     assert events[-1] == (910, 3, 5, 1, 120, 1)
     assert sink.nmd_trace_error() == 0
+    checkpoint = TraceCheckpoint()
+    sink.nmd_trace_get_checkpoint_state(c.byref(checkpoint))
+    assert checkpoint.version == 1 and checkpoint.epoch == 900
+    sink.nmd_trace_reset()
+    assert sink.nmd_trace_set_checkpoint_state(c.byref(checkpoint)) == 1
+    sink.nmd_trace_emit(106, 1, 2, 1, 0x104, 0x77)
+    assert events[-1] == (1006, 1, 2, 1, 0x104, 0x77)
+    invalid_checkpoint = TraceCheckpoint.from_buffer_copy(bytes(checkpoint))
+    invalid_checkpoint.version = 2
+    assert sink.nmd_trace_set_checkpoint_state(c.byref(invalid_checkpoint)) == 0
+    assert sink.nmd_trace_error() != 0
+    assert sink.nmd_trace_set_checkpoint_state(c.byref(checkpoint)) == 1
     sink.nmd_trace_emit(99, 1, 2, 1, 0, 0)
-    assert sink.nmd_trace_error() != 0 and len(events) == 5
+    assert sink.nmd_trace_error() != 0 and len(events) == 6
     sink.nmd_trace_reset()
     sink.nmd_trace_emit(1, 255, 2, 1, 0, 0)
-    assert sink.nmd_trace_error() != 0 and len(events) == 5
+    assert sink.nmd_trace_error() != 0 and len(events) == 6
     sink.nmd_trace_reset()
     sink.nmd_trace_adjust((1 << 64) - 1)
     sink.nmd_trace_adjust(1)

@@ -140,7 +140,7 @@ build_blastem() {
         exit 1
     fi
     source_stamp() {
-        (cd "$buildsrc" && shasum Makefile cpu_dsl.py genesis.c link.T m68k.cpu m68k_util.c psg.c render_audio.c vdp.c ym2612.c z80.cpu z80_util.c trace_abi.c trace_abi.h decomp_abi.c decomp_abi.h) |
+        (cd "$buildsrc" && shasum Makefile cpu_dsl.py genesis.c libblastem.c link.T m68k.cpu m68k_util.c psg.c render_audio.c serialize.h vdp.c ym2612.c z80.cpu z80_util.c trace_abi.c trace_abi.h decomp_abi.c decomp_abi.h) |
             shasum | cut -d ' ' -f 1
     }
     current_source_stamp="$(source_stamp)"

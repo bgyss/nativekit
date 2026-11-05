@@ -90,6 +90,18 @@ with tempfile.TemporaryDirectory() as temporary:
         assert result.returncode != 0 and marker.lower() in result.stderr.lower(), result.stderr
         assert not output.exists()
 
+    checkpoint_scenario = {
+        "stop": {"criterion": "frame_limit"},
+        "checkpoint_test": {},
+        "required_capabilities": ["sync_checkpoint"],
+    }
+    try:
+        runner._preflight_core(no_caps, checkpoint_scenario)
+    except runner.RunnerError as exc:
+        assert "sync_checkpoint" in str(exc), str(exc)
+    else:
+        raise AssertionError("checkpoint capability gap was hidden by absent extension symbols")
+
     state_output = base / "missing-state-capability"
     result = subprocess.run([
         sys.executable, str(runner_path), "--mode", "estimate", "--core", str(instruction_only),
@@ -130,6 +142,24 @@ with tempfile.TemporaryDirectory() as temporary:
 
     matching_scenario = json.loads(scenario.read_text())
     matching_metadata = runner._make_identity(capable_no_libretro, rom, matching_scenario, 3)
+    checkpoint = runner.checkpoint_envelope(b"synthetic-state", matching_metadata, "post_frame")
+    assert runner.validate_checkpoint_envelope(checkpoint, matching_metadata) == b"synthetic-state"
+    bad_digest = {**checkpoint, "state": b"changed"}
+    try:
+        runner.validate_checkpoint_envelope(bad_digest, matching_metadata)
+    except runner.RunnerError as exc:
+        assert "digest" in str(exc)
+    else:
+        raise AssertionError("corrupted checkpoint state bytes were accepted")
+    wrong_identity = json.loads(json.dumps(matching_metadata))
+    wrong_identity["identities"]["patch_sha256"] = "0" * 64
+    try:
+        runner.validate_checkpoint_envelope(
+            {**checkpoint, "metadata": wrong_identity}, matching_metadata)
+    except runner.nmdh_trace.NMDHError:
+        pass
+    else:
+        raise AssertionError("checkpoint with a mismatched patch identity was accepted")
     estimate_file = base / "matching-estimate.json"
     estimate_file.write_text(json.dumps({
         "status": "complete", "metadata": matching_metadata, "frames": 3,
@@ -182,6 +212,7 @@ with tempfile.TemporaryDirectory() as temporary:
     record = runner._event_dict(handoff_event)
     assert record["payload"]["criterion"] == "pc"
     assert record["payload"]["handoff"]["master_clock"] == 900
+    assert record["payload"]["handoff"]["stop_clock"] == 900
     assert record["payload"]["handoff"]["z80_master_clock"] == 885
     assert record["payload"]["handoff"]["m68k"]["cycles"] == 0
 

@@ -2,7 +2,7 @@ diff --git a/Makefile b/Makefile
 index 18e1448..8f8a4f8 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -278,0 +279,11 @@ CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO_SOURCE
+@@ -278,0 +279,12 @@ CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO_SOURCE
 +CFLAGS+=-DNMD_DECOMP_HAS_M68K_INSTRUCTION
 +CFLAGS+=-DNMD_DECOMP_HAS_M68K_STATE
 +CFLAGS+=-DNMD_DECOMP_HAS_FLOW_EDGE
@@ -12,9 +12,10 @@ index 18e1448..8f8a4f8 100644
 +CFLAGS+=-DNMD_DECOMP_HAS_RESET_EXCEPTION_INTERRUPT
 +CFLAGS+=-DNMD_DECOMP_HAS_BUS_INTERVALS
 +CFLAGS+=-DNMD_DECOMP_HAS_MASTER_CLOCK
++CFLAGS+=-DNMD_DECOMP_HAS_SYNC_CHECKPOINT
 +CFLAGS+=-DNMD_DECOMP_HAS_CONTROLLED_STOP
 +CFLAGS+=-DNMD_DECOMP_HAS_REPLACE_HANDOFF
-@@ -318 +329 @@ endif
+@@ -318 +330 @@ endif
 -COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o trace_abi.o $(M68KOBJS) \
 +COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o trace_abi.o decomp_abi.o $(M68KOBJS) \
 diff --git a/cpu_dsl.py b/cpu_dsl.py
@@ -652,3 +653,341 @@ index 2b46182..e44e009 100644
 +	}
 @@ -166,0 +380 @@ void z80_clear_reset(z80_context * context, uint32_t cycle)
 +		z80_decomp_reset_event(context);
+diff --git a/genesis.c b/genesis.c
+--- a/genesis.c
++++ b/genesis.c
+@@ -31,0 +32,11 @@
++static genesis_context *nmd_decomp_active_genesis;
++static struct {
++	genesis_context *gen;
++	uint32_t m68k_sync_cycle;
++	uint32_t m68k_target_cycle;
++	uint32_t z80_sync_cycle;
++	uint32_t last_frame;
++	uint32_t last_flush_cycle;
++	uint8_t z80_last_flag_result;
++	uint8_t valid;
++} nmd_decomp_pending_restore;
+@@ -59,0 +71,224 @@
++static void nmd_decomp_save_u64(serialize_buffer *buf, uint64_t value)
++{
++	save_int32(buf, (uint32_t)(value >> 32));
++	save_int32(buf, (uint32_t)value);
++}
++
++static uint64_t nmd_decomp_load_u64(deserialize_buffer *buf)
++{
++	uint64_t high = load_int32(buf);
++	return high << 32 | load_int32(buf);
++}
++
++static void nmd_decomp_serialize_audio_source(serialize_buffer *buf, audio_source *source)
++{
++	save_int8(buf, source != NULL);
++	if (!source) {
++		return;
++	}
++	save_int32(buf, source->mask);
++	save_int8(buf, source->num_channels);
++	save_int32(buf, source->buffer_pos);
++	save_int32(buf, source->read_start);
++	save_int32(buf, source->read_end);
++	save_int32(buf, source->lowpass_alpha);
++	save_int8(buf, source->front_populated);
++	save_int16(buf, (uint16_t)source->last_left);
++	save_int16(buf, (uint16_t)source->last_right);
++	nmd_decomp_save_u64(buf, source->buffer_fraction);
++	nmd_decomp_save_u64(buf, source->buffer_inc);
++	uint32_t sample_count = source->mask + 1;
++	save_buffer16(buf, (uint16_t *)source->back, sample_count);
++}
++
++static int nmd_decomp_deserialize_audio_source(deserialize_buffer *buf, audio_source *source)
++{
++	uint8_t present = load_int8(buf);
++	if (!present) {
++		return source == NULL;
++	}
++	uint32_t mask = load_int32(buf);
++	uint8_t num_channels = load_int8(buf);
++	uint32_t buffer_pos = load_int32(buf);
++	uint32_t read_start = load_int32(buf);
++	uint32_t read_end = load_int32(buf);
++	uint32_t lowpass_alpha = load_int32(buf);
++	uint8_t front_populated = load_int8(buf);
++	int16_t last_left = (int16_t)load_int16(buf);
++	int16_t last_right = (int16_t)load_int16(buf);
++	uint64_t buffer_fraction = nmd_decomp_load_u64(buf);
++	uint64_t buffer_inc = nmd_decomp_load_u64(buf);
++	uint32_t sample_count = mask + 1;
++	if (!source || source->mask != mask || source->num_channels != num_channels ||
++	    !source->back || source->front != source->back || !sample_count) {
++		return 0;
++	}
++	load_buffer16(buf, (uint16_t *)source->back, sample_count);
++	source->buffer_pos = buffer_pos;
++	source->read_start = read_start;
++	source->read_end = read_end;
++	source->lowpass_alpha = lowpass_alpha;
++	source->front_populated = front_populated;
++	source->last_left = last_left;
++	source->last_right = last_right;
++	source->buffer_fraction = buffer_fraction;
++	source->buffer_inc = buffer_inc;
++	return 1;
++}
++
++static void nmd_decomp_serialize_checkpoint(genesis_context *gen, serialize_buffer *buf)
++{
++	struct nmd_decomp_checkpoint_state state;
++	nmd_decomp_get_checkpoint_state(&state);
++	save_int32(buf, state.version);
++	save_int32(buf, state.failed);
++	save_int32(buf, state.stop_pending);
++	save_int32(buf, state.handed_off);
++	save_int32(buf, state.stop_action);
++	save_int32(buf, state.stop_cpu);
++	save_int32(buf, state.stop_pc);
++	save_int32(buf, state.stop_next_pc);
++	save_int32(buf, state.stop_criterion);
++	save_int32(buf, state.stop_metadata_set);
++	save_int32(buf, state.test_rebase_requested);
++	nmd_decomp_save_u64(buf, state.sequence);
++	nmd_decomp_save_u64(buf, state.master_clock_offset);
++	nmd_decomp_save_u64(buf, state.master_clock_epoch);
++	nmd_decomp_save_u64(buf, state.stop_clock);
++	nmd_decomp_save_u64(buf, state.stop_value);
++	nmd_decomp_save_u64(buf, state.stop_instruction_count);
++
++	struct nmd_trace_checkpoint_state trace_state;
++	nmd_trace_get_checkpoint_state(&trace_state);
++	save_int32(buf, trace_state.version);
++	save_int32(buf, trace_state.failed);
++	nmd_decomp_save_u64(buf, trace_state.epoch);
++	for (uint32_t i = 0; i < 6; i++) {
++		nmd_decomp_save_u64(buf, trace_state.last[i]);
++	}
++	save_int32(buf, gen->m68k->sync_cycle);
++	save_int32(buf, gen->m68k->target_cycle);
++	save_int32(buf, gen->z80->sync_cycle);
++	save_int32(buf, gen->last_frame);
++	save_int32(buf, gen->last_flush_cycle);
++	save_int8(buf, gen->z80->last_flag_result);
++	nmd_decomp_serialize_audio_source(buf, gen->ym->audio);
++	nmd_decomp_serialize_audio_source(buf, gen->psg->audio);
++	struct nmd_decomp_libretro_audio_checkpoint_state audio_state;
++	nmd_decomp_get_libretro_audio_checkpoint_state(&audio_state);
++	save_int32(buf, audio_state.version);
++	save_int32(buf, audio_state.primed);
++	for (uint32_t i = 0; i < 2; i++) {
++		save_int32(buf, audio_state.last_in[i]);
++		save_int32(buf, audio_state.last_out[i]);
++	}
++
++	save_int32(buf, gen->m68k->decomp_instruction_pc);
++	save_int16(buf, gen->m68k->decomp_instruction_opcode);
++	save_int8(buf, gen->m68k->decomp_event_kind);
++	save_int32(buf, gen->m68k->decomp_event_vector);
++	save_int8(buf, gen->m68k->decomp_event_active);
++	save_int8(buf, gen->m68k->trace_fetch);
++
++	save_int16(buf, gen->z80->wz);
++	save_int16(buf, gen->z80->decomp_instruction_pc);
++	save_int8(buf, gen->z80->decomp_fetch_len);
++	save_buffer8(buf, gen->z80->decomp_fetch_bytes,
++		sizeof gen->z80->decomp_fetch_bytes);
++	save_int16(buf, gen->z80->decomp_pending_pc);
++	save_int8(buf, gen->z80->decomp_pending_value);
++	save_int8(buf, gen->z80->decomp_pending_fetch);
++	save_int8(buf, gen->z80->decomp_active);
++	save_int16(buf, gen->z80->decomp_event_vector);
++	save_int8(buf, gen->z80->decomp_event_reason);
++	save_int8(buf, gen->z80->decomp_event_active);
++	save_int8(buf, gen->z80->trace_fetch);
++}
++
++static void nmd_decomp_deserialize_checkpoint(deserialize_buffer *buf, void *vgen)
++{
++	genesis_context *gen = vgen;
++	struct nmd_decomp_checkpoint_state state = {0};
++	state.version = load_int32(buf);
++	if (state.version != NMD_DECOMP_CHECKPOINT_VERSION) {
++		nmd_decomp_set_checkpoint_state(&state);
++		return;
++	}
++	state.failed = load_int32(buf);
++	state.stop_pending = load_int32(buf);
++	state.handed_off = load_int32(buf);
++	state.stop_action = load_int32(buf);
++	state.stop_cpu = load_int32(buf);
++	state.stop_pc = load_int32(buf);
++	state.stop_next_pc = load_int32(buf);
++	state.stop_criterion = load_int32(buf);
++	state.stop_metadata_set = load_int32(buf);
++	state.test_rebase_requested = load_int32(buf);
++	state.sequence = nmd_decomp_load_u64(buf);
++	state.master_clock_offset = nmd_decomp_load_u64(buf);
++	state.master_clock_epoch = nmd_decomp_load_u64(buf);
++	state.stop_clock = nmd_decomp_load_u64(buf);
++	state.stop_value = nmd_decomp_load_u64(buf);
++	state.stop_instruction_count = nmd_decomp_load_u64(buf);
++
++	struct nmd_trace_checkpoint_state trace_state = {0};
++	trace_state.version = load_int32(buf);
++	trace_state.failed = load_int32(buf);
++	trace_state.epoch = nmd_decomp_load_u64(buf);
++	for (uint32_t i = 0; i < 6; i++) {
++		trace_state.last[i] = nmd_decomp_load_u64(buf);
++	}
++	nmd_trace_set_checkpoint_state(&trace_state);
++	nmd_decomp_pending_restore.gen = gen;
++	nmd_decomp_pending_restore.m68k_sync_cycle = load_int32(buf);
++	nmd_decomp_pending_restore.m68k_target_cycle = load_int32(buf);
++	nmd_decomp_pending_restore.z80_sync_cycle = load_int32(buf);
++	nmd_decomp_pending_restore.last_frame = load_int32(buf);
++	nmd_decomp_pending_restore.last_flush_cycle = load_int32(buf);
++	nmd_decomp_pending_restore.z80_last_flag_result = load_int8(buf);
++	if (!nmd_decomp_deserialize_audio_source(buf, gen->ym->audio) ||
++	    !nmd_decomp_deserialize_audio_source(buf, gen->psg->audio)) {
++		state.failed = 1;
++		nmd_decomp_set_checkpoint_state(&state);
++		buf->cur_pos = buf->size;
++		return;
++	}
++	struct nmd_decomp_libretro_audio_checkpoint_state audio_state = {0};
++	audio_state.version = load_int32(buf);
++	audio_state.primed = load_int32(buf);
++	for (uint32_t i = 0; i < 2; i++) {
++		audio_state.last_in[i] = load_int32(buf);
++		audio_state.last_out[i] = load_int32(buf);
++	}
++	if (!nmd_decomp_set_libretro_audio_checkpoint_state(&audio_state)) {
++		state.failed = 1;
++		nmd_decomp_set_checkpoint_state(&state);
++		buf->cur_pos = buf->size;
++		return;
++	}
++	nmd_decomp_pending_restore.valid = 1;
++
++	gen->m68k->decomp_instruction_pc = load_int32(buf);
++	gen->m68k->decomp_instruction_opcode = load_int16(buf);
++	gen->m68k->decomp_event_kind = load_int8(buf);
++	gen->m68k->decomp_event_vector = load_int32(buf);
++	gen->m68k->decomp_event_active = load_int8(buf);
++	gen->m68k->trace_fetch = load_int8(buf);
++
++	gen->z80->wz = load_int16(buf);
++	gen->z80->decomp_instruction_pc = load_int16(buf);
++	gen->z80->decomp_fetch_len = load_int8(buf);
++	load_buffer8(buf, gen->z80->decomp_fetch_bytes,
++		sizeof gen->z80->decomp_fetch_bytes);
++	gen->z80->decomp_pending_pc = load_int16(buf);
++	gen->z80->decomp_pending_value = load_int8(buf);
++	gen->z80->decomp_pending_fetch = load_int8(buf);
++	gen->z80->decomp_active = load_int8(buf);
++	gen->z80->decomp_event_vector = load_int16(buf);
++	gen->z80->decomp_event_reason = load_int8(buf);
++	gen->z80->decomp_event_active = load_int8(buf);
++	gen->z80->trace_fetch = load_int8(buf);
++
++	nmd_decomp_set_checkpoint_state(&state);
++}
++
+@@ -134,0 +370,5 @@
++		if (gen->header.type == SYSTEM_GENESIS) {
++			start_section(buf, SECTION_NMDH);
++			nmd_decomp_serialize_checkpoint(gen, buf);
++			end_section(buf);
++		}
+@@ -239,0 +480 @@
++	nmd_decomp_pending_restore.valid = 0;
+@@ -252,0 +494,3 @@
++		register_section_handler(buf, (section_handler){
++			.fun = nmd_decomp_deserialize_checkpoint, .data = gen
++		}, SECTION_NMDH);
+@@ -301,0 +546,9 @@
++	}
++	if (nmd_decomp_pending_restore.valid && nmd_decomp_pending_restore.gen == gen) {
++		gen->m68k->sync_cycle = nmd_decomp_pending_restore.m68k_sync_cycle;
++		gen->m68k->target_cycle = nmd_decomp_pending_restore.m68k_target_cycle;
++		gen->z80->sync_cycle = nmd_decomp_pending_restore.z80_sync_cycle;
++		gen->last_frame = nmd_decomp_pending_restore.last_frame;
++		gen->last_flush_cycle = nmd_decomp_pending_restore.last_flush_cycle;
++		gen->z80->last_flag_result = nmd_decomp_pending_restore.z80_last_flag_result;
++		nmd_decomp_pending_restore.valid = 0;
+@@ -2233,0 +2487,31 @@
++int nmd_decomp_test_snapshot(struct nmd_decomp_handoff *snapshot)
++{
++	genesis_context *gen = nmd_decomp_active_genesis;
++	if (!gen || !snapshot || !gen->m68k || !gen->z80 || !gen->vdp) {
++		return 0;
++	}
++	memset(snapshot, 0, sizeof(*snapshot));
++	uint64_t clock = gen->m68k->cycles;
++	if (gen->z80->cycles > clock) {
++		clock = gen->z80->cycles;
++	}
++	if (gen->vdp->cycles > clock) {
++		clock = gen->vdp->cycles;
++	}
++	if (gen->ym->current_cycle > clock) {
++		clock = gen->ym->current_cycle;
++	}
++	if (gen->psg->cycles > clock) {
++		clock = gen->psg->cycles;
++	}
++	snapshot->master_clock = nmd_decomp_clock(clock);
++	snapshot->z80_master_clock = nmd_decomp_clock(gen->z80->cycles);
++	snapshot->vdp_clock = nmd_decomp_clock(gen->vdp->cycles);
++	snapshot->ym_clock = nmd_decomp_clock(gen->ym->current_cycle);
++	snapshot->psg_clock = nmd_decomp_clock(gen->psg->cycles);
++	snapshot->io_clock = snapshot->master_clock;
++	m68k_decomp_copy_state(gen->m68k, &snapshot->m68k);
++	z80_decomp_copy_state(gen->z80, &snapshot->z80);
++	return 1;
++}
++
+@@ -2465,0 +2750,3 @@
++	if (nmd_decomp_active_genesis == gen) {
++		nmd_decomp_active_genesis = NULL;
++	}
+@@ -2985,0 +3273 @@
++	nmd_decomp_active_genesis = gen;
+diff --git a/serialize.h b/serialize.h
+--- a/serialize.h
++++ b/serialize.h
+@@ -54 +54,2 @@
+-	SECTION_COLECO_IO
++	SECTION_COLECO_IO,
++	SECTION_NMDH
+diff --git a/libblastem.c b/libblastem.c
+--- a/libblastem.c
++++ b/libblastem.c
+@@ -5,0 +6 @@
++#include "decomp_abi.h"
+@@ -586,0 +588,25 @@
++void nmd_decomp_get_libretro_audio_checkpoint_state(
++	struct nmd_decomp_libretro_audio_checkpoint_state *state)
++{
++	if (!state) {
++		return;
++	}
++	state->version = NMD_DECOMP_LIBRETRO_AUDIO_CHECKPOINT_VERSION;
++	state->primed = dc_primed;
++	memcpy(state->last_in, dc_last_in, sizeof dc_last_in);
++	memcpy(state->last_out, dc_last_out, sizeof dc_last_out);
++}
++
++int nmd_decomp_set_libretro_audio_checkpoint_state(
++	const struct nmd_decomp_libretro_audio_checkpoint_state *state)
++{
++	if (!state || state->version != NMD_DECOMP_LIBRETRO_AUDIO_CHECKPOINT_VERSION ||
++	    state->primed > 1) {
++		return 0;
++	}
++	dc_primed = (uint8_t)state->primed;
++	memcpy(dc_last_in, state->last_in, sizeof dc_last_in);
++	memcpy(dc_last_out, state->last_out, sizeof dc_last_out);
++	return 1;
++}
++

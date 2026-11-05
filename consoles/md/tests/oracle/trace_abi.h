@@ -26,6 +26,12 @@ enum { NMD_TRACE_FETCH = 1, NMD_TRACE_READ, NMD_TRACE_WRITE, NMD_TRACE_DMA, NMD_
 typedef void (*nmd_trace_callback)(void *user, uint64_t clock, uint8_t device,
                                    uint8_t operation, uint8_t width, uint32_t address, uint32_t value);
 typedef void (*nmd_trace_audio_callback)(void *user, uint8_t device, int16_t left, int16_t right);
+struct nmd_trace_checkpoint_state {
+    uint32_t version;
+    uint32_t failed;
+    uint64_t epoch;
+    uint64_t last[6];
+};
 uint32_t nmd_trace_version(void);
 uint64_t nmd_trace_capabilities(void);
 int nmd_trace_register(uint32_t version, nmd_trace_callback callback, void *user);
@@ -38,4 +44,6 @@ void nmd_trace_adjust(uint64_t deduction);
 void nmd_trace_emit(uint32_t local_clock, uint8_t device, uint8_t operation,
                     uint8_t width, uint32_t address, uint32_t value);
 int nmd_trace_error(void);
+void nmd_trace_get_checkpoint_state(struct nmd_trace_checkpoint_state *state);
+int nmd_trace_set_checkpoint_state(const struct nmd_trace_checkpoint_state *state);
 #endif

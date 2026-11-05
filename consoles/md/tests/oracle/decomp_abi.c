@@ -214,6 +214,83 @@ int nmd_decomp_take_test_rebase(void)
     return requested;
 }
 
+int nmd_decomp_resume_stop(void)
+{
+    if (!stop_pending)
+        return 1;
+    if (stop_action != NMD_DECOMP_STOP)
+        return 0;
+    stop_pending = 0;
+    handed_off = 0;
+    stop_action = NMD_DECOMP_CONTINUE;
+    stop_cpu = 0;
+    stop_pc = 0;
+    stop_next_pc = 0;
+    stop_clock = 0;
+    stop_criterion = 0;
+    stop_value = 0;
+    stop_instruction_count = 0;
+    stop_metadata_set = 0;
+    return 1;
+}
+
+void nmd_decomp_get_checkpoint_state(struct nmd_decomp_checkpoint_state *state)
+{
+    if (!state)
+        return;
+    *state = (struct nmd_decomp_checkpoint_state){
+        .version = NMD_DECOMP_CHECKPOINT_VERSION,
+        .failed = failed,
+        .stop_pending = stop_pending,
+        .handed_off = handed_off,
+        .stop_action = stop_action,
+        .stop_cpu = stop_cpu,
+        .stop_pc = stop_pc,
+        .stop_next_pc = stop_next_pc,
+        .stop_criterion = stop_criterion,
+        .stop_metadata_set = stop_metadata_set,
+        .test_rebase_requested = test_rebase_requested,
+        .sequence = sequence,
+        .master_clock_offset = master_clock_offset,
+        .master_clock_epoch = master_clock_epoch,
+        .stop_clock = stop_clock,
+        .stop_value = stop_value,
+        .stop_instruction_count = stop_instruction_count,
+    };
+}
+
+int nmd_decomp_set_checkpoint_state(const struct nmd_decomp_checkpoint_state *state)
+{
+    if (!state || state->version != NMD_DECOMP_CHECKPOINT_VERSION ||
+        state->failed > 1 || state->stop_pending > 1 || state->handed_off > 1 ||
+        state->stop_metadata_set > 1 || state->test_rebase_requested > 1 ||
+        state->stop_action > NMD_DECOMP_REPLACE ||
+        (state->stop_pending &&
+         ((state->stop_cpu != NMD_DECOMP_M68K && state->stop_cpu != NMD_DECOMP_Z80) ||
+          state->stop_action == NMD_DECOMP_CONTINUE)) ||
+        (state->handed_off && !state->stop_pending)) {
+        failed = 1;
+        return 0;
+    }
+    failed = state->failed;
+    stop_pending = state->stop_pending;
+    handed_off = state->handed_off;
+    stop_action = state->stop_action;
+    stop_cpu = state->stop_cpu;
+    stop_pc = state->stop_pc;
+    stop_next_pc = state->stop_next_pc;
+    stop_criterion = state->stop_criterion;
+    stop_metadata_set = state->stop_metadata_set;
+    test_rebase_requested = state->test_rebase_requested;
+    sequence = state->sequence;
+    master_clock_offset = state->master_clock_offset;
+    master_clock_epoch = state->master_clock_epoch;
+    stop_clock = state->stop_clock;
+    stop_value = state->stop_value;
+    stop_instruction_count = state->stop_instruction_count;
+    return 1;
+}
+
 static int valid_event(const struct nmd_decomp_event *event)
 {
     return event && event->struct_size == sizeof(*event) &&

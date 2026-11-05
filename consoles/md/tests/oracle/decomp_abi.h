@@ -5,6 +5,8 @@
 #include <stdint.h>
 
 #define NMD_DECOMP_ABI_VERSION 1u
+#define NMD_DECOMP_CHECKPOINT_VERSION 1u
+#define NMD_DECOMP_LIBRETRO_AUDIO_CHECKPOINT_VERSION 1u
 #define NMD_DECOMP_PAYLOAD_BYTES 256u
 #define NMD_DECOMP_MAX_FETCH_BYTES 16u
 
@@ -163,6 +165,33 @@ struct nmd_decomp_handoff {
     struct nmd_decomp_z80_state z80;
 };
 
+struct nmd_decomp_checkpoint_state {
+    uint32_t version;
+    uint32_t failed;
+    uint32_t stop_pending;
+    uint32_t handed_off;
+    uint32_t stop_action;
+    uint32_t stop_cpu;
+    uint32_t stop_pc;
+    uint32_t stop_next_pc;
+    uint32_t stop_criterion;
+    uint32_t stop_metadata_set;
+    uint32_t test_rebase_requested;
+    uint64_t sequence;
+    uint64_t master_clock_offset;
+    uint64_t master_clock_epoch;
+    uint64_t stop_clock;
+    uint64_t stop_value;
+    uint64_t stop_instruction_count;
+};
+
+struct nmd_decomp_libretro_audio_checkpoint_state {
+    uint32_t version;
+    uint32_t primed;
+    uint32_t last_in[2];
+    uint32_t last_out[2];
+};
+
 _Static_assert(sizeof(struct nmd_decomp_handoff) <= NMD_DECOMP_PAYLOAD_BYTES,
                "NMDH handoff must fit in the copied event payload");
 
@@ -230,5 +259,13 @@ uint64_t nmd_decomp_clock_epoch(void);
 void nmd_decomp_adjust_clock(uint32_t deduction);
 void nmd_decomp_request_test_rebase(void);
 int nmd_decomp_take_test_rebase(void);
+int nmd_decomp_resume_stop(void);
+void nmd_decomp_get_checkpoint_state(struct nmd_decomp_checkpoint_state *state);
+int nmd_decomp_set_checkpoint_state(const struct nmd_decomp_checkpoint_state *state);
+int nmd_decomp_test_snapshot(struct nmd_decomp_handoff *snapshot);
+void nmd_decomp_get_libretro_audio_checkpoint_state(
+    struct nmd_decomp_libretro_audio_checkpoint_state *state);
+int nmd_decomp_set_libretro_audio_checkpoint_state(
+    const struct nmd_decomp_libretro_audio_checkpoint_state *state);
 
 #endif

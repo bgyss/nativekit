@@ -69,6 +69,7 @@
 - Modify: `docs/superpowers/plans/2026-11-04-nativemd-decomp/d01-reference-execution-hooks.md` (replace proposed status with partial)
 
 **Interfaces:**
+- Permit test-only continuation from an ordinary STOP checkpoint for deterministic replay; REPLACE remains latched with no resume operation.
 - Produces `uint32_t nmd_decomp_abi_version(void)` and `uint64_t nmd_decomp_capabilities(void)`.
 - Defines `enum nmd_decomp_action { NMD_DECOMP_CONTINUE = 0, NMD_DECOMP_STOP = 1, NMD_DECOMP_REPLACE = 2 }`, CPU IDs `NMD_DECOMP_M68K = 1` and `NMD_DECOMP_Z80 = 2`, event IDs `INSTRUCTION=1`, `FLOW_EDGE=2`, `BUS_ACCESS=3`, `RESET=4`, `EXCEPTION=5`, `INTERRUPT=6`, `STOP=7`, `REPLACE=8`, and `typedef enum nmd_decomp_action (*nmd_decomp_callback)(void *user, const struct nmd_decomp_event *event)`.
 - Produces `int nmd_decomp_register(uint32_t version, nmd_decomp_callback callback, void *user)`, `void nmd_decomp_reset(void)` and `int nmd_decomp_error(void)`; reject unsupported versions and invalid callback registration.
@@ -204,6 +205,11 @@
 ### Task 7: Prove complete synchronized checkpoint replay
 
 **Files:**
+- Modify: serialize.h and genesis.c for the versioned NMDH checkpoint section
+- Modify: libblastem.c for the candidate-only Libretro audio filter checkpoint state
+- Modify: ABI header/source for serialized trace state and STOP-only continuation
+- Modify: decomp runner for paired checkpoint replay and identity validation
+- Modify: ABI/runner checks for the state extension and checkpoint envelope
 - Modify: `tools/toolchains/patches/blastem/0002-nmd-decomp-hooks.patch`
 - Modify: `tools/toolchains/setup.sh` (include every changed serializer source in the source stamp)
 - Modify: `consoles/md/tests/decomp/core_check.py`
@@ -213,12 +219,13 @@
 - Use Libretro `retro_serialize_size`, `retro_serialize`, and `retro_unserialize` only post-frame or after Task 5's synchronized handoff.
 - Extend the pinned test-core state only for fields proven absent by the restore audit; include Z80 WZ/MEMPTR if the test confirms it is omitted, plus any NMDH sequence/epoch/pending-stop state that changes replay output.
 - Version the extension by the build's patch/core identity; do not change delivered `nmd` or NMDT v2 save/trace contracts.
+- Continue deterministically from STOP only for the checkpoint replay control; REPLACE remains latched and has no resume operation.
 
-- [ ] **Step 1: Add failing round-trip and state-load controls.** Capture at a post-frame and at a synchronized stop; save, continue for a fixed synthetic input, restore, and rerun. Compare full CPU snapshots, NMDH events, NMDT v2 events, and video/audio callback hashes. Include a Z80 instruction that changes WZ before the checkpoint.
-- [ ] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case checkpoint`.** Expected: fail on any omitted hidden state/event epoch, or because the current runner does not expose safe checkpoint replay.
-- [ ] **Step 3: Audit the pinned `m68k_util.c`, `z80_util.c`, `genesis.c` serialization fields against the context structures.** Add only the missing test-core fields demonstrated by the failing replay, and reject incompatible extension versions.
-- [ ] **Step 4: Rebuild and rerun checkpoint controls.** Expected: restored and uninterrupted paths produce identical subsequent CPU/device-visible state, NMDH/NMDT events, and video/audio hashes at both safe boundary types; corrupted state and patch/core identity mismatch are rejected.
-- [ ] **Step 5: Commit** `nativemd: make NMDH checkpoints replayable`.
+- [x] **Step 1: Add failing round-trip and state-load controls.** Capture at a post-frame and at a synchronized stop; save, continue for a fixed synthetic input, restore, and rerun. Compare full CPU snapshots, NMDH events, NMDT v2 events, and video/audio callback hashes. Include a Z80 instruction that changes WZ before the checkpoint.
+- [x] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case checkpoint`.** Expected: fail in preflight because the Task 6 core lacks `sync_checkpoint`; the baseline has no checkpoint replay path.
+- [x] **Step 3: Audit the pinned `m68k_util.c`, `z80_util.c`, `genesis.c` and Libretro audio-output state against their runtime structures.** Add only the missing test-core fields demonstrated by the failing replay, and reject incompatible extension versions.
+- [x] **Step 4: Rebuild and rerun checkpoint controls.** Expected: restored and uninterrupted paths produce identical subsequent CPU/device-visible state, NMDH/NMDT events, and video/audio hashes at both safe boundary types; corrupted state and patch/core identity mismatch are rejected.
+- [x] **Step 5: Commit** `nativemd: make NMDH checkpoints replayable`.
 
 ### Task 8: Close the D01 evidence gates and record resource budget
 

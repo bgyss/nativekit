@@ -132,7 +132,29 @@ scenario/trigger produce identical machine snapshots.
 Libretro checkpoint capture/restore is permitted only after a completed frame
 or a synchronized hook stop. No save occurs during a callback or between a
 bus access start and completion. Restoring to replay a checkpoint uses normal
-reference execution; that does not resume a REPLACE decision point.
+reference execution; only an ordinary STOP checkpoint may be continued by the
+test runner. REPLACE remains latched and has no resume operation.
+
+The pinned candidate Genesis core appends a versioned `SECTION_NMDH` to full
+machine states. Extension version 1 stores NMDH sequence, clock offset/epoch,
+pending STOP metadata and error state; NMDT's trace epoch, per-device last
+clocks and error state; the CPUs' decomp fetch/event bookkeeping; the Z80
+WZ/MEMPTR register and raw flag cache; and the M68K/Z80 scheduler deadlines.
+It also stores Genesis frame/audio-flush cursors, the YM/PSG resampler phase,
+filter history and ring buffers, and the Libretro DC-blocker history. The
+pinned `z80_serialize` omits WZ and does not preserve the raw flag cache; the
+stock 68000/Z80 serializers omit the captured scheduler deadlines; Genesis
+state does not save its frame/audio-flush cursors; and neither the chip state
+nor the machine state includes the render-audio or Libretro filter state. The
+stock sections already serialize the CPU architectural state, Genesis RAM and
+bus arbitration, VDP, YM, PSG and IO state. The extension is candidate-only and
+does not alter the delivered `nmd` save contract or the NMDT v2 trace format.
+
+The runner's checkpoint envelope carries the existing core, patch, ABI,
+runner, ROM and scenario identities plus a SHA-256 digest of the serialized
+state. It rejects a changed digest or any identity mismatch before loading the
+state. The candidate state loader marks an unsupported extension or trace
+state version as an error, which the runner rejects after restore.
 
 ## NMDH v1 file envelope
 

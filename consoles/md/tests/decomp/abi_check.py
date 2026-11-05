@@ -51,6 +51,20 @@ class Stop(c.Structure):
                 ("stop_clock", c.c_uint64)]
 
 
+class CheckpointState(c.Structure):
+    _fields_ = [
+        ("version", c.c_uint32), ("failed", c.c_uint32),
+        ("stop_pending", c.c_uint32), ("handed_off", c.c_uint32),
+        ("stop_action", c.c_uint32), ("stop_cpu", c.c_uint32),
+        ("stop_pc", c.c_uint32), ("stop_next_pc", c.c_uint32),
+        ("stop_criterion", c.c_uint32), ("stop_metadata_set", c.c_uint32),
+        ("test_rebase_requested", c.c_uint32), ("sequence", c.c_uint64),
+        ("master_clock_offset", c.c_uint64), ("master_clock_epoch", c.c_uint64),
+        ("stop_clock", c.c_uint64), ("stop_value", c.c_uint64),
+        ("stop_instruction_count", c.c_uint64),
+    ]
+
+
 def build_library(directory, enabled_capabilities):
     name = "decomp-empty" if not enabled_capabilities else "decomp-" + "-".join(enabled_capabilities)
     library = pathlib.Path(directory) / (name + "." + extension)
@@ -87,6 +101,10 @@ def configure(library):
     library.nmd_decomp_adjust_clock.argtypes = [c.c_uint32]
     library.nmd_decomp_request_test_rebase.argtypes = []
     library.nmd_decomp_take_test_rebase.restype = c.c_int
+    library.nmd_decomp_resume_stop.restype = c.c_int
+    library.nmd_decomp_get_checkpoint_state.argtypes = [c.POINTER(CheckpointState)]
+    library.nmd_decomp_set_checkpoint_state.argtypes = [c.POINTER(CheckpointState)]
+    library.nmd_decomp_set_checkpoint_state.restype = c.c_int
     return callback_type
 
 
@@ -188,6 +206,7 @@ with tempfile.TemporaryDirectory() as temporary:
             stop.stop_clock) == (4, 2, 0x1234, 17, 720)
     empty.nmd_decomp_mark_handed_off()
     assert empty.nmd_decomp_should_stop_cpu(1, 0) == 1
+    assert empty.nmd_decomp_resume_stop() == 0  # REPLACE stays latched
     empty.nmd_decomp_reset()
     assert empty.nmd_decomp_clock(100) == 100
     assert empty.nmd_decomp_clock_epoch() == 0
@@ -200,5 +219,29 @@ with tempfile.TemporaryDirectory() as temporary:
     empty.nmd_decomp_reset()
     assert empty.nmd_decomp_clock(100) == 100
     assert empty.nmd_decomp_clock_epoch() == 0
+
+    checkpoint_state = CheckpointState()
+    empty.nmd_decomp_get_checkpoint_state(c.byref(checkpoint_state))
+    assert checkpoint_state.version == 1
+    checkpoint_state.sequence = 19
+    checkpoint_state.master_clock_offset = 400
+    checkpoint_state.master_clock_epoch = 3
+    checkpoint_state.stop_pending = 1
+    checkpoint_state.handed_off = 1
+    checkpoint_state.stop_action = 1
+    checkpoint_state.stop_cpu = 2
+    checkpoint_state.stop_pc = 0x20
+    checkpoint_state.stop_next_pc = 0x21
+    assert empty.nmd_decomp_set_checkpoint_state(c.byref(checkpoint_state)) == 1
+    assert empty.nmd_decomp_clock(100) == 500
+    assert empty.nmd_decomp_clock_epoch() == 3
+    assert empty.nmd_decomp_stop_action() == 1
+    assert empty.nmd_decomp_resume_stop() == 1
+    assert empty.nmd_decomp_stop_pending() == 0
+    assert empty.nmd_decomp_handed_off() == 0
+    invalid_checkpoint = CheckpointState.from_buffer_copy(bytes(checkpoint_state))
+    invalid_checkpoint.version = 2
+    assert empty.nmd_decomp_set_checkpoint_state(c.byref(invalid_checkpoint)) == 0
+    assert empty.nmd_decomp_error() != 0
 
 print("decomp ABI checks: ok")
