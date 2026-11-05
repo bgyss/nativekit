@@ -174,6 +174,8 @@ def _validate_scenario(scenario, frames):
         raise RunnerError("scenario must require instruction and state capabilities for its stop CPU")
     if stop["criterion"] != "frame_limit" and not (required & (1 << 10)):
         raise RunnerError("scenario stop criterion requires controlled_stop")
+    if stop["criterion"] != "frame_limit" and not (required & (1 << 8)):
+        raise RunnerError("scenario stop criterion requires master_clock")
     if stop["criterion"] == "interrupt" and not (required & (1 << 5)):
         raise RunnerError("interrupt stop requires reset_exception_interrupt")
     if stop["action"] == "replace" and not (required & (1 << 11)):
@@ -215,6 +217,10 @@ def _preflight_core(core_path, scenario):
         register = core.nmd_decomp_register
         core.nmd_decomp_reset
         core.nmd_decomp_error
+        if scenario["stop"]["criterion"] != "frame_limit":
+            core.nmd_decomp_set_stop_metadata
+            core.nmd_decomp_should_stop_cpu
+            core.nmd_decomp_mark_handed_off
     except (OSError, AttributeError) as exc:
         raise RunnerError("core is missing required NMDH ABI symbols") from exc
     abi_version.restype = c.c_uint32
@@ -341,13 +347,23 @@ class Interrupt(c.Structure):
 
 class StopEvent(c.Structure):
     _fields_ = [("criterion", c.c_uint32), ("reason", c.c_uint32),
-                ("instruction_count", c.c_uint64), ("stop_clock", c.c_uint64)]
+                ("value", c.c_uint64), ("instruction_count", c.c_uint64),
+                ("stop_clock", c.c_uint64)]
+
+
+class Handoff(c.Structure):
+    _fields_ = [
+        ("stop", StopEvent), ("master_clock", c.c_uint64),
+        ("z80_master_clock", c.c_uint32), ("vdp_clock", c.c_uint32),
+        ("ym_clock", c.c_uint32), ("psg_clock", c.c_uint32),
+        ("io_clock", c.c_uint32), ("m68k", M68KState), ("z80", Z80State),
+    ]
 
 
 class EventPayload(c.Union):
     _fields_ = [("instruction", Instruction), ("m68k", M68KState), ("z80", Z80State),
                 ("flow", FlowEdge), ("bus", BusAccess), ("interrupt", Interrupt),
-                ("stop", StopEvent), ("bytes", c.c_uint8 * 256)]
+                ("stop", StopEvent), ("handoff", Handoff), ("bytes", c.c_uint8 * 256)]
 
 
 class DecompEvent(c.Structure):
@@ -390,10 +406,27 @@ def _event_dict(event):
         data = event.payload.interrupt
         payload = {"vector": data.vector, "reason": data.reason,
                    "phase": data.phase, "stack_pointer": data.stack_pointer}
+    elif kind in (EVENT_STOP, EVENT_REPLACE):
+        data = event.payload.handoff
+        stop = data.stop
+        payload = {
+            "criterion": STOP_CRITERION_NAMES.get(stop.criterion, "unknown"),
+            "reason": stop.reason, "value": stop.value,
+            "instruction_count": stop.instruction_count, "stop_clock": stop.stop_clock,
+            "handoff": {
+                "master_clock": data.master_clock,
+                "stop_clock": stop.stop_clock,
+                "z80_master_clock": data.z80_master_clock,
+                "vdp_clock": data.vdp_clock, "ym_clock": data.ym_clock,
+                "psg_clock": data.psg_clock, "io_clock": data.io_clock,
+                "m68k": _state_dict(data.m68k), "z80": _state_dict(data.z80),
+            },
+        }
     else:
         data = event.payload.stop
         payload = {"criterion": data.criterion, "reason": data.reason,
-                   "instruction_count": data.instruction_count, "stop_clock": data.stop_clock}
+                   "value": data.value, "instruction_count": data.instruction_count,
+                   "stop_clock": data.stop_clock}
     return {"struct_size": event.struct_size, "kind": kind, "cpu": event.cpu,
             "flags": event.flags, "sequence": event.sequence,
             "master_clock": event.master_clock, "epoch": event.epoch,
@@ -424,6 +457,15 @@ def instruction_stop_matches(stop, event, instruction_count, pending_interrupt=F
     if stop["criterion"] == "instruction_budget":
         return instruction_count >= stop["value"]
     return False
+
+
+STOP_CRITERION_IDS = {
+    "pc": 1,
+    "return_sentinel": 2,
+    "interrupt": 3,
+    "instruction_budget": 4,
+}
+STOP_CRITERION_NAMES = {value: name for name, value in STOP_CRITERION_IDS.items()}
 
 
 class LimitedStream:
@@ -475,7 +517,10 @@ def _worker(args):
     event_counts = {}
     instruction_counts = {"m68k": 0, "z80": 0}
     frame_count = 0
-    stop_state = {"pending_interrupt": False, "triggered": False, "action": 0}
+    stop_state = {
+        "pending_interrupt": False, "triggered": False, "request_sent": False,
+        "action": 0, "trigger_event": None, "handoff_event": None,
+    }
     current_input = [{}]
     video_hash = hashlib.sha256()
     audio_hash = hashlib.sha256()
@@ -578,20 +623,27 @@ def _worker(args):
                     name == scenario["stop"]["cpu"] and
                     scenario["stop"]["criterion"] == "interrupt"):
                 stop_state["pending_interrupt"] = True
-            if (not estimate_mode and not stop_state["triggered"] and
+            if (not estimate_mode and not stop_state["request_sent"] and
                     instruction_stop_matches(scenario["stop"], event_record,
                                              instruction_counts[name],
                                              stop_state["pending_interrupt"])):
-                stop_state["triggered"] = True
+                criterion = scenario["stop"]["criterion"]
+                value = scenario["stop"].get("value", 0)
+                core.nmd_decomp_set_stop_metadata(
+                    STOP_CRITERION_IDS[criterion], value, instruction_counts[name])
+                stop_state["request_sent"] = True
+                stop_state["trigger_event"] = event_record
                 stop_state["action"] = (ACTION_REPLACE if scenario["stop"]["action"] == "replace"
                                          else ACTION_STOP)
                 return stop_state["action"]
-            if event.kind == EVENT_STOP:
+            if event.kind in (EVENT_STOP, EVENT_REPLACE):
+                if not stop_state["request_sent"]:
+                    raise RunnerError("core emitted a handoff without a runner stop request")
+                stop_state["handoff_event"] = event_record
                 stop_state["triggered"] = True
-                stop_state["action"] = ACTION_STOP
-            elif event.kind == EVENT_REPLACE:
-                stop_state["triggered"] = True
-                stop_state["action"] = ACTION_REPLACE
+                if event.kind != (EVENT_REPLACE if stop_state["action"] == ACTION_REPLACE
+                                  else EVENT_STOP):
+                    raise RunnerError("core handoff action differs from the requested action")
             return ACTION_CONTINUE
         except Exception as exc:
             trace_errors.append("NMDH callback failed: " + str(exc))
@@ -640,6 +692,8 @@ def _worker(args):
                                              c.CFUNCTYPE(c.c_int, c.c_void_p, c.POINTER(DecompEvent)),
                                              c.c_void_p]
         core.nmd_decomp_register.restype = c.c_int
+        core.nmd_decomp_set_stop_metadata.argtypes = [c.c_uint32, c.c_uint64, c.c_uint64]
+        core.nmd_decomp_set_stop_metadata.restype = None
         core.nmd_decomp_reset()
         if not core.nmd_decomp_register(1, on_decomp, None):
             raise RunnerError("core refused NMDH ABI version 1")
@@ -667,6 +721,9 @@ def _worker(args):
             criterion = scenario["stop"]["criterion"]
             if criterion == "frame_limit":
                 stop_state["triggered"] = frame_count == args.frames
+                stop_state["action"] = ACTION_STOP if stop_state["triggered"] else 0
+            elif stop_state["request_sent"] and not stop_state["handoff_event"]:
+                raise RunnerError("core returned from retro_run without a synchronized handoff")
             if not stop_state["triggered"]:
                 raise RunnerError("scenario stop criterion was not reached")
         if core.nmd_decomp_error():
@@ -698,6 +755,10 @@ def _worker(args):
             "video_sha256": video_hash.hexdigest(),
             "audio_sha256": audio_hash.hexdigest(),
             "stop_action": stop_state["action"],
+            "stop_criterion": scenario["stop"]["criterion"],
+            "stop_value": scenario["stop"].get("value"),
+            "trigger_event": stop_state["trigger_event"],
+            "handoff_event": stop_state["handoff_event"],
         }
         (output / "worker-result.json").write_bytes(nmdh_trace.canonical_json(result))
         output_manifest = {"format": "NMDH v1 capture", "metadata": metadata, **result,

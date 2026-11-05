@@ -11,7 +11,7 @@ The interface will be deep at the runner seam: callers select a CPU/stop criteri
 ## Goals
 
 - Expose 68000 and Z80 instruction-boundary events with PC, fetched opcode bytes, architectural state, and a sequence from which dynamic control-flow edges can be reconstructed.
-- Expose reset, exception, and interrupt entry/return events for both CPUs.
+- Expose reset and interrupt entry/return events for both CPUs, plus exception entry/return where the architecture defines an exception path. The Z80 has no architected exception-entry mechanism; its reset and maskable/NMI events are covered instead.
 - Expose ordered CPU bus transactions with start and completion clocks, read/write/fetch provenance, width, address, and value. Distinguish covered intervals from any unimplemented idle-cycle detail.
 - Provide controlled stop and replacement-decision hooks at an instruction boundary, plus explicit stop criteria for normal return, target PC, interrupt, frame limit, or instruction budget. A replacement decision only synchronizes and hands control back to the runner; D01 does not apply replacement effects or resume from that decision point.
 - Capture and restore a complete machine checkpoint at documented safe boundaries, including CPU hidden state and scheduler epochs that affect subsequent execution.
@@ -59,10 +59,10 @@ NMDH v1 events are:
 | `INSTRUCTION` | CPU, current PC, opcode/prefetch word, fetched-byte provenance, global clock, and a copied CPU-state snapshot |
 | `FLOW_EDGE` | Previous and current instruction PCs, with the observed transition type when known; indirect targets remain explicit when unresolved |
 | `BUS_ACCESS` | CPU, read/write, fetch/operand/data provenance, width, address, value, access start clock, completion clock, and epoch |
-| `RESET` / `EXCEPTION` / `INTERRUPT` | CPU, vector/reason, entry or return phase, PC/stack transition, and clock |
-| `STOP` / `REPLACE` | CPU, criterion, triggering PC, instruction budget/return condition, and synchronized stop clock |
+| `RESET` / `EXCEPTION` / `INTERRUPT` | CPU, vector/reason, entry or return phase, PC/stack transition, and clock; exceptions apply where the architecture defines them, while the Z80 reports reset and IRQ/NMI |
+| `STOP` / `REPLACE` | CPU, criterion/value, triggering instruction count and PC, both CPU snapshots, synchronized master clock, and VDP/YM/PSG/IO scheduler clocks |
 
-An `INSTRUCTION` event describes the just-completed instruction: `pc` and fetched bytes identify its pre-instruction address and encoding; `next_pc` and the copied CPU snapshot show the post-instruction state at the boundary before another guest instruction. The copied 68000 snapshot includes D0-D7, A0-A7, USP/SSP selection, PC, SR/CCR flags, prefetch, stop state, pending interrupt fields, and relevant local/global cycles. The Z80 snapshot includes main and alternate registers, AF/BC/DE/HL, IX/IY, SP/PC/WZ, I/R, IM/IFF state, flags, reset/BUSREQ/BUSACK, pending interrupt state, and relevant cycles. The final field list must be checked against the pinned context structures and round-trip test before implementation is accepted.
+An `INSTRUCTION` event describes the just-completed instruction: `pc` and fetched bytes identify its pre-instruction address and encoding; `next_pc` and the copied CPU snapshot show the post-instruction state at the boundary before another guest instruction. The copied 68000 snapshot includes D0-D7, A0-A7, USP/SSP selection, PC, SR/CCR flags, prefetch, stop state, pending interrupt fields, and relevant local/global cycles. The Z80 snapshot includes main and alternate registers, AF/BC/DE/HL, IX/IY, SP/PC/WZ, I/R, IM/IFF state, flags, reset/BUSREQ/BUSACK, pending interrupt state, and relevant cycles. The final field list must be checked against the pinned context structures and round-trip test before implementation is accepted. The Z80 computed-goto hook publishes the preceding instruction when the next opcode is fetched, but before that opcode body executes; its snapshot includes the fetch-side PC/R changes.
 
 The runner streams NMDH v1 to a versioned file with a header, capability and identity record, bounded records, and a footer containing record count and completion status. Incomplete or truncated streams are invalid. The existing NMDT v2 file remains independently available for its device events and current consumers; both streams carry the shared master-clock epoch identity needed for later merge/replay.
 

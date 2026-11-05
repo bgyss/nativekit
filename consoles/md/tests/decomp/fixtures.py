@@ -191,3 +191,96 @@ loop:
         "loop_pc": subroutine + 7,
     }
     return rom_path, scenario_path, expected
+
+
+def build_handoff_fixture(directory, m68k_assembler, z80_assembler):
+    """Write a combined-CPU cartridge with reset, TRAP/RTE and VDP IRQ handlers."""
+    directory = Path(directory)
+    z80_code = _assemble(z80_assembler, directory, "handoff-z80", """\
+        org 0
+        ld sp,$1ff0
+        im 1
+        ei
+        call subroutine
+z80_loop:
+        jp z80_loop
+subroutine:
+        ld a,$33
+        ret
+        org $38
+z80_irq:
+        reti
+        org $66
+z80_nmi:
+        retn
+""")
+    if len(z80_code) <= 0x66 or len(z80_code) >= 0x100:
+        raise RuntimeError("Z80 handoff fixture does not contain its IRQ/NMI vectors")
+
+    m68k_lines = [
+        "        move.w #0,$a11200",
+        "        move.w #$0100,$a11100",
+        "        move.w #$0100,$a11200",
+    ]
+    for offset, value in enumerate(z80_code):
+        m68k_lines.append("        move.b #$%02x,$%08x" % (value, 0xA00000 + offset))
+    m68k_lines.extend((
+        "        move.w #0,$a11100",
+        "        move.w #$8134,$c00004",
+        "        move.w #$2000,sr",
+        "        trap #0",
+        "        jmp $00000800",
+    ))
+    m68k_code = _assemble(m68k_assembler, directory, "handoff-m68k-loader",
+                          "\n".join(m68k_lines) + "\n")
+    if len(m68k_code) >= 0x400:
+        raise RuntimeError("68000 handoff loader overlaps its exception handlers")
+
+    rom = bytearray(0x8000)
+    rom[0:4] = (0x00FFFF00).to_bytes(4, "big")
+    rom[4:8] = (0x200).to_bytes(4, "big")
+    for offset in range(8, 0x100, 4):
+        rom[offset:offset + 4] = (0x200).to_bytes(4, "big")
+    rom[0x78:0x7C] = (0x620).to_bytes(4, "big")
+    rom[0x80:0x84] = (0x600).to_bytes(4, "big")
+    rom[0x100:0x110] = b"SEGA GENESIS    "
+    rom[0x120:0x150] = b"NATIVEKIT SYNTHETIC".ljust(48, b" ")
+    rom[0x150:0x180] = b"NATIVEKIT SYNTHETIC".ljust(48, b" ")
+    rom[0x1F0:0x200] = b"JUE             "
+    rom[0x200:0x200 + len(m68k_code)] = m68k_code
+    trap_handler = _assemble(m68k_assembler, directory, "handoff-trap-handler", """\
+        addq.l #1,d2
+        rte
+""")
+    vint_handler = _assemble(m68k_assembler, directory, "handoff-vint-handler", """\
+        addq.l #1,d4
+        rte
+""")
+    rom[0x600:0x600 + len(trap_handler)] = trap_handler
+    rom[0x620:0x620 + len(vint_handler)] = vint_handler
+    rom_path = directory / "nmdh-handoff-synthetic.bin"
+    rom_path.write_bytes(rom)
+
+    call_pc = z80_code.index(0xCD)
+    loop_pc = z80_code.index(0xC3)
+    subroutine = z80_code.find(bytes((0x3E, 0x33, 0xC9)))
+    if subroutine < 0:
+        raise RuntimeError("Z80 handoff subroutine bytes were not emitted as expected")
+    expected = {
+        "m68k_code_bytes": len(m68k_code),
+        "z80_code_bytes": len(z80_code),
+        "m68k_entry_pc": 0x200,
+        "m68k_stop_pc": 0x800,
+        "m68k_trap_vector": 32,
+        "m68k_trap_handler": 0x600,
+        "m68k_vint_vector": 30,
+        "m68k_vint_handler": 0x620,
+        "z80_entry_pc": 0,
+        "z80_call_pc": call_pc,
+        "z80_return_pc": call_pc + 3,
+        "z80_loop_pc": loop_pc,
+        "z80_subroutine_pc": subroutine,
+        "z80_irq_vector": 0x38,
+        "z80_nmi_vector": 0x66,
+    }
+    return rom_path, expected

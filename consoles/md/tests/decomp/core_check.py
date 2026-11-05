@@ -10,7 +10,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fixtures import build_m68k_fixture, build_z80_fixture
+from fixtures import build_handoff_fixture, build_m68k_fixture, build_z80_fixture
 
 sys.path.insert(0, str(root / "consoles/md/tools/decomp"))
 import trace as nmdh_trace
@@ -258,14 +258,162 @@ def run_z80_case():
                identities["runner_sha256"]))
 
 
+def _handoff_scenario(stop):
+    return {
+        "version": 1,
+        "region": "U",
+        "model": "md1va3",
+        "pad1": "3",
+        "pad2": "3",
+        "input": {},
+        "required_capabilities": [
+            "m68k_instruction", "m68k_state", "z80_instruction", "z80_state",
+            "flow_edge", "reset_exception_interrupt", "fetch_provenance",
+            "master_clock", "controlled_stop", "replace_handoff",
+        ],
+        "stop": stop,
+    }
+
+
+def _capture_handoff_case(directory, rom_path, stop, label):
+    scenario_path = directory / (label + ".json")
+    scenario_path.write_text(json.dumps(_handoff_scenario(stop), sort_keys=True,
+                                        separators=(",", ":")))
+    estimate_dir = directory / (label + "-estimate")
+    estimate = subprocess.run([
+        sys.executable, str(RUNNER), "--mode", "estimate", "--core", str(CORE),
+        "--rom", str(rom_path), "--scenario", str(scenario_path), "--frames", "1",
+        "--out", str(estimate_dir),
+    ], capture_output=True, text=True, timeout=450)
+    if estimate.returncode:
+        raise AssertionError("%s estimate failed: %s" % (label, estimate.stderr.strip()))
+
+    capture_dir = directory / (label + "-capture")
+    capture = subprocess.run([
+        sys.executable, str(RUNNER), "--mode", "capture", "--core", str(CORE),
+        "--rom", str(rom_path), "--scenario", str(scenario_path), "--frames", "1",
+        "--estimate-file", str(estimate_dir / "estimate.json"), "--out", str(capture_dir),
+    ], capture_output=True, text=True, timeout=450)
+    if capture.returncode:
+        raise AssertionError("%s capture failed: %s" % (label, capture.stderr.strip()))
+    events = list(nmdh_trace.read_nmdh(capture_dir / "capture.nmdh"))
+    manifest = json.loads((capture_dir / "manifest.json").read_text())
+    return events, manifest
+
+
+def _assert_handoff(events, manifest, action, cpu, criterion, target=None):
+    handoffs = [event for event in events if event["kind"] in (7, 8)]
+    if len(handoffs) != 1:
+        raise AssertionError("expected exactly one synchronized stop/replacement event")
+    event = handoffs[0]
+    expected_kind = 8 if action == "replace" else 7
+    if event["kind"] != expected_kind or event["cpu"] != (1 if cpu == "m68k" else 2):
+        raise AssertionError("handoff event does not match requested CPU/action")
+    payload = event["payload"]
+    if (payload["criterion"] != criterion or payload["handoff"]["master_clock"] != event["master_clock"] or
+            payload["handoff"]["stop_clock"] != event["master_clock"]):
+        raise AssertionError("handoff reason or master-clock snapshot is wrong")
+    if payload["handoff"]["m68k"]["cycles"] > event["master_clock"]:
+        raise AssertionError("68000 snapshot is ahead of the synchronized clock")
+    if payload["handoff"]["z80"]["cycles"] * 15 > event["master_clock"]:
+        raise AssertionError("Z80 snapshot is ahead of the synchronized clock")
+    if target is not None and manifest["trigger_event"]["next_pc"] != target:
+        raise AssertionError("stop trigger did not match the requested post-instruction boundary")
+    trigger = manifest["trigger_event"]
+    cpu_id = 1 if cpu == "m68k" else 2
+    later = [item for item in events if item["sequence"] > trigger["sequence"] and
+             item["kind"] == 1 and item["cpu"] == cpu_id]
+    if later:
+        raise AssertionError("the stopped CPU executed another guest instruction")
+    if not manifest["instruction_counts"]["m68k"] or not manifest["instruction_counts"]["z80"]:
+        raise AssertionError("combined-CPU handoff did not advance both CPUs: " +
+                             repr(manifest["instruction_counts"]))
+    snapshots = payload["handoff"]
+    clocks = (snapshots["master_clock"], snapshots["vdp_clock"], snapshots["ym_clock"],
+              snapshots["psg_clock"], snapshots["io_clock"])
+    if any(clock != snapshots["master_clock"] for clock in clocks[1:]):
+        raise AssertionError("device and scheduler clocks are not synchronized: " + repr(clocks))
+    return event, trigger
+
+
+def run_handoff_case():
+    if not CORE.is_file() or not ASSEMBLER.is_file():
+        raise AssertionError("pinned test core and vasm must be built before the handoff case")
+    z80_assembler = root / "build/toolchains/vasm/vasmz80_oldstyle"
+    if not z80_assembler.is_file():
+        raise AssertionError("pinned Z80 vasm must be built before the handoff case")
+    with tempfile.TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        rom_path, expected = build_handoff_fixture(directory, ASSEMBLER, z80_assembler)
+
+        pc_stop = {"cpu": "m68k", "criterion": "pc", "action": "stop",
+                   "value": expected["m68k_stop_pc"]}
+        stop_events, stop_manifest = _capture_handoff_case(
+            directory, rom_path, pc_stop, "handoff-stop")
+        stop_event, stop_trigger = _assert_handoff(
+            stop_events, stop_manifest, "stop", "m68k", "pc", expected["m68k_stop_pc"])
+
+        replace_stop = dict(pc_stop, action="replace")
+        replace_events, replace_manifest = _capture_handoff_case(
+            directory, rom_path, replace_stop, "handoff-replace")
+        replace_event, replace_trigger = _assert_handoff(
+            replace_events, replace_manifest, "replace", "m68k", "pc", expected["m68k_stop_pc"])
+        if stop_trigger != replace_trigger:
+            raise AssertionError("STOP and REPLACE did not preserve the same immutable trigger event")
+        if stop_event["payload"]["handoff"] != replace_event["payload"]["handoff"]:
+            raise AssertionError("STOP and REPLACE mutated the same decision-boundary snapshot differently")
+
+        return_stop = {"cpu": "z80", "criterion": "return_sentinel", "action": "stop",
+                       "value": expected["z80_return_pc"]}
+        return_events, return_manifest = _capture_handoff_case(
+            directory, rom_path, return_stop, "handoff-return")
+        _assert_handoff(return_events, return_manifest, "stop", "z80", "return_sentinel",
+                        expected["z80_return_pc"])
+
+        budget_stop = {"cpu": "z80", "criterion": "instruction_budget", "action": "stop",
+                       "value": 20}
+        budget_events, budget_manifest = _capture_handoff_case(
+            directory, rom_path, budget_stop, "handoff-budget")
+        _assert_handoff(budget_events, budget_manifest, "stop", "z80", "instruction_budget")
+
+        irq_stop = {"cpu": "m68k", "criterion": "interrupt", "action": "stop"}
+        irq_events, irq_manifest = _capture_handoff_case(
+            directory, rom_path, irq_stop, "handoff-interrupt")
+        _assert_handoff(irq_events, irq_manifest, "stop", "m68k", "interrupt")
+
+        frame_stop = {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"}
+        frame_events, frame_manifest = _capture_handoff_case(
+            directory, rom_path, frame_stop, "handoff-frame")
+        if frame_manifest["frames_run"] != 1 or frame_manifest["stop_criterion"] != "frame_limit":
+            raise AssertionError("frame-limit capture did not stop at its requested frame boundary")
+        for cpu, kind in ((1, 4), (2, 4), (1, 5), (1, 6), (2, 6)):
+            if not any(event["kind"] == kind and event["cpu"] == cpu for event in frame_events):
+                raise AssertionError("missing reset, exception or CPU interrupt event %d/%d" % (kind, cpu))
+        for cpu in (1, 2):
+            phases = {event["payload"]["phase"] for event in frame_events
+                      if event["kind"] == 6 and event["cpu"] == cpu}
+            if not {1, 2}.issubset(phases):
+                raise AssertionError("CPU %d IRQ/NMI entry and return events are incomplete" % cpu)
+
+        identities = stop_manifest["metadata"]["identities"]
+        print("handoff synthetic: m68k_code_bytes=%d z80_code_bytes=%d stop_clock=%d events=%d rom_sha256=%s scenario_sha256=%s core_sha256=%s patch_sha256=%s abi_sha256=%s runner_sha256=%s" %
+              (expected["m68k_code_bytes"], expected["z80_code_bytes"],
+               stop_event["master_clock"], len(stop_events),
+               identities["rom_sha256"], identities["scenario_sha256"],
+               identities["core_sha256"], identities["patch_sha256"],
+               identities["abi_sha256"], identities["runner_sha256"]))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", choices=("m68k", "z80"), required=True)
+    parser.add_argument("--case", choices=("m68k", "z80", "handoff"), required=True)
     args = parser.parse_args()
     if args.case == "m68k":
         run_m68k_case()
     elif args.case == "z80":
         run_z80_case()
+    elif args.case == "handoff":
+        run_handoff_case()
     print("decomp core %s checks: ok" % args.case)
 
 

@@ -14,7 +14,7 @@ D00 workflow and baseline inventory; a retail ROM is not required for synthetic 
 
 1. Specify a separate versioned decomp capability ABI. Existing NMDT v2 access-completion events are not instruction boundaries or a complete CPU-state interface; preserve existing trace consumers.
 
-2. Expose instruction-boundary PC, decoded extent or fetched bytes, CPU register/flag state, control-flow edges, reset/exception/interrupt entry and return, code-fetch versus operand/data provenance, and global clock epochs for both 68000 and Z80.
+2. Expose instruction-boundary PC, decoded extent or fetched bytes, CPU register/flag state, control-flow edges, reset and interrupt entry/return for both CPUs, M68K exception entry/return, code-fetch versus operand/data provenance, and global clock epochs. The Z80 has no architected exception-entry path.
 
 3. Provide checked state capture/restore, complete machine checkpoints at documented safe boundaries, controlled routine execution to explicit return/stop criteria, and execution replacement hooks. Audit all state actually needed, including alternate/hidden CPU state and prefetch/scheduler state where reference execution depends on it.
 

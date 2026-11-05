@@ -152,6 +152,51 @@ with tempfile.TemporaryDirectory() as temporary:
     assert runner.instruction_stop_matches(sentinel_stop, instruction_event, 1, False)
     assert not runner.instruction_stop_matches({**pc_stop, "value": 0x200},
                                                instruction_event, 1, False)
+    budget_stop = {"cpu": "m68k", "criterion": "instruction_budget",
+                   "action": "stop", "value": 4}
+    assert runner.instruction_stop_matches(budget_stop, instruction_event, 4, False)
+    assert not runner.instruction_stop_matches(budget_stop, instruction_event, 3, False)
+    interrupt_stop = {"cpu": "m68k", "criterion": "interrupt", "action": "stop"}
+    assert runner.instruction_stop_matches(interrupt_stop, instruction_event, 4, True)
+    assert not runner.instruction_stop_matches(interrupt_stop, instruction_event, 4, False)
+    frame_stop = {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"}
+    assert not runner.instruction_stop_matches(frame_stop, instruction_event, 4, False)
+
+    handoff_event = runner.DecompEvent()
+    handoff_event.struct_size = runner.c.sizeof(runner.DecompEvent)
+    handoff_event.kind = runner.EVENT_STOP
+    handoff_event.cpu = runner.TRACE_M68K
+    handoff_event.master_clock = 900
+    handoff = handoff_event.payload.handoff
+    handoff.stop.criterion = runner.STOP_CRITERION_IDS["pc"]
+    handoff.stop.reason = runner.ACTION_STOP
+    handoff.stop.value = 0x206
+    handoff.stop.instruction_count = 4
+    handoff.stop.stop_clock = 900
+    handoff.master_clock = 900
+    handoff.z80_master_clock = 885
+    handoff.vdp_clock = 900
+    handoff.ym_clock = 900
+    handoff.psg_clock = 900
+    handoff.io_clock = 900
+    record = runner._event_dict(handoff_event)
+    assert record["payload"]["criterion"] == "pc"
+    assert record["payload"]["handoff"]["master_clock"] == 900
+    assert record["payload"]["handoff"]["z80_master_clock"] == 885
+    assert record["payload"]["handoff"]["m68k"]["cycles"] == 0
+
+    no_master_clock = {
+        "version": 1, "region": "U", "model": "md1va3", "pad1": "3", "pad2": "3",
+        "input": {},
+        "required_capabilities": ["m68k_instruction", "m68k_state", "controlled_stop"],
+        "stop": {"cpu": "m68k", "criterion": "pc", "action": "stop", "value": 0x206},
+    }
+    try:
+        runner._validate_scenario(no_master_clock, 1)
+    except runner.RunnerError as exc:
+        assert "master_clock" in str(exc)
+    else:
+        raise AssertionError("non-frame stop accepted without a master-clock capability")
 
     timed_out = runner.supervise_child(
         [sys.executable, "-c", "import time; time.sleep(2)"], timeout_seconds=0.05)

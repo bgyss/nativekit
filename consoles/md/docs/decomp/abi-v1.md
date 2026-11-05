@@ -42,7 +42,7 @@ and encoding, while `next_pc` and the snapshot reflect the post-instruction
 boundary before another guest instruction. Instruction snapshots include the
 CPU hidden/prefetch and pending interrupt fields needed by the execution
 boundary. The pinned context fields and their semantics are audited against
-live synthetic execution before a capability is claimed.
+live synthetic execution before a capability is claimed. The Z80 computed-goto hook publishes the preceding instruction when the next opcode has been fetched, but before that opcode body executes; its snapshot includes the fetch-side PC/R changes.
 
 For Z80 state, `main` and `alt` use the pinned context order `[B,C,D,E,H,L,F,A]`.
 Flag fields are the candidate core's raw representations, not a packed F byte:
@@ -55,6 +55,29 @@ The callback returns `NMD_DECOMP_CONTINUE` (`0`), `NMD_DECOMP_STOP` (`1`) or
 fails closed with STOP. REPLACE is only a synchronized decision-point handoff.
 It does not mutate CPU, memory, or clock state and does not resume reference
 execution. C-side effects and resumption are later D04/D05 work.
+
+Reset, exception and interrupt events use the shared interrupt payload:
+`vector`, `reason`, `phase` (`1=entry`, `2=return`) and the stack pointer.
+Both CPUs report reset and interrupt entry/return. The M68K also reports
+exception entry/return, including software traps. The Z80 has no architected
+exception-entry path, so no Z80 `EXCEPTION` event is emitted.
+
+The `STOP` and `REPLACE` event payload is a complete handoff record. It contains
+the requested stop criterion and value, action reason, triggering CPU's
+instruction count, synchronized master clock, copies of both CPU snapshots,
+and the VDP, YM, PSG and IO scheduler clocks. The CPU-local `cycles` fields
+remain in their own units; `z80_master_clock` is the Z80 cycle converted to
+the common master clock. The event's master clock and `stop_clock` name the
+same scheduler boundary. Criterion IDs are 1=PC, 2=return sentinel,
+3=interrupt, and 4=instruction budget; frame limit is a natural post-frame
+return and is recorded by the runner without a CPU callback action.
+
+The ABI latches the first stop action and its CPU/clock. The generated CPU
+loops allow the other CPU to finish up to the requested boundary, then stop
+both cores before another instruction. The Genesis scheduler advances the
+devices to a stable common clock, copies both CPU states, and publishes the
+handoff event before `retro_run` returns. A completed REPLACE handoff stays
+latched; D01 has no resume operation.
 
 `nmd_decomp_error()` is sticky until `nmd_decomp_reset()`. Invalid event sizes,
 event/CPU IDs, callback actions, or sequence overflow set it. A runner must
@@ -74,7 +97,7 @@ are independent and may be combined:
 | `1 << 2` | Z80 instruction boundaries |
 | `1 << 3` | Z80 state snapshots |
 | `1 << 4` | Dynamic flow edges |
-| `1 << 5` | Reset, exception and interrupt entry/return events |
+| `1 << 5` | Reset and interrupt entry/return for both CPUs; M68K exception entry/return |
 | `1 << 6` | Observed instruction opcode/prefetch bytes marked as code fetch; extension-word provenance is not claimed by this bit |
 | `1 << 7` | CPU bus start/completion intervals |
 | `1 << 8` | Shared master-clock epoch |
@@ -92,8 +115,10 @@ across both CPUs. Clock and epoch values use the synchronized Genesis master
 clock. A STOP/REPLACE action is honored after the current instruction and
 before the next guest instruction; the scheduler must then synchronize both
 CPUs, VDP, sound and IO before returning to the runner. The returned snapshot
-must preserve the triggering CPU state and the other CPU's state at that same
-machine boundary.
+includes the triggering CPU's immutable instruction event and both machine
+CPU states at the synchronized handoff clock. The other CPU may make
+pre-boundary progress while it catches up. STOP and REPLACE on the same
+scenario/trigger produce identical machine snapshots.
 
 Libretro checkpoint capture/restore is permitted only after a completed frame
 or a synchronized hook stop. No save occurs during a callback or between a

@@ -43,6 +43,13 @@ enum nmd_decomp_event_kind {
     NMD_DECOMP_REPLACE_EVENT = 8
 };
 
+enum nmd_decomp_stop_criterion {
+    NMD_DECOMP_STOP_PC = 1,
+    NMD_DECOMP_STOP_RETURN_SENTINEL = 2,
+    NMD_DECOMP_STOP_INTERRUPT = 3,
+    NMD_DECOMP_STOP_INSTRUCTION_BUDGET = 4
+};
+
 enum nmd_decomp_provenance {
     NMD_DECOMP_PROVENANCE_FETCH = 1,
     NMD_DECOMP_PROVENANCE_OPERAND = 2,
@@ -139,9 +146,25 @@ struct nmd_decomp_interrupt {
 struct nmd_decomp_stop {
     uint32_t criterion;
     uint32_t reason;
+    uint64_t value;
     uint64_t instruction_count;
     uint64_t stop_clock;
 };
+
+struct nmd_decomp_handoff {
+    struct nmd_decomp_stop stop;
+    uint64_t master_clock;
+    uint32_t z80_master_clock;
+    uint32_t vdp_clock;
+    uint32_t ym_clock;
+    uint32_t psg_clock;
+    uint32_t io_clock;
+    struct nmd_decomp_m68k_state m68k;
+    struct nmd_decomp_z80_state z80;
+};
+
+_Static_assert(sizeof(struct nmd_decomp_handoff) <= NMD_DECOMP_PAYLOAD_BYTES,
+               "NMDH handoff must fit in the copied event payload");
 
 union nmd_decomp_cpu_state {
     struct nmd_decomp_m68k_state m68k;
@@ -164,6 +187,7 @@ union nmd_decomp_payload {
     struct nmd_decomp_bus_access bus;
     struct nmd_decomp_interrupt interrupt;
     struct nmd_decomp_stop stop;
+    struct nmd_decomp_handoff handoff;
     uint8_t bytes[NMD_DECOMP_PAYLOAD_BYTES];
 };
 
@@ -189,5 +213,17 @@ int nmd_decomp_register(uint32_t version, nmd_decomp_callback callback, void *us
 void nmd_decomp_reset(void);
 int nmd_decomp_error(void);
 enum nmd_decomp_action nmd_decomp_publish(struct nmd_decomp_event *event);
+int nmd_decomp_stop_pending(void);
+uint32_t nmd_decomp_stop_action(void);
+uint32_t nmd_decomp_stop_cpu(void);
+uint32_t nmd_decomp_stop_pc(void);
+uint32_t nmd_decomp_stop_next_pc(void);
+uint64_t nmd_decomp_stop_clock(void);
+int nmd_decomp_should_stop_cpu(uint32_t cpu, uint64_t master_clock);
+int nmd_decomp_handed_off(void);
+void nmd_decomp_set_stop_metadata(uint32_t criterion, uint64_t value,
+                                  uint64_t instruction_count);
+void nmd_decomp_fill_stop(struct nmd_decomp_stop *stop);
+void nmd_decomp_mark_handed_off(void);
 
 #endif

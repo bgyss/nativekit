@@ -45,6 +45,12 @@ class Event(c.Structure):
     ]
 
 
+class Stop(c.Structure):
+    _fields_ = [("criterion", c.c_uint32), ("reason", c.c_uint32),
+                ("value", c.c_uint64), ("instruction_count", c.c_uint64),
+                ("stop_clock", c.c_uint64)]
+
+
 def build_library(directory, enabled_capabilities):
     name = "decomp-empty" if not enabled_capabilities else "decomp-" + "-".join(enabled_capabilities)
     library = pathlib.Path(directory) / (name + "." + extension)
@@ -66,6 +72,15 @@ def configure(library):
     library.nmd_decomp_error.restype = c.c_int
     library.nmd_decomp_publish.argtypes = [c.POINTER(Event)]
     library.nmd_decomp_publish.restype = c.c_int
+    library.nmd_decomp_stop_pending.restype = c.c_int
+    library.nmd_decomp_stop_action.restype = c.c_uint32
+    library.nmd_decomp_stop_cpu.restype = c.c_uint32
+    library.nmd_decomp_stop_clock.restype = c.c_uint64
+    library.nmd_decomp_should_stop_cpu.argtypes = [c.c_uint32, c.c_uint64]
+    library.nmd_decomp_should_stop_cpu.restype = c.c_int
+    library.nmd_decomp_set_stop_metadata.argtypes = [c.c_uint32, c.c_uint64, c.c_uint64]
+    library.nmd_decomp_fill_stop.argtypes = [c.POINTER(Stop)]
+    library.nmd_decomp_mark_handed_off.argtypes = []
     return callback_type
 
 
@@ -142,5 +157,30 @@ with tempfile.TemporaryDirectory() as temporary:
     assert empty.nmd_decomp_register(1, receive, None) == 1
     assert empty.nmd_decomp_publish(c.byref(event)) == 0
     assert event.sequence == 1
+
+    @callback_type
+    def replace_request(user, event_pointer):
+        empty.nmd_decomp_set_stop_metadata(4, 0x1234, 17)
+        return 2
+
+    empty.nmd_decomp_reset()
+    assert empty.nmd_decomp_register(1, replace_request, None) == 1
+    event.kind = 1
+    event.cpu = 2
+    event.master_clock = 720
+    assert empty.nmd_decomp_publish(c.byref(event)) == 2
+    assert empty.nmd_decomp_stop_pending() == 1
+    assert empty.nmd_decomp_stop_action() == 2
+    assert empty.nmd_decomp_stop_cpu() == 2
+    assert empty.nmd_decomp_stop_clock() == 720
+    assert empty.nmd_decomp_should_stop_cpu(2, 0) == 1
+    assert empty.nmd_decomp_should_stop_cpu(1, 719) == 0
+    assert empty.nmd_decomp_should_stop_cpu(1, 720) == 1
+    stop = Stop()
+    empty.nmd_decomp_fill_stop(c.byref(stop))
+    assert (stop.criterion, stop.reason, stop.value, stop.instruction_count,
+            stop.stop_clock) == (4, 2, 0x1234, 17, 720)
+    empty.nmd_decomp_mark_handed_off()
+    assert empty.nmd_decomp_should_stop_cpu(1, 0) == 1
 
 print("decomp ABI checks: ok")

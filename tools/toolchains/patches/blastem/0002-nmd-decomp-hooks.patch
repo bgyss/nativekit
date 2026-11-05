@@ -1,43 +1,156 @@
 diff --git a/Makefile b/Makefile
-index 18e1448..b8339f3 100644
+index 18e1448..f3c0fc2 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -278,0 +279,6 @@ CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO_SOURCE
+@@ -278,0 +279,10 @@ CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO_SOURCE
 +CFLAGS+=-DNMD_DECOMP_HAS_M68K_INSTRUCTION
 +CFLAGS+=-DNMD_DECOMP_HAS_M68K_STATE
 +CFLAGS+=-DNMD_DECOMP_HAS_FLOW_EDGE
 +CFLAGS+=-DNMD_DECOMP_HAS_FETCH_PROVENANCE
 +CFLAGS+=-DNMD_DECOMP_HAS_Z80_INSTRUCTION
 +CFLAGS+=-DNMD_DECOMP_HAS_Z80_STATE
-@@ -318 +324 @@ endif
++CFLAGS+=-DNMD_DECOMP_HAS_RESET_EXCEPTION_INTERRUPT
++CFLAGS+=-DNMD_DECOMP_HAS_MASTER_CLOCK
++CFLAGS+=-DNMD_DECOMP_HAS_CONTROLLED_STOP
++CFLAGS+=-DNMD_DECOMP_HAS_REPLACE_HANDOFF
+@@ -318 +328 @@ endif
 -COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o trace_abi.o $(M68KOBJS) \
 +COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o trace_abi.o decomp_abi.o $(M68KOBJS) \
 diff --git a/cpu_dsl.py b/cpu_dsl.py
-index 08d825e..ff72b6f 100755
+index 08d825e..1df0ea3 100755
 --- a/cpu_dsl.py
 +++ b/cpu_dsl.py
 @@ -717,0 +718,5 @@ def _dispatchCImpl(prog, params):
 +		if prog.prefix == 'z80_':
 +			table_ids = {'main': 0, 'cb': 1, 'ed': 2, 'dded': 3, 'fded': 4,
 +			             'ddcb': 5, 'fdcb': 6, 'dd': 7, 'fd': 8}
-+			return '\n\tz80_decomp_dispatch(context, {table_id}, (uint8_t)({op}));\n\tgoto *impl_{tbl}[{op}];'.format(
++			return '\n\tif (z80_decomp_dispatch(context, {table_id}, (uint8_t)({op}))) return;\n\tgoto *impl_{tbl}[{op}];'.format(
 +				table_id = table_ids[table], tbl = table, op = params[0])
-@@ -2761,0 +2767,2 @@ class Program:
+@@ -2740,0 +2746,2 @@ class Program:
++					if self.prefix == 'm68k_':
++						bodyPieces.append('\n\tif (nmd_decomp_should_stop_cpu(1, context->cycles)) { context->should_return = 1; return; }')
+@@ -2748,0 +2756,2 @@ class Program:
++						if self.prefix == 'm68k_':
++							bodyPieces.append('\n\t\t\tif (nmd_decomp_should_stop_cpu(1, context->cycles)) { context->should_return = 1; return; }')
+@@ -2761,0 +2771,2 @@ class Program:
 +					if self.prefix == 'm68k_':
 +						bodyPieces.append('\n\t\t\tm68k_decomp_begin_instruction(context);')
-@@ -2762,0 +2770,2 @@ class Program:
+@@ -2762,0 +2774,2 @@ class Program:
 +					if self.prefix == 'm68k_':
-+						bodyPieces.append('\n\t\tm68k_decomp_complete_instruction(context);')
-@@ -2773,0 +2783,2 @@ class Program:
++						bodyPieces.append('\n\t\tif (m68k_decomp_complete_instruction(context)) { context->should_return = 1; return; }')
+@@ -2770,0 +2784,2 @@ class Program:
++					if self.prefix == 'm68k_':
++						bodyPieces.append('\n\t\tif (nmd_decomp_should_stop_cpu(1, context->cycles)) { context->should_return = 1; return; }')
+@@ -2773,0 +2789,2 @@ class Program:
 +				if self.prefix == 'm68k_':
 +					bodyPieces.append('\n\t\tm68k_decomp_begin_instruction(context);')
-@@ -2774,0 +2786,2 @@ class Program:
+@@ -2774,0 +2792,2 @@ class Program:
 +				if self.prefix == 'm68k_':
-+					bodyPieces.append('\n\t\tm68k_decomp_complete_instruction(context);')
-@@ -3200 +3213 @@ if __name__ == '__main__':
++					bodyPieces.append('\n\t\tif (m68k_decomp_complete_instruction(context)) { context->should_return = 1; return; }')
+@@ -3200 +3219 @@ if __name__ == '__main__':
 -	main(argv)
 \ No newline at end of file
 +	main(argv)
+diff --git a/genesis.c b/genesis.c
+index 44314f9..160a8e2 100644
+--- a/genesis.c
++++ b/genesis.c
+@@ -25,0 +26 @@
++#include "decomp_abi.h"
+@@ -2129,0 +2131 @@ static void handle_reset_requests(genesis_context *gen)
++			m68k_decomp_reset_event(gen->m68k, gen->m68k->pc);
+@@ -2146,0 +2149,81 @@ static void handle_reset_requests(genesis_context *gen)
++static void decomp_synchronized_handoff(genesis_context *gen)
++{
++	m68k_context *m68k = gen->m68k;
++	z80_context *z80 = gen->z80;
++	sync_z80(gen, m68k->cycles);
++
++	uint64_t z80_clock = (uint64_t)z80->cycles * z80->opts->gen.clock_divider;
++	uint64_t clock = m68k->cycles > z80_clock ? m68k->cycles : z80_clock;
++	if (gen->vdp->cycles > clock) {
++		clock = gen->vdp->cycles;
++	}
++	if (gen->ym->current_cycle > clock) {
++		clock = gen->ym->current_cycle;
++	}
++	if (gen->psg->cycles > clock) {
++		clock = gen->psg->cycles;
++	}
++
++	for (uint8_t pass = 0; pass < 16; pass++) {
++		sync_sound(gen, clock);
++		vdp_run_context(gen->vdp, clock);
++		io_run(gen->io.ports, clock);
++		io_run(gen->io.ports + 1, clock);
++		io_run(gen->io.ports + 2, clock);
++		if (gen->expansion) {
++			scd_run(gen->expansion, gen_cycle_to_scd(clock, gen));
++		}
++		if (gen->mars) {
++			s32x_run(gen->mars, clock);
++		}
++		uint64_t next_clock = clock;
++		if (gen->vdp->cycles > next_clock) {
++			next_clock = gen->vdp->cycles;
++		}
++		if (gen->ym->current_cycle > next_clock) {
++			next_clock = gen->ym->current_cycle;
++		}
++		if (gen->psg->cycles > next_clock) {
++			next_clock = gen->psg->cycles;
++		}
++		if (next_clock == clock) {
++			break;
++		}
++		clock = next_clock;
++	}
++	if (gen->vdp->cycles != clock || gen->ym->current_cycle != clock ||
++	    gen->psg->cycles != clock) {
++		struct nmd_decomp_event invalid = {0};
++		nmd_decomp_publish(&invalid);
++		return;
++	}
++	if (clock >= gen->last_sync_cycle) {
++		gen->refresh_counter += clock - gen->last_sync_cycle;
++		gen->last_sync_cycle = clock;
++		gen->refresh_counter %= MCLKS_PER_68K * REFRESH_INTERVAL;
++	}
++	gen->frame_end = vdp_cycles_to_frame_end(gen->vdp);
++	m68k->sync_cycle = gen->frame_end;
++
++	struct nmd_decomp_event event = {0};
++	event.struct_size = sizeof event;
++	event.kind = nmd_decomp_stop_action() == NMD_DECOMP_REPLACE ?
++		NMD_DECOMP_REPLACE_EVENT : NMD_DECOMP_STOP_EVENT;
++	event.cpu = nmd_decomp_stop_cpu();
++	event.master_clock = clock;
++	event.pc = nmd_decomp_stop_pc();
++	event.next_pc = nmd_decomp_stop_next_pc();
++	nmd_decomp_fill_stop(&event.payload.handoff.stop);
++	event.payload.handoff.stop.stop_clock = clock;
++	event.payload.handoff.master_clock = clock;
++	event.payload.handoff.z80_master_clock = z80->cycles * z80->opts->gen.clock_divider;
++	event.payload.handoff.vdp_clock = gen->vdp->cycles;
++	event.payload.handoff.ym_clock = gen->ym->current_cycle;
++	event.payload.handoff.psg_clock = gen->psg->cycles;
++	event.payload.handoff.io_clock = clock;
++	m68k_decomp_copy_state(m68k, &event.payload.handoff.m68k);
++	z80_decomp_copy_state(z80, &event.payload.handoff.z80);
++	nmd_decomp_mark_handed_off();
++	nmd_decomp_publish(&event);
++}
++
+@@ -2191,0 +2275 @@ static void start_genesis(system_header *system, char *statefile)
++		m68k_decomp_reset_event(gen->m68k, gen->m68k->pc);
+@@ -2201,0 +2286,3 @@ static void start_genesis(system_header *system, char *statefile)
++	if (nmd_decomp_stop_pending() && !nmd_decomp_handed_off()) {
++		decomp_synchronized_handoff(gen);
++	}
+@@ -2233,0 +2321,3 @@ static void resume_genesis(system_header *system)
++	if (nmd_decomp_stop_pending() && !nmd_decomp_handed_off()) {
++		decomp_synchronized_handoff(gen);
++	}
 diff --git a/link.T b/link.T
 index fda72e5..e7783ee 100644
 --- a/link.T
@@ -46,29 +159,46 @@ index fda72e5..e7783ee 100644
 -	global: retro_* nmd_trace_*;
 +	global: retro_* nmd_trace_* nmd_decomp_*;
 diff --git a/m68k.cpu b/m68k.cpu
-index 54e5416..8f943a6 100644
+index 54e5416..9fc8db1 100644
 --- a/m68k.cpu
 +++ b/m68k.cpu
-@@ -19,0 +20,2 @@ declare
+@@ -12,0 +13 @@ declare
++	struct nmd_decomp_m68k_state;
+@@ -19,0 +21,8 @@ declare
 +	void m68k_decomp_begin_instruction(m68k_context *context);
-+	void m68k_decomp_complete_instruction(m68k_context *context);
-@@ -67,0 +70,2 @@ regs
++	int m68k_decomp_complete_instruction(m68k_context *context);
++	void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state);
++	void m68k_decomp_exception(m68k_context *context, uint32_t vector);
++	void m68k_decomp_interrupt(m68k_context *context);
++	void m68k_decomp_return(m68k_context *context);
++	void m68k_decomp_reset_event(m68k_context *context, uint32_t address);
++	int nmd_decomp_should_stop_cpu(uint32_t cpu, uint64_t master_clock);
+@@ -67,0 +77,5 @@ regs
 +	decomp_instruction_pc 32
 +	decomp_instruction_opcode 16
++	decomp_event_kind 8
++	decomp_event_vector 32
++	decomp_event_active 8
+@@ -172,0 +187 @@ m68k_trap
++	ccall m68k_decomp_exception context vector
+@@ -231,0 +247 @@ m68k_interrupt
++			ccall m68k_decomp_interrupt context
+@@ -2828,0 +2845 @@ m68k_calc_ea
++	ccall m68k_decomp_reset_event context pc
 diff --git a/m68k_util.c b/m68k_util.c
-index ca58189..6a0eb07 100644
+index ca58189..ca14373 100644
 --- a/m68k_util.c
 +++ b/m68k_util.c
 @@ -2,0 +3 @@
 +#include "decomp_abi.h"
-@@ -11,0 +13,66 @@ void m68k_trace_mark_fetch(m68k_context *context)
+@@ -11,0 +13,125 @@ void m68k_trace_mark_fetch(m68k_context *context)
 +void m68k_decomp_begin_instruction(m68k_context *context)
 +{
 +	context->decomp_instruction_pc = context->pc - 2;
 +	context->decomp_instruction_opcode = context->prefetch;
 +}
 +
-+static void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state)
++void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state)
 +{
 +	memcpy(state->d, context->dregs, sizeof state->d);
 +	memcpy(state->a, context->aregs, sizeof state->a);
@@ -94,7 +224,62 @@ index ca58189..6a0eb07 100644
 +	state->int_ack = context->int_ack;
 +}
 +
-+void m68k_decomp_complete_instruction(m68k_context *context)
++static void m68k_decomp_publish_transition(m68k_context *context, uint32_t kind,
++                                          uint32_t vector, uint32_t reason,
++                                          uint32_t phase, uint32_t pc,
++                                          uint32_t next_pc)
++{
++	struct nmd_decomp_event event = {0};
++	event.struct_size = sizeof event;
++	event.kind = kind;
++	event.cpu = NMD_DECOMP_M68K;
++	event.master_clock = context->cycles;
++	event.pc = pc & context->opts->gen.address_mask;
++	event.next_pc = next_pc & context->opts->gen.address_mask;
++	event.payload.interrupt.vector = vector;
++	event.payload.interrupt.reason = reason;
++	event.payload.interrupt.phase = phase;
++	event.payload.interrupt.stack_pointer = context->aregs[7];
++	nmd_decomp_publish(&event);
++}
++
++void m68k_decomp_exception(m68k_context *context, uint32_t vector)
++{
++	context->decomp_event_kind = NMD_DECOMP_EXCEPTION;
++	context->decomp_event_vector = vector;
++	context->decomp_event_active = 1;
++	m68k_decomp_publish_transition(context, NMD_DECOMP_EXCEPTION, vector, 0, 1,
++		context->decomp_instruction_pc, context->pc - 2);
++}
++
++void m68k_decomp_interrupt(m68k_context *context)
++{
++	uint32_t vector = 24 + context->int_ack;
++	context->decomp_event_kind = NMD_DECOMP_INTERRUPT;
++	context->decomp_event_vector = vector;
++	context->decomp_event_active = 1;
++	m68k_decomp_publish_transition(context, NMD_DECOMP_INTERRUPT, vector, 1, 1,
++		context->decomp_instruction_pc, context->pc - 2);
++}
++
++void m68k_decomp_return(m68k_context *context)
++{
++	if (!context->decomp_event_active) {
++		return;
++	}
++	m68k_decomp_publish_transition(context, context->decomp_event_kind,
++		context->decomp_event_vector, 0, 2,
++		context->decomp_instruction_pc, context->pc - 2);
++	context->decomp_event_active = 0;
++}
++
++void m68k_decomp_reset_event(m68k_context *context, uint32_t address)
++{
++	context->decomp_event_active = 0;
++	m68k_decomp_publish_transition(context, NMD_DECOMP_RESET, 0, 0, 1, 0, address);
++}
++
++int m68k_decomp_complete_instruction(m68k_context *context)
 +{
 +	struct nmd_decomp_event event = {0};
 +	uint32_t address_mask = context->opts->gen.address_mask;
@@ -126,19 +311,30 @@ index ca58189..6a0eb07 100644
 +	event.payload.flow.current_pc = next_pc;
 +	event.payload.flow.target_known = 1;
 +	nmd_decomp_publish(&event);
++	if (opcode == 0x4E73) {
++		m68k_decomp_return(context);
++	}
++	return nmd_decomp_should_stop_cpu(NMD_DECOMP_M68K, context->cycles);
 +}
 +
-@@ -276,0 +344,2 @@ void m68k_reset(m68k_context *context)
+@@ -276,0 +403,2 @@ void m68k_reset(m68k_context *context)
 +	context->decomp_instruction_pc = 0;
 +	context->decomp_instruction_opcode = 0;
 diff --git a/z80.cpu b/z80.cpu
-index 35ef668..b906bdd 100644
+index 35ef668..f6f9861 100644
 --- a/z80.cpu
 +++ b/z80.cpu
-@@ -29,0 +30,2 @@ declare
+@@ -11,0 +12 @@ declare
++	struct nmd_decomp_z80_state;
+@@ -29,0 +31,7 @@ declare
 +	void z80_decomp_note_fetch(z80_context *context, uint32_t address, uint8_t value);
-+	void z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode);
-@@ -44,0 +47,7 @@ regs
++	uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode);
++	void z80_decomp_copy_state(z80_context *context, struct nmd_decomp_z80_state *state);
++	void z80_decomp_interrupt(z80_context *context, uint32_t vector, uint32_t reason);
++	void z80_decomp_return(z80_context *context);
++	void z80_decomp_reset_event(z80_context *context);
++	int nmd_decomp_should_stop_cpu(uint32_t cpu, uint64_t master_clock);
+@@ -44,0 +53,10 @@ regs
 +	decomp_instruction_pc 16
 +	decomp_fetch_len 8
 +	decomp_fetch_bytes 8 16
@@ -146,13 +342,24 @@ index 35ef668..b906bdd 100644
 +	decomp_pending_value 8
 +	decomp_pending_fetch 8
 +	decomp_active 8
++	decomp_event_vector 16
++	decomp_event_reason 8
++	decomp_event_active 8
+@@ -106,0 +125 @@ z80_interrupt
++		ccall z80_decomp_interrupt context 0x66 2
+@@ -118,0 +138 @@ z80_interrupt
++					ccall z80_decomp_interrupt context int_value 1
+@@ -121,0 +142 @@ z80_interrupt
++					ccall z80_decomp_interrupt context 0x38 1
+@@ -126,0 +148 @@ z80_interrupt
++					ccall z80_decomp_interrupt context pc 1
 diff --git a/z80_util.c b/z80_util.c
-index 2b46182..65d20d0 100644
+index 2b46182..7138191 100644
 --- a/z80_util.c
 +++ b/z80_util.c
 @@ -2,0 +3 @@
 +#include "decomp_abi.h"
-@@ -13,0 +15,103 @@ static void z80_trace_read(z80_context *context, uint32_t address, uint8_t value
+@@ -13,0 +15,169 @@ static void z80_trace_read(z80_context *context, uint32_t address, uint8_t value
 +	if (operation == NMD_TRACE_FETCH) {
 +		z80_decomp_note_fetch(context, address, value);
 +	}
@@ -171,21 +378,8 @@ index 2b46182..65d20d0 100644
 +	nmd_decomp_publish(&invalid);
 +}
 +
-+static void z80_decomp_emit_instruction(z80_context *context, uint16_t next_pc)
++void z80_decomp_copy_state(z80_context *context, struct nmd_decomp_z80_state *state)
 +{
-+	struct nmd_decomp_event event = {0};
-+	struct nmd_decomp_z80_state *state;
-+	event.struct_size = sizeof event;
-+	event.kind = NMD_DECOMP_INSTRUCTION;
-+	event.cpu = NMD_DECOMP_Z80;
-+	event.master_clock = (uint64_t)context->cycles * context->opts->gen.clock_divider;
-+	event.pc = context->decomp_instruction_pc;
-+	event.next_pc = next_pc;
-+	event.payload.instruction.fetched_length = context->decomp_fetch_len;
-+	memcpy(event.payload.instruction.fetched_bytes, context->decomp_fetch_bytes,
-+	       context->decomp_fetch_len);
-+	event.payload.instruction.opcode = context->decomp_fetch_bytes[0];
-+	state = &event.payload.instruction.state.z80;
 +	memcpy(state->main, context->main, sizeof state->main);
 +	memcpy(state->alt, context->alt, sizeof state->alt);
 +	state->cycles = context->cycles;
@@ -213,7 +407,71 @@ index 2b46182..65d20d0 100644
 +	state->chflags = context->chflags;
 +	state->busreq = context->busreq;
 +	state->busack = context->busack;
++}
++
++static void z80_decomp_publish_transition(z80_context *context, uint32_t kind,
++                                         uint32_t vector, uint32_t reason,
++                                         uint32_t phase, uint16_t pc,
++                                         uint16_t next_pc)
++{
++	struct nmd_decomp_event event = {0};
++	event.struct_size = sizeof event;
++	event.kind = kind;
++	event.cpu = NMD_DECOMP_Z80;
++	event.master_clock = (uint64_t)context->cycles * context->opts->gen.clock_divider;
++	event.pc = pc;
++	event.next_pc = next_pc;
++	event.payload.interrupt.vector = vector;
++	event.payload.interrupt.reason = reason;
++	event.payload.interrupt.phase = phase;
++	event.payload.interrupt.stack_pointer = context->sp;
 +	nmd_decomp_publish(&event);
++}
++
++void z80_decomp_interrupt(z80_context *context, uint32_t vector, uint32_t reason)
++{
++	context->decomp_event_vector = vector;
++	context->decomp_event_reason = reason;
++	context->decomp_event_active = 1;
++	z80_decomp_publish_transition(context, NMD_DECOMP_INTERRUPT, vector, reason, 1,
++		context->decomp_instruction_pc, vector);
++}
++
++void z80_decomp_return(z80_context *context)
++{
++	if (!context->decomp_event_active) {
++		return;
++	}
++	z80_decomp_publish_transition(context, NMD_DECOMP_INTERRUPT,
++		context->decomp_event_vector, context->decomp_event_reason, 2,
++		context->decomp_instruction_pc, context->pc);
++	context->decomp_event_active = 0;
++}
++
++void z80_decomp_reset_event(z80_context *context)
++{
++	context->decomp_active = 0;
++	context->decomp_fetch_len = 0;
++	context->decomp_pending_fetch = 0;
++	context->decomp_event_active = 0;
++	z80_decomp_publish_transition(context, NMD_DECOMP_RESET, 0, 0, 1, 0, context->pc);
++}
++
++static uint8_t z80_decomp_emit_instruction(z80_context *context, uint16_t next_pc)
++{
++	struct nmd_decomp_event event = {0};
++	event.struct_size = sizeof event;
++	event.kind = NMD_DECOMP_INSTRUCTION;
++	event.cpu = NMD_DECOMP_Z80;
++	event.master_clock = (uint64_t)context->cycles * context->opts->gen.clock_divider;
++	event.pc = context->decomp_instruction_pc;
++	event.next_pc = next_pc;
++	event.payload.instruction.fetched_length = context->decomp_fetch_len;
++	memcpy(event.payload.instruction.fetched_bytes, context->decomp_fetch_bytes,
++	       context->decomp_fetch_len);
++	event.payload.instruction.opcode = context->decomp_fetch_bytes[0];
++	z80_decomp_copy_state(context, &event.payload.instruction.state.z80);
++	enum nmd_decomp_action action = nmd_decomp_publish(&event);
 +
 +	event = (struct nmd_decomp_event){0};
 +	event.struct_size = sizeof event;
@@ -226,16 +484,28 @@ index 2b46182..65d20d0 100644
 +	event.payload.flow.current_pc = next_pc;
 +	event.payload.flow.target_known = 1;
 +	nmd_decomp_publish(&event);
++	if (context->decomp_event_active && context->decomp_fetch_len >= 2 &&
++	    context->decomp_fetch_bytes[0] == 0xED &&
++	    ((context->decomp_fetch_bytes[1] & 0xC7) == 0x45 ||
++	     context->decomp_fetch_bytes[1] == 0x4D)) {
++		z80_decomp_return(context);
++	}
++	return action != NMD_DECOMP_CONTINUE ||
++		nmd_decomp_should_stop_cpu(NMD_DECOMP_Z80,
++			(uint64_t)context->cycles * context->opts->gen.clock_divider);
 +}
 +
-+void z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode)
++uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode)
 +{
 +	if (!context->decomp_pending_fetch) {
-+		return;
++		return 0;
 +	}
 +	if (table == 0) {
 +		if (context->decomp_active) {
-+			z80_decomp_emit_instruction(context, context->decomp_pending_pc);
++			if (z80_decomp_emit_instruction(context, context->decomp_pending_pc)) {
++				context->decomp_pending_fetch = 0;
++				return 1;
++			}
 +		}
 +		context->decomp_instruction_pc = context->decomp_pending_pc;
 +		context->decomp_fetch_len = 0;
@@ -248,11 +518,21 @@ index 2b46182..65d20d0 100644
 +	if (context->decomp_fetch_len >= 16) {
 +		context->decomp_pending_fetch = 0;
 +		z80_decomp_fail();
-+		return;
++		return 1;
 +	}
 +	context->decomp_fetch_bytes[context->decomp_fetch_len++] =
 +		context->decomp_pending_value;
 +	context->decomp_pending_fetch = 0;
 +	if (context->decomp_pending_value != opcode) {
 +		z80_decomp_fail();
++		return 1;
 +	}
++	return nmd_decomp_should_stop_cpu(NMD_DECOMP_Z80,
++		(uint64_t)context->cycles * context->opts->gen.clock_divider);
+@@ -133,0 +304,4 @@ void z80_run(z80_context *context, uint32_t target_cycle)
++	if (nmd_decomp_should_stop_cpu(NMD_DECOMP_Z80,
++	    (uint64_t)context->cycles * context->opts->gen.clock_divider)) {
++		return;
++	}
+@@ -166,0 +341 @@ void z80_clear_reset(z80_context * context, uint32_t cycle)
++		z80_decomp_reset_event(context);

@@ -155,20 +155,25 @@
 
 **Files:**
 - Modify: `tools/toolchains/patches/blastem/0002-nmd-decomp-hooks.patch`
+- Modify: `consoles/md/tests/oracle/decomp_abi.h` / `.c` (pending action and immutable handoff record)
+- Modify: `consoles/md/tools/decomp/run.py` (require and record the synchronized STOP/REPLACE event)
+- Modify: `consoles/md/tests/decomp/runner_check.py` (cover stop criteria and handoff response)
 - Modify: `consoles/md/tests/decomp/fixtures.py`
 - Modify: `consoles/md/tests/decomp/core_check.py`
+- Modify: `consoles/md/docs/decomp/abi-v1.md` (stop, interrupt and handoff payload semantics)
+- Modify: `docs/superpowers/specs/2026-11-04-nmd-decomp-abi-design.md` and `docs/superpowers/plans/2026-11-04-nativemd-decomp/d01-reference-execution-hooks.md` (architecture-specific exception support and the full handoff record)
 
 **Interfaces:**
-- Emits `FLOW_EDGE`, `RESET`, `EXCEPTION` and `INTERRUPT` entry/return events for both CPUs; unresolved indirect targets stay explicit.
+- Emits `FLOW_EDGE` and `RESET` for both CPUs, M68K `EXCEPTION` entry/return, and M68K/Z80 `INTERRUPT` entry/return; the Z80 has no architected exception-entry path. Unresolved indirect targets stay explicit.
 - A callback action on an instruction event stops before the next guest instruction. The core then synchronizes the 68000, Z80, VDP, sound, IO and scheduler to one documented master-clock boundary before `retro_run` returns to the runner.
 - Runner stop criteria are target PC, caller-supplied normal-return sentinel, interrupt, frame limit or instruction budget. `REPLACE` is the same stop-and-handoff boundary with the immutable triggering snapshot; it performs no memory/register/clock mutation and has no resume operation in D01.
 - Target-PC and return-sentinel criteria match the instruction event's `next_pc`, so handoff occurs after the transfer reaches the requested boundary and before the destination instruction executes.
 
-- [ ] **Step 1: Add failing controls for reset, exception and IRQ/NMI entry plus return, nested/tail/computed flow and all stop criteria.** Include a combined-CPU case that snapshots both CPU states and device/scheduler clock at the handoff.
-- [ ] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case handoff`.** Expected: fail for missing interrupt/control capabilities and because `retro_run` currently runs to the frame boundary.
-- [ ] **Step 3: Add the smallest safe stop and return path in the generated CPU loops and `genesis.c` scheduler.** Preserve the callback's copied event; synchronize all devices once; return a stop reason and boundary clock to the runner without changing guest state. If safe synchronization cannot be demonstrated, stop with a measured blocker and concrete core/ABI adaptation proposal; do not weaken the gate.
-- [ ] **Step 4: Rebuild and run the handoff case.** Expected: target/return/interrupt/budget/frame stops pass; `STOP` and `REPLACE` emit no later guest instruction, return identical snapshots, and show synchronized master clocks. The other CPU must make its expected pre-boundary progress.
-- [ ] **Step 5: Commit** `nativemd: synchronize NMDH stop handoffs`.
+- [x] **Step 1: Add failing controls for both CPU resets, M68K exception and both CPUs' IRQ entry plus return, nested/tail/computed flow and all stop criteria.** Include a combined-CPU case that snapshots both CPU states and device/scheduler clock at the handoff; pin identical STOP and REPLACE snapshots.
+- [x] **Step 2: Run `python3 consoles/md/tests/decomp/core_check.py --case handoff`.** Expected: fail in preflight because the baseline core lacks reset/clock/controlled-stop/handoff capabilities; the actual handoff behavior is exercised in Step 4.
+- [x] **Step 3: Add the smallest safe stop and return path in the generated CPU loops and `genesis.c` scheduler.** Preserve the callback's copied event; iterate device synchronization to one common clock and fail closed if it does not stabilize; return the stop reason and boundary clock without changing guest state. If safe synchronization cannot be demonstrated, stop with a measured blocker and concrete core/ABI adaptation proposal; do not weaken the gate.
+- [x] **Step 4: Rebuild and run the handoff case.** Expected: target/return/interrupt/budget/frame stops pass; `STOP` and `REPLACE` emit no later guest instruction, return identical snapshots, and show synchronized master clocks. The other CPU must make its expected pre-boundary progress.
+- [x] **Step 5: Commit** `nativemd: synchronize NMDH stop handoffs`.
 
 ### Task 6: Add ordered bus intervals and coverage declarations
 
