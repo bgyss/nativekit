@@ -1,6 +1,6 @@
 # D01 design: NMDH v1 reference-execution interface
 
-**Status: proposal awaiting approval; no D01 implementation has started.** This design follows the selected approach: a separate decomp hook ABI plus a narrowly patched save-state implementation in the pinned test core. It is scoped to [D01](../plans/2026-11-04-nativemd-decomp/d01-reference-execution-hooks.md).
+**Status: approved; D01 implementation is in progress.** This design follows the selected approach: a separate decomp hook ABI plus a narrowly patched save-state implementation in the pinned test core. It is scoped to [D01](../plans/2026-11-04-nativemd-decomp/d01-reference-execution-hooks.md).
 
 ## Intent
 

@@ -1,6 +1,6 @@
 # D01: Build the decomp verification ABI for both reference CPUs
 
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Partial; implementation in progress. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
