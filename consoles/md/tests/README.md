@@ -27,6 +27,22 @@ weight fitting, generated C compilation, source-hash checks, and the native
 are documented in [`oracle/TRACE_FORMAT.md`](oracle/TRACE_FORMAT.md); it is
 exploratory profile evidence, not hardware qualification.
 
+## D01 decomp execution hooks
+
+Run `mise run test:md-decomp` for the NMDH ABI, stream and identity controls,
+runner timeout/storage failure cases, planted CPU/epoch/order errors, both
+actual CPU fixtures, synchronized handoffs, and post-frame/STOP checkpoint
+replay. The task builds the pinned candidate core through its `tools:md`
+dependency. These checks use authored synthetic cartridges and qualify the
+candidate test core only; they do not qualify hardware accuracy or a retail
+title.
+
+Run `python3 consoles/md/tools/decomp/benchmark.py --frames 30` for the
+bounded combined-CPU resource measurement. It writes capture files and a JSON
+measurement under ignored `build/decomp/synthetic-nmdh/`. The defaults remain
+420 seconds and 256 MiB per capture; the measured workload and limits are
+reported in [`decomp/resource-budget.md`](../docs/decomp/resource-budget.md).
+
 Run `mise run test:md-consumer` to build the separate CMake consumer and execute
 it headless. `mise run test:md-golden-check` plants pixel, bus-trace, and PCM
 changes in the comparator. After `mise run test:md-rom` passes, record the

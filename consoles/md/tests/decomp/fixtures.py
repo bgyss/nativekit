@@ -193,6 +193,76 @@ loop:
     return rom_path, scenario_path, expected
 
 
+def build_benchmark_fixture(directory, m68k_assembler, z80_assembler):
+    """Write a low-event-density cartridge with both CPUs in real loops."""
+    directory = Path(directory)
+    z80_code = _assemble(z80_assembler, directory, "benchmark-z80", """\
+        org 0
+        ld sp,$1ff0
+        ld b,$00
+loop:
+        djnz loop
+        jr loop
+""")
+    if len(z80_code) >= 0x100:
+        raise RuntimeError("Z80 benchmark fixture exceeds its RAM window")
+
+    m68k_lines = [
+        "        move.w #0,$a11200",
+        "        move.w #$0100,$a11100",
+        "        move.w #$0100,$a11200",
+    ]
+    for offset, value in enumerate(z80_code):
+        m68k_lines.append("        move.b #$%02x,$%08x" % (value, 0xA00000 + offset))
+    m68k_lines.extend((
+        "        move.w #0,$a11100",
+        "        moveq #1,d0",
+        "        move.l #1,d1",
+        "        moveq #40,d7",
+        "delay_z80: divu.w d0,d1",
+        "        dbra d7,delay_z80",
+        "        move.w #$0100,$a11100",
+        "loop68: divu.w d0,d1",
+        "        bra.s loop68",
+    ))
+    m68k_code = _assemble(m68k_assembler, directory, "benchmark-m68k-z80-loader",
+                          "\n".join(m68k_lines) + "\n")
+
+    rom = bytearray(0x8000)
+    rom[0:4] = (0x00FFFF00).to_bytes(4, "big")
+    rom[4:8] = (0x200).to_bytes(4, "big")
+    for offset in range(8, 0x100, 4):
+        rom[offset:offset + 4] = (0x200).to_bytes(4, "big")
+    rom[0x100:0x110] = b"SEGA GENESIS    "
+    rom[0x120:0x150] = b"NATIVEKIT SYNTHETIC".ljust(48, b" ")
+    rom[0x150:0x180] = b"NATIVEKIT SYNTHETIC".ljust(48, b" ")
+    rom[0x1F0:0x200] = b"JUE             "
+    rom[0x200:0x200 + len(m68k_code)] = m68k_code
+    rom_path = directory / "nmdh-benchmark-synthetic.bin"
+    rom_path.write_bytes(rom)
+
+    scenario = {
+        "version": 1,
+        "region": "U",
+        "model": "md1va3",
+        "pad1": "3",
+        "pad2": "3",
+        "input": {},
+        "required_capabilities": [
+            "m68k_instruction", "m68k_state", "z80_instruction", "z80_state",
+            "flow_edge", "reset_exception_interrupt", "fetch_provenance",
+            "bus_intervals", "master_clock",
+        ],
+        "stop": {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"},
+    }
+    scenario_path = directory / "nmdh-benchmark-synthetic.json"
+    scenario_path.write_text(json.dumps(scenario, sort_keys=True, separators=(",", ":")))
+    return rom_path, scenario_path, {
+        "m68k_code_bytes": len(m68k_code),
+        "z80_code_bytes": len(z80_code),
+    }
+
+
 def build_handoff_fixture(directory, m68k_assembler, z80_assembler):
     """Write a combined-CPU cartridge with reset, TRAP/RTE and VDP IRQ handlers."""
     directory = Path(directory)

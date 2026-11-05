@@ -76,6 +76,11 @@ run = "python3 consoles/md/tests/oracle_check.py"
 description = "Check the candidate trace envelope and clock epochs"
 run = "python3 consoles/md/tests/trace_check.py && python3 consoles/md/tests/trace_abi_check.py"
 
+[tasks."test:md-decomp"]
+description = "Run NMDH ABI, format, negative-control, and actual-core checkpoint gates"
+depends = ["tools:md"]
+run = "python3 consoles/md/tests/decomp_check.py"
+
 [tasks."test:md-features"]
 description = "Check evidence-aware extraction from candidate traces"
 run = "python3 consoles/md/tests/feature_check.py"

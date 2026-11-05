@@ -1,6 +1,6 @@
 # D01: Build the decomp verification ABI for both reference CPUs
 
-**Status:** Partial; implementation in progress. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Complete for the pinned candidate-tooling and authored synthetic acceptance criteria. This does not qualify BlastEm as hardware-accurate or certify a retail title. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -38,7 +38,13 @@ A decomp ABI document/header, fresh BlastEm test patches, runner support, author
 
 ## Validation
 
-Run mise run test:md-toolchain, mise run test:md-oracle-smoke, mise run test:md-trace, and mise run test:md-profile when their paths change. Add the new decomp checks to the proposed shared check entrypoint defined in README.md.
+Run `mise run test:md-toolchain`, `mise run test:md-oracle-smoke`,
+`mise run test:md-trace`, and `mise run test:md-profile` when their paths
+change. `mise run test:md-decomp` is the non-empty shared entrypoint for the
+NMDH ABI, format, runner, actual-core and checkpoint controls; it depends on
+`tools:md`. Run `python3 consoles/md/tools/decomp/benchmark.py --frames 30`
+before reporting the D01 resource budget in
+[`consoles/md/docs/decomp/resource-budget.md`](../../../../consoles/md/docs/decomp/resource-budget.md).
 
 Existing tasks are listed in the [command contract](README.md#planned-locations-and-commands). New decomp commands must first be implemented and documented; their names in this plan are not existing tool capabilities. Record commands actually run, exit status and source/input identities.
 

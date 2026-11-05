@@ -231,8 +231,11 @@
 
 **Files:**
 - Create: `consoles/md/tests/decomp_check.py`
+- Create: `consoles/md/tests/decomp/benchmark_check.py`
 - Create: `consoles/md/tools/decomp/benchmark.py`
 - Create: `consoles/md/docs/decomp/resource-budget.md`
+- Modify: `consoles/md/tests/decomp/fixtures.py` (add the lower-event combined-CPU benchmark cartridge)
+- Modify: `consoles/md/tools/decomp/run.py` (record peak capture-worker RSS)
 - Modify: `mise.toml`
 - Modify: `consoles/md/tests/README.md`
 - Modify: `tools/toolchains/README.md`
@@ -241,24 +244,24 @@
 
 **Interfaces:**
 - Produces non-empty `mise run test:md-decomp`, depending on `tools:md`, and runs every ABI, format, actual-core and negative-control case.
-- Produces `python3 consoles/md/tools/decomp/benchmark.py --frames 30` for the authored combined-CPU looping fixture. It records actual event count/rate, bytes/frame, runner overhead, peak process memory and all input identities; output artifacts remain in ignored `build/decomp/synthetic-nmdh/`.
+- Produces `python3 consoles/md/tools/decomp/benchmark.py --frames 30` for the authored low-event combined-CPU fixture. It records actual event count/rate, bytes/frame, outer-runner overhead, peak worker RSS and all input identities; output artifacts remain in ignored `build/decomp/synthetic-nmdh/`.
 - Tracked `resource-budget.md` records the measured results and confirms whether each run completed within 420 seconds and 256 MiB; adjust limits only from measured evidence before title captures.
 - D01 moves to complete only after each contract acceptance criterion passes; otherwise record partial/blocked evidence and the first unmet gate without claiming full completion.
 
-- [ ] **Step 1: Add final integration tests and planted failures.** Mutate a valid event stream to contain wrong PC, register/flag, epoch, capability, identity, event order, count, digest and stop boundary; require the corresponding validator to reject each mutation. Add explicit timeout and byte-limit runs that leave incomplete results.
-- [ ] **Step 2: Run `python3 consoles/md/tests/decomp_check.py`.** Expected: fail on missing final task wiring or any missing negative control; actual CPU cases must use the patched BlastEm core.
-- [ ] **Step 3: Add the shared mise entrypoint and document exact commands and evidence limits.** Wire `test:md-decomp` to `tools:md` and the non-empty integration runner; add the tests/toolchain docs and benchmark command.
-- [ ] **Step 4: Run affected checks.** Run `mise run test:md-toolchain`, `mise run test:md-oracle-smoke`, `mise run test:md-trace`, `mise run test:md-profile`, and `mise run test:md-decomp`; expected: all pass and existing NMDT/profile behavior is preserved.
-- [ ] **Step 5: Measure the bounded combined-CPU fixture.** Run `python3 consoles/md/tools/decomp/benchmark.py --frames 30`; expected: complete streaming output and measured events/second, bytes/frame, runner overhead and peak memory under the declared limits. If it exceeds a limit, reduce only the synthetic benchmark workload, rerun, and report the measured scope.
-- [ ] **Step 6: Review `git diff --check`, update the D01 status from partial to complete only if all gates pass, and record source/tool/core/patch/ABI/runner/scenario identities and the resource report.**
-- [ ] **Step 7: Commit** `nativemd: complete D01 reference execution hooks`.
+- [x] **Step 1: Add final integration tests and planted failures.** Mutate a valid event stream to contain wrong PC, register/flag, epoch, capability, identity, event order, count, digest and stop boundary; require the corresponding validator to reject each mutation. Add explicit timeout and byte-limit runs that leave incomplete results.
+- [x] **Step 2: Run `python3 consoles/md/tests/decomp_check.py`.** Expected: fail on missing final task wiring or any missing negative control; actual CPU cases must use the patched BlastEm core.
+- [x] **Step 3: Add the shared mise entrypoint and document exact commands and evidence limits.** Wire `test:md-decomp` to `tools:md` and the non-empty integration runner; add the tests/toolchain docs and benchmark command.
+- [x] **Step 4: Run affected checks.** Run `mise run test:md-toolchain`, `mise run test:md-oracle-smoke`, `mise run test:md-trace`, `mise run test:md-profile`, and `mise run test:md-decomp`; expected: all pass and existing NMDT/profile behavior is preserved.
+- [x] **Step 5: Measure the bounded combined-CPU fixture.** Run `python3 consoles/md/tools/decomp/benchmark.py --frames 30`; expected: complete streaming output and measured events/second, bytes/frame, runner overhead and peak memory under the declared limits. If it exceeds a limit, reduce only the synthetic benchmark workload, rerun, and report the measured scope.
+- [x] **Step 6: Review `git diff --check`, update the D01 status from partial to complete only if all gates pass, and record source/tool/core/patch/ABI/runner/scenario identities and the resource report.**
+- [x] **Step 7: Commit** `nativemd: complete D01 reference execution hooks`.
 
 ## D01 Acceptance Review
 
-- [ ] Both real CPU hook paths execute authored synthetic instructions and expose independently checked state and flow.
-- [ ] Capture/restore reproduces subsequent state and NMDH/NMDT event streams across repeated runs and a state-load boundary.
-- [ ] A planted wrong PC, register/flag, epoch or capability is rejected by its corresponding gate.
-- [ ] NMDT v2 format and existing trace/profile/survey checks retain documented behavior.
-- [ ] Bounded capture stays within declared memory/storage limits; limits and child timeouts yield explicit incomplete results, never accepted truncated evidence.
-- [ ] All inputs are fingerprinted; private ROMs, captures and paths remain outside tracked files.
-- [ ] `README.md` and the D01 contract accurately report D01 complete, partial or blocked; no D02+ status is advanced.
+- [x] Both real CPU hook paths execute authored synthetic instructions and expose independently checked state and flow.
+- [x] Capture/restore reproduces subsequent state and NMDH/NMDT event streams across repeated runs and a state-load boundary.
+- [x] A planted wrong PC, register/flag, epoch or capability is rejected by its corresponding gate.
+- [x] NMDT v2 format and existing trace/profile/survey checks retain documented behavior.
+- [x] Bounded capture stays within declared memory/storage limits; limits and child timeouts yield explicit incomplete results, never accepted truncated evidence.
+- [x] All inputs are fingerprinted; private ROMs, captures and paths remain outside tracked files.
+- [x] `README.md` and the D01 contract accurately report D01 complete, partial or blocked; no D02+ status is advanced.

@@ -167,6 +167,9 @@ def run_m68k_case():
         events = list(nmdh_trace.read_nmdh(capture_dir / "capture.nmdh"))
         assert_m68k_trace(events, expected)
         manifest = json.loads((capture_dir / "manifest.json").read_text())
+        if (type(manifest.get("peak_worker_rss_bytes")) is not int or
+                manifest["peak_worker_rss_bytes"] <= 0):
+            raise AssertionError("capture manifest omitted positive peak worker RSS")
         serialized_manifest = json.dumps(manifest)
         if str(root) in serialized_manifest or str(directory) in serialized_manifest:
             raise AssertionError("path leaked into the synthetic capture manifest")

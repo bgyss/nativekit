@@ -43,3 +43,13 @@ for a three-button pad. Output is PPM frames, native-endian signed 16-bit
 stereo PCM, a JSON manifest, and the available clocked trace events. The current
 core samples input once per frame. The available traces and resampled chip PCM
 are exploratory; complete timing coverage and reference qualification remain open.
+
+The D01 NMDH execution hooks live only in the pinned candidate test build.
+`mise run test:md-decomp` builds `tools:md` and runs the NMDH ABI, format,
+identity, failure, actual-core, and checkpoint-replay controls. To measure the
+authored synthetic capture budget, run
+`python3 consoles/md/tools/decomp/benchmark.py --frames 30`; outputs remain in
+ignored `build/decomp/synthetic-nmdh/`; the measured budget is recorded in
+[`resource-budget.md`](../../consoles/md/docs/decomp/resource-budget.md). The
+checkpoint section is candidate-only and does not change the delivered nmd
+save contract or NMDT v2 trace format.

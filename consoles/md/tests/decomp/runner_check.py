@@ -255,8 +255,14 @@ with tempfile.TemporaryDirectory() as temporary:
         frames=3, estimate_file=None, out=timeout_out, max_seconds=1, max_bytes=1024 * 1024,
     )
     original_supervisor = runner.supervise_child
-    runner.supervise_child = lambda command, timeout_seconds: runner.ChildResult(
-        -15, "", "", True)
+
+    def timed_out_worker(command, timeout_seconds):
+        output = pathlib.Path(command[command.index("--out") + 1])
+        (output / "sample.nmdh.partial").write_bytes(b"incomplete NMDH")
+        (output / "sample.nmdt.partial").write_bytes(b"incomplete NMDT")
+        return runner.ChildResult(-15, "", "", True)
+
+    runner.supervise_child = timed_out_worker
     try:
         try:
             runner._run_parent(parent_args)
@@ -268,5 +274,42 @@ with tempfile.TemporaryDirectory() as temporary:
         runner.supervise_child = original_supervisor
     timeout_status = json.loads((timeout_out / "status.json").read_text())
     assert timeout_status["status"] == "incomplete_timeout"
+    assert (timeout_out / "sample.nmdh.partial").is_file()
+    assert (timeout_out / "sample.nmdt.partial").is_file()
+    assert not (timeout_out / "manifest.json").exists()
+
+    storage_out = base / "storage-limit-status"
+    storage_parent_args = argparse.Namespace(
+        mode="capture", core=capable_no_libretro, rom=rom, scenario=scenario,
+        frames=3, estimate_file=estimate_file, out=storage_out, max_seconds=1,
+        max_bytes=1024,
+    )
+
+    def storage_limited_worker(command, timeout_seconds):
+        output = pathlib.Path(command[command.index("--out") + 1])
+        (output / "capture.nmdh.partial").write_bytes(b"incomplete NMDH")
+        (output / "capture.nmdt.partial").write_bytes(b"incomplete NMDT")
+        (output / "worker-status.json").write_text(json.dumps({
+            "status": "incomplete_storage_limit",
+            "reason": "NMDT v2 stream exceeded its storage limit",
+            "identities": matching_metadata["identities"],
+        }))
+        return runner.ChildResult(1, "", "storage limit")
+
+    runner.supervise_child = storage_limited_worker
+    try:
+        try:
+            runner._run_parent(storage_parent_args)
+        except runner.RunnerError:
+            pass
+        else:
+            raise AssertionError("storage-limited run was accepted")
+    finally:
+        runner.supervise_child = original_supervisor
+    storage_status = json.loads((storage_out / "status.json").read_text())
+    assert storage_status["status"] == "incomplete_storage_limit"
+    assert (storage_out / "capture.nmdh.partial").is_file()
+    assert (storage_out / "capture.nmdt.partial").is_file()
+    assert not (storage_out / "manifest.json").exists()
 
 print("decomp runner checks: ok")

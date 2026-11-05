@@ -1,6 +1,6 @@
 # nativemd ROM-to-decomp milestones
 
-**Current status: D00 complete; D01 partial; D02-D12 unstarted.** This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
+**Current status: D00 complete; D01 complete; D02-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
 
 ## What must be added
 
@@ -30,7 +30,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 | ID | Deliverable | Prerequisite | Status |
 |---|---|---|---|
 | [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM | complete |
-| [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory | partial |
+| [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory | complete |
 | [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory | unstarted |
 | [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | unstarted |
 | [D04](d04-per-routine-c-verification.md) | Verify C routines against original execution on both CPUs | D01 hooks, D03 shared catalog/decoder controls | unstarted |
@@ -88,7 +88,7 @@ These are proposed interfaces to implement, **not commands that exist today**:
 - Shared synthetic controls: `consoles/md/tests/decomp/`.
 - Reusable method/ABI docs: `consoles/md/docs/decomp/`.
 - Private/generated title work: `build/decomp/<game-id>/`; move maintained game source only to a user-authorized repository.
-- Shared test entrypoint: `mise run test:md-decomp`, added with the first real checks in D01. Expand it as capabilities land; no empty successful task.
+- Shared test entrypoint: `mise run test:md-decomp` is implemented, depends on `tools:md`, and runs the D01 ABI, format, negative-control, actual-core and checkpoint-replay suite. Keep it non-empty as capabilities land.
 - CLI operations: intake, trace, census, rebuild, check-calls, check-lockstep, native-check and report. Define exact syntax during implementation and write it into the project manifest. Do not publish pretend invocations in results.
 - Each title owns reproducible CMake/native-scenario and assembly verification commands. Put the exact working commands in its manifest and README as soon as implemented.
 

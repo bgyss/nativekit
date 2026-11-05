@@ -9,6 +9,7 @@ import json
 import math
 import os
 from pathlib import Path
+import resource
 import subprocess
 import sys
 import time
@@ -49,6 +50,11 @@ BUTTONS = {"A": 0, "X": 1, "MODE": 2, "START": 3, "UP": 4, "DOWN": 5,
 
 class RunnerError(RuntimeError):
     pass
+
+
+def _peak_worker_rss_bytes():
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return int(peak if sys.platform == "darwin" else peak * 1024)
 
 
 @dataclass
@@ -1010,6 +1016,7 @@ def _worker(args):
             "instruction_counts": instruction_counts,
             "nmdt_records": nmdt_writer.count,
             "elapsed_seconds": elapsed,
+            "peak_worker_rss_bytes": _peak_worker_rss_bytes(),
             "stream_bytes": stream_sizes,
             "nmdh_bytes": nmdh_path.stat().st_size,
             "nmdt_bytes": nmdt_path.stat().st_size,
