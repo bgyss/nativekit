@@ -136,20 +136,27 @@ static void targets(int w, int h)
     s_rh = h;
 }
 
-int rr_open(void)
+/* the backend's programs (gl_ctx_run: a driver can take seconds over a shader) */
+static void programs(void *ok_)
 {
-    void *win = host_window_handle();
-    int w = 0, h = 0;
-    if (!gl_ctx_open(win) || !gl_api_load())
-        return 0;
-    s_window = win != NULL;
     s_copy = rr_gl_program(rr_gl_quad_vs, k_copy);
     s_sharp = rr_gl_program(rr_gl_quad_vs, k_sharp);
     s_over = rr_gl_program(rr_gl_quad_vs, k_over);
+    *(int *)ok_ = s_copy && s_sharp && s_over;
+}
+
+int rr_open(void)
+{
+    void *win = host_window_handle();
+    int w = 0, h = 0, ok = 0;
+    if (!gl_ctx_open(win) || !gl_api_load())
+        return 0;
+    s_window = win != NULL;
+    gl_ctx_run(programs, &ok);
     /* a console's own programs and their objects (rr_set_open_hook), after the backend's */
     if (s_open_hook && !s_open_hook())
         return 0;
-    if (!s_copy || !s_sharp || !s_over)
+    if (!ok)
         return 0;
     glGenTextures(1, &s_otex);
     glBindTexture(GL_TEXTURE_2D, s_otex);
