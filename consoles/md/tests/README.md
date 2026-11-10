@@ -37,6 +37,11 @@ dependency. These checks use authored synthetic cartridges and qualify the
 candidate test core only; they do not qualify hardware accuracy or a retail
 title.
 
+The same task runs the D03 intake gates: both decoders swept against the
+pinned vasm, and an authored cartridge captured on the candidate core, mapped,
+rebuilt byte-identically and attacked with planted errors. Counts, schemas and
+limits are in [`decomp/intake.md`](../docs/decomp/intake.md).
+
 Run `python3 consoles/md/tools/decomp/benchmark.py --frames 30` for the
 bounded combined-CPU resource measurement. It writes capture files and a JSON
 measurement under ignored `build/decomp/synthetic-nmdh/`. The defaults remain

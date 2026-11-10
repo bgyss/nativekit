@@ -1,6 +1,6 @@
 # D03: Recover code identities and a lossless assembly skeleton
 
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Partial 2026-11-10: shared tooling and synthetic controls done ([results](#results)); the first title's intake, census and rebuild have not run. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -44,6 +44,33 @@ Existing tasks are listed in the [command contract](README.md#planned-locations-
 ## Stop conditions and evidence limits
 
 Do not count unknown bytes as code or data by guess, claim all ISA encodings from a few controls, or call a raw incbin skeleton a finished symbolic decomp. If source normalization is necessary, retain a reversible mapping to the original file. Preserve partial progress and report the first unmet gate; do not mark this milestone complete until all acceptance criteria hold.
+
+## Results
+
+Partial, 2026-11-10, branch `nativemd`, by the
+[implementation plan](../2026-11-10-nmd-decomp-d03-implementation.md). Tools:
+vasm and BlastEm at the pins in `tools/toolchains/pins.env`. No ROM input was
+used; every fixture is authored and assembled at test time.
+
+| Acceptance line | State |
+|---|---|
+| Full original image rebuilds with identical length, SHA-256, zero differing bytes | **Unmet for the first title** (not run). Met for the authored control images. |
+| All-incbin rebuild labelled raw preservation; decoded and unknown bytes reported separately | Met in tooling (`--raw`, `census.json`), on controls. |
+| Synthetic dead code, computed targets, two programs at one RAM address without false merges | Met (`census_check.py`). |
+| Changed instruction, data byte, placement or source-ROM identity fails its gate | Met (seven planted errors). |
+
+Artifacts: `consoles/md/tools/decomp/{m68k_dis,z80_dis,asmverify,codemap,skeleton,intake}.py`,
+`consoles/md/tests/decomp/{m68k_decoder_check,z80_decoder_check,census_fixture,census_check}.py`,
+[intake.md](../../../../consoles/md/docs/decomp/intake.md) (schemas, credit
+rules, decoder control counts and limits).
+
+Command run: `mise run test:md-decomp`, exit 0 (all D01 gates plus the three
+new ones).
+
+First unmet gate: the first title's intake. It needs the user's ROM path at
+runtime (SHA-256 `f68818ae…f334`) and the private workspace
+`build/decomp/md-f68818ae1a61/`, neither of which is in this checkout. Other
+open items are listed under "Not done" in intake.md.
 
 ## Copy-ready goal prompt
 

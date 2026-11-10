@@ -1,6 +1,6 @@
 # nativemd ROM-to-decomp milestones
 
-**Current status: D00 complete; D01 complete; D02 complete; D03-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. D02 completion covers the opt-in native execution path (contract 1.1.0) against authored synthetic controls only; no native run has been compared with the reference or made with a retail title. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
+**Current status: D00 complete; D01 complete; D02 complete; D03 partial (shared synthetic tooling only; the first title's intake has not run); D04-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. D02 completion covers the opt-in native execution path (contract 1.1.0) against authored synthetic controls only; no native run has been compared with the reference or made with a retail title. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
 
 ## What must be added
 
@@ -32,7 +32,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 | [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM | complete |
 | [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory | complete |
 | [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory | complete |
-| [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | unstarted |
+| [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | partial |
 | [D04](d04-per-routine-c-verification.md) | Verify C routines against original execution on both CPUs | D01 hooks, D03 shared catalog/decoder controls | unstarted |
 | [D05](d05-whole-image-lockstep.md) | Verify combined C substitution under concurrent hardware execution | D01, D04 | unstarted |
 | [D06](d06-first-native-playable-slice.md) | Deliver the first game slice through the actual native launch path | D00 selected title, D02 execution path, D03 title skeleton, D04 and D05 verified checking infrastructure. | unstarted |
@@ -89,7 +89,7 @@ These are proposed interfaces to implement, **not commands that exist today**:
 - Reusable method/ABI docs: `consoles/md/docs/decomp/`.
 - Private/generated title work: `build/decomp/<game-id>/`; move maintained game source only to a user-authorized repository.
 - Shared test entrypoint: `mise run test:md-decomp` is implemented, depends on `tools:md`, and runs the D01 ABI, format, negative-control, actual-core and checkpoint-replay suite. Keep it non-empty as capabilities land.
-- CLI operations: intake, trace, census, rebuild, check-calls, check-lockstep, native-check and report. Define exact syntax during implementation and write it into the project manifest. Do not publish pretend invocations in results.
+- CLI operations: `intake`, `rebuild` and `census` exist in `consoles/md/tools/decomp/intake.py` ([syntax](../../../../consoles/md/docs/decomp/intake.md)). trace (beyond `run.py`), check-calls, check-lockstep, native-check and report are still to define. Do not publish pretend invocations in results.
 - Each title owns reproducible CMake/native-scenario and assembly verification commands. Put the exact working commands in its manifest and README as soon as implemented.
 
 Existing tasks can be invoked today from the repo root inside `nix develop`. Relevant focused tasks include `test:md-console`, `test:md-io`, `test:md-z80`, `test:md-sound`, `test:md-bus`, `test:md-interrupt`, `test:md-vdp`, `test:md-dma`, `test:md-render`, `test:md-execution`, `test:md-toolchain`, `test:md-oracle-smoke`, `test:md-trace`, `test:md-features`, `test:md-survey`, `test:md-profile`, `test:md-consumer`, `test:md-golden-check`, `test:md-rom`, and `test:kit`; use `mise run <task>`.
@@ -98,4 +98,4 @@ At a platform release boundary, run `mise run build`, `mise run test`, `mise run
 
 ## How to start
 
-Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00-D02 are complete and D03-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.
+Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00-D02 are complete, D03 is partial and D04-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run every NMDH ABI, format, runner and actual-core gate."""
+"""Run every NMDH ABI, format, runner and actual-core gate, and the intake gates."""
 import pathlib
 import subprocess
 import sys
@@ -24,6 +24,12 @@ CHECKS = (
      "consoles/md/tests/decomp/core_check.py", "--case", "bus"),
     ("actual post-frame and STOP checkpoint replay",
      "consoles/md/tests/decomp/core_check.py", "--case", "checkpoint"),
+    ("68000 decoder against the assembler, flow facts and planted errors",
+     "consoles/md/tests/decomp/m68k_decoder_check.py"),
+    ("Z80 decoder against the assembler, flow facts and planted errors",
+     "consoles/md/tests/decomp/z80_decoder_check.py"),
+    ("intake code map, rebuild gate, census and planted errors",
+     "consoles/md/tests/decomp/census_check.py"),
 )
 
 
