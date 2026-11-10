@@ -1,6 +1,6 @@
 # D02: Make the native game reset and execution path real
 
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Complete 2026-11-10 against authored synthetic controls ([results](#results)); not a retail-title or hardware qualification. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -44,6 +44,55 @@ Existing tasks are listed in the [command contract](README.md#planned-locations-
 ## Stop conditions and evidence limits
 
 Do not add a 68000/Z80 interpreter, guest JIT, instruction dispatch loop, or title-specific behavior to make the fixture run. Do not declare the runtime game-ready from synthetic execution alone. Preserve partial progress and report the first unmet gate; do not mark this milestone complete until all acceptance criteria hold.
+
+## Results
+
+Executed 2026-11-10 on branch `nativemd` from `4496637` by the
+[implementation plan](../2026-11-10-nmd-decomp-d02-implementation.md). Host:
+macOS (Darwin 27.3.0, arm64), `build/null` headless configuration; candidate
+tools at the pins in `tools/toolchains/pins.env`. No ROM input was used: every
+fixture is authored C built from this tree.
+
+Artifacts:
+
+- Contract: [native execution](../../../../consoles/md/docs/decomp/native-execution.md) and the 1.1 section of the [nativemd contract](../../../../consoles/md/docs/contract.md).
+- Runtime: `consoles/md/src/console/dispatch.c` (68000 coroutine, native interrupt return, `nmd_restart`, `nmd_set_sr`), `consoles/md/src/z80/z80.c` (stacked Z80 interrupt return), public headers under `consoles/md/include/nmd/`.
+- Authored cartridge: `consoles/md/tests/consumer/native.c`, checked by `consoles/md/tests/consumer/run.py`.
+- Unit controls: `consoles/md/tests/unit/execution_check.c`, `consoles/md/tests/execution_check.py`.
+
+Version decision: additive only, so **1.1.0**. New things are one appended
+cart field whose zero value is 1.0's behavior, appended CPU-state fields, four
+calls, and two dump regions. The existing consumer source changed only in its
+version assert; `md_consumer` still runs its five idle frames.
+
+| Acceptance line | Evidence |
+|---|---|
+| Boots through `nmd_main`, main logic over frames, changing input, interrupts, sound work, reproducible reset | `md_native`: 68 scripted frames, three dumps; boot marker, main-frame and interrupt counts, pad history, main's running sum, Z80 command/acknowledge/interrupt counters all equal to values computed from the script; three distinct pictures; non-silent sound; 11 output files byte-identical across two runs. In-process re-power, including while suspended in a handler: `execution_check` `repower`. |
+| Missing reset/IRQ/Z80 targets fail; idle cannot pass | 10 fatal cases with exact messages; `NMD_NATIVE_PLANT=skip-reset` (an idle host-mode cart) is rejected: "the reset routine left no boot marker". |
+| Negative controls: skipped reset, lost state, wrong interrupt return | Runtime plants 1/2/3 fail 9 named unit cases; cart plants `lose-state` ("main ran 1 frames of 30") and `bad-return` ("1 vertical interrupts in 30 frames") are rejected. |
+| Existing consumers keep behavior; version recorded | All tasks below; 1.1.0 above. |
+
+Commands run from the repository root, all exit 0: `mise run test:md-execution`,
+`test:md-console`, `test:md-io`, `test:md-z80`, `test:md-bus`,
+`test:md-interrupt`, `test:md-sound`, `test:md-vdp`, `test:md-dma`,
+`test:md-render`, `test:md-consumer`, `test:kit`, `test:md-rom` (59-case
+matrix), `golden:md-compare`, `test:md-profile`, `test:md-golden-check`, and
+`git diff --check`. Not run: the macOS/Windows/iOS host builds, `mise run
+test`, and the SNES tasks (no kit or SNES source changed).
+
+Limits and open items:
+
+- The unit checks were written alongside the runtime rather than before it;
+  their ability to fail rests on the planted-error runs, not on an observed
+  red run of each case.
+- Nothing native was compared with the reference core. The interrupt frame's
+  stacked PC is the game's own `nmd_cpu.pc`, and exception/acknowledge cycles
+  beyond their bus accesses are not charged.
+- The first title's private workspace was absent, so its needs (other
+  exceptions, TRAP, trace, Z80 NMI) are unverified: D03/D06.
+- VRAM, CRAM, VSRAM, sound-chip and I/O state have no public observation
+  path yet: D05.
+- A main loop with no bus access or wait never yields.
 
 ## Copy-ready goal prompt
 

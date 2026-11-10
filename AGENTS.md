@@ -11,7 +11,7 @@ Run commands from the repository root. `nix develop` enters the compiler and too
 - `mise run build:null` builds headless targets; `mise run build:macos` builds the macOS Metal host; `mise run build` runs the macOS-oriented build matrix.
 - `mise run tools` builds pinned SNES reference tools; `mise run tools:md` builds candidate Mega Drive tools.
 - `mise run test:kit`, `mise run test:rom`, and `mise run test` run kit checks, SNES reference comparisons, and the full checks with consumer integration.
-- Run focused Mega Drive checks with `mise run` and one of `test:md-console`, `test:md-io`, `test:md-z80`, `test:md-sound`, `test:md-bus`, `test:md-interrupt`, `test:md-vdp`, `test:md-dma`, or `test:md-render`. `mise run test:md-rom` compares synthetic cases with the candidate core.
+- Run focused Mega Drive checks with `mise run` and one of `test:md-console`, `test:md-io`, `test:md-z80`, `test:md-sound`, `test:md-bus`, `test:md-interrupt`, `test:md-vdp`, `test:md-dma`, `test:md-render`, or `test:md-execution`. `mise run test:md-rom` compares synthetic cases with the candidate core.
 - `mise run test:nes` runs the NES contract checks, synthetic cartridge, and profile-tool checks.
 - Run exploratory tooling checks with `mise run` and one of `test:md-toolchain`, `test:md-oracle-smoke`, `test:md-trace`, `test:md-features`, or `test:md-survey`.
 

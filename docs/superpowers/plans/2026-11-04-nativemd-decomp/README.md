@@ -1,6 +1,6 @@
 # nativemd ROM-to-decomp milestones
 
-**Current status: D00 complete; D01 complete; D02-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
+**Current status: D00 complete; D01 complete; D02 complete; D03-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. D02 completion covers the opt-in native execution path (contract 1.1.0) against authored synthetic controls only; no native run has been compared with the reference or made with a retail title. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
 
 ## What must be added
 
@@ -10,7 +10,7 @@ nativemd is the native hardware/runtime library. The missing project is the assi
 |---|---|---|
 | SNES method | [SNES playbook](../../../../consoles/snes/docs/snes-decomp-learnings.md), especially sections 1, 4, 5, 9 and 15-18 | Actual local game-tool sources are inventoried in [workflow parity](../../../../consoles/md/docs/decomp/workflow-parity.md); reusable 68000/Z80 equivalents remain absent |
 | MD hardware | [1.0 contract](../../../../consoles/md/docs/contract.md), synthetic comparison, profiles and consumer | Real-game integration and title-exposed defect controls |
-| Native startup | [frame adapter](../../../../consoles/md/src/front/md_console.c), [reset state](../../../../consoles/md/src/console/bus.c), [IRQ dispatch](../../../../consoles/md/src/console/dispatch.c) | Current frame path advances hardware and IRQs; reset-vector dispatch and a resumable 68000 main execution path are absent |
+| Native startup | [frame adapter](../../../../consoles/md/src/front/md_console.c), [reset state](../../../../consoles/md/src/console/bus.c), [IRQ dispatch and 68000 run](../../../../consoles/md/src/console/dispatch.c), [native execution contract](../../../../consoles/md/docs/decomp/native-execution.md) | D02 added reset-vector entry and a resumable 68000 run behind `NMD_EXECUTION_NATIVE`; a real title through it, and VDP/sound state observation, remain |
 | Reference hooks | [NMDT v2](../../../../consoles/md/tests/oracle/TRACE_FORMAT.md), [hook ABI](../../../../consoles/md/tests/oracle/trace_abi.h) | Instruction/state/control hooks, callable original execution, full comparison snapshots and replay capabilities |
 | Assembly recovery | Pinned vasm tools; two small [assembler smoke controls](../../../../consoles/md/tests/toolchain_check.py) | Decoder controls, code/data census, RAM-code identities, exact whole-image rebuild and symbolic filing |
 | C recovery | Public 68000/Z80 state and bus APIs; synthetic C programs | Routine catalog, ABI adapters, semantic controls, A5, A7, complete title C and typed refactoring |
@@ -31,7 +31,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 |---|---|---|---|
 | [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM | complete |
 | [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory | complete |
-| [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory | unstarted |
+| [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory | complete |
 | [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | unstarted |
 | [D04](d04-per-routine-c-verification.md) | Verify C routines against original execution on both CPUs | D01 hooks, D03 shared catalog/decoder controls | unstarted |
 | [D05](d05-whole-image-lockstep.md) | Verify combined C substitution under concurrent hardware execution | D01, D04 | unstarted |
@@ -92,10 +92,10 @@ These are proposed interfaces to implement, **not commands that exist today**:
 - CLI operations: intake, trace, census, rebuild, check-calls, check-lockstep, native-check and report. Define exact syntax during implementation and write it into the project manifest. Do not publish pretend invocations in results.
 - Each title owns reproducible CMake/native-scenario and assembly verification commands. Put the exact working commands in its manifest and README as soon as implemented.
 
-Existing tasks can be invoked today from the repo root inside `nix develop`. Relevant focused tasks include `test:md-console`, `test:md-io`, `test:md-z80`, `test:md-sound`, `test:md-bus`, `test:md-interrupt`, `test:md-vdp`, `test:md-dma`, `test:md-render`, `test:md-toolchain`, `test:md-oracle-smoke`, `test:md-trace`, `test:md-features`, `test:md-survey`, `test:md-profile`, `test:md-consumer`, `test:md-golden-check`, `test:md-rom`, and `test:kit`; use `mise run <task>`.
+Existing tasks can be invoked today from the repo root inside `nix develop`. Relevant focused tasks include `test:md-console`, `test:md-io`, `test:md-z80`, `test:md-sound`, `test:md-bus`, `test:md-interrupt`, `test:md-vdp`, `test:md-dma`, `test:md-render`, `test:md-execution`, `test:md-toolchain`, `test:md-oracle-smoke`, `test:md-trace`, `test:md-features`, `test:md-survey`, `test:md-profile`, `test:md-consumer`, `test:md-golden-check`, `test:md-rom`, and `test:kit`; use `mise run <task>`.
 
 At a platform release boundary, run `mise run build`, `mise run test`, `mise run test:consumer`, `mise run test:kit`, `mise run golden:compare`, `mise run test:rom`, `mise exec -- python3 consoles/snes/tests/golden.py time`, the MD tasks above, `mise run golden:md-compare`, and `git diff --check`. Preserve the existing SNES timing threshold in the handoff (23.07 s CPU) and frozen baselines. Record actual host/toolchain failures separately; no re-recording a golden to clear unexplained drift.
 
 ## How to start
 
-Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00 is complete and D01-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.
+Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00-D02 are complete and D03-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.

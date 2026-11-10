@@ -2,7 +2,8 @@
 
 ## Version and scope
 
-nativemd's public game contract is **1.0.0**, declared by `nmd/version.h`.
+nativemd's public game contract is **1.1.0**, declared by `nmd/version.h`.
+1.1 adds native execution; every 1.0 game builds and runs the same.
 It models the base Sega Mega Drive / Genesis: the 68000-facing bus, a native
 C routine model for interrupt handlers, a native Z80 routine model, Mode 5
 VDP output and DMA, YM2612 and SN76489 sound, and two controller ports. It does
@@ -18,8 +19,33 @@ host. The `nmd_cart.routines` table maps 68000 interrupt vectors to C handlers;
 are `rd8`, `rd16`, `rd32`, `wr8`, `wr16`, and `wr32`; longwords are two
 16-bit bus transfers.
 
-Zero-initialized carts select NTSC, the md1va3 model, and six-button pads on
-both ports. A null `cost_profile` adds no profiled access work.
+Zero-initialized carts select NTSC, the md1va3 model, six-button pads on
+both ports, and host-driven execution. A null `cost_profile` adds no profiled
+access work.
+
+## Native execution (1.1)
+
+`nmd_cart.execution = NMD_EXECUTION_NATIVE` makes the console run the game's
+68000 logic itself: `nmd_power` loads the stack pointer and PC from the ROM's
+reset vectors, and `nmd_run_frame` (so `nmd_main`) enters the C routine at the
+reset PC on a coroutine and resumes it every frame, leaving it at the first
+interrupt-check point at or after the vertical blank. In this mode a 68000
+interrupt returns by popping SR and PC from the guest stack and restores no
+other register, interrupts nest by the SR mask, and a Z80 interrupt pushes and
+pops PC on the Z80's stack and leaves IFF1/IFF2 to the handler. A missing
+reset, interrupt or Z80 routine, a reset routine that returns, and a handler
+that returns to an address with no routine are fatal. The full rules are in
+[native execution](decomp/native-execution.md).
+
+1.1 also adds, in either mode: `nmd_set_sr` (an SR load that exchanges `A7`
+with the new `nmd_cpu.usp`/`ssp` on an S-bit change), `nmd_restart` (native
+mode: drop the 68000's C frames and enter a routine), the Z80 alternate
+registers `a2 f2 b2 c2 d2 e2 h2 l2`, and untimed observation of memory:
+`nmd_work_ram`, `nmd_z80_ram`, and the script's `dump` (`.wram`, `.zram`).
+
+With `NMD_EXECUTION_HOST` (zero), `nmd_run_frame` only advances the hardware
+to the vertical blank and dispatches interrupts on its caller's stack, and a
+handler's return restores the whole saved CPU state, as in 1.0.
 
 ## Address and device map
 
@@ -98,7 +124,9 @@ silently approximated.
 
 The public C interface is C11. The separate consumer project under
 `consoles/md/tests/consumer/` shows the supported `add_subdirectory` and
-`nmd` link pattern. `mise run test:md-consumer` builds and runs it headless.
+`nmd` link pattern. `mise run test:md-consumer` builds and runs it headless, with `md_native`,
+an authored game using native execution. `mise run test:md-execution` holds
+the native execution rules and their fatal cases.
 `mise run test:md-rom` compares 59 synthetic cases with the candidate; six
 candidate differences are documented in `consoles/md/tests/rom/KNOWN`.
 BlastEm traces and the generated golden master provide deterministic regression

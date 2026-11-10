@@ -49,6 +49,22 @@ changes in the comparator. After `mise run test:md-rom` passes, record the
 synthetic-only baseline with `mise run golden:md-record`; compare it later with
 `mise run golden:md-compare`.
 
+## D02 native execution
+
+Run `mise run test:md-execution` for the reset entry, frame resume, re-power,
+68000 interrupt frames, nesting, user mode, restart and Z80 interrupt cases.
+`execution_check.py` also runs ten fatal targets (each must exit 70 with its
+exact message) and plants three errors in the test build's runtime (a skipped
+reset entry, state lost across a yield, an interrupt return that ignores the
+guest stack); every planted run must fail the named cases.
+
+`mise run test:md-consumer` runs `md_native`, an authored game through
+`nmd_main` with scripted input. The runner reads the script's `.wram`/`.zram`
+dumps, shots and `--sound` capture, requires two runs to be byte-identical,
+and requires its own assertions to reject an idle cart and two planted game
+errors (`NMD_NATIVE_PLANT`). These are authored controls with no reference
+comparison; see [`decomp/native-execution.md`](../docs/decomp/native-execution.md).
+
 ## Stage 2 ROM matrix
 
 `rom/cases.py` defines the named 68000 bus, VDP port, DMA, and Mode 5 render
