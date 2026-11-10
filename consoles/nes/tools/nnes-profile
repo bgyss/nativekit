@@ -1,0 +1,500 @@
+#!/usr/bin/env python3
+"""Fit an nnes CPU cost profile from classified NES reference trace windows.
+
+Usage:
+  nnes-profile normalize RAW.jsonl --out TRACE.jsonl
+  nnes-profile fit TRACE.jsonl [TRACE.jsonl ...] --out DIR [--name game]
+
+Trace format and access-filter requirements are documented in
+consoles/nes/docs/cost-profile.md.
+"""
+
+import argparse
+import itertools
+import json
+import math
+import os
+import re
+import sys
+
+TOOL_VERSION = "0.1"
+TRACE_FORMAT = "nnes-reference-trace"
+TRACE_VERSION = 1
+KINDS = ("wram", "rom", "cart_ram", "io")
+KIND_NAMES = KINDS
+FEATURES = tuple(["read_" + kind for kind in KINDS] +
+                 ["write_" + kind for kind in KINDS])
+DEFAULT_MIN_ACCESSES = 1000
+
+
+def fail(message):
+    raise SystemExit("nnes-profile: " + message)
+
+
+def read_traces(paths):
+    headers, windows = [], []
+    for path in paths:
+        try:
+            source = open(path, encoding="utf-8")
+        except OSError as exc:
+            fail("cannot open %s: %s" % (path, exc))
+        with source:
+            have_header = False
+            for line_number, line in enumerate(source, 1):
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    fail("%s:%d: invalid JSON: %s" % (path, line_number, exc))
+                if not isinstance(record, dict):
+                    fail("%s:%d: each record must be a JSON object" %
+                         (path, line_number))
+                if not have_header:
+                    have_header = True
+                    if (record.get("type") != "header" or
+                            record.get("format") != TRACE_FORMAT or
+                            record.get("version") != TRACE_VERSION):
+                        fail("%s:%d: expected %s version %d header" %
+                             (path, line_number, TRACE_FORMAT, TRACE_VERSION))
+                    sha = str(record.get("rom_sha1", "")).lower()
+                    if not re.fullmatch(r"[0-9a-f]{40}", sha):
+                        fail("%s:%d: rom_sha1 must be 40 hex characters" %
+                             (path, line_number))
+                    if not isinstance(record.get("reference"), str) or not record["reference"]:
+                        fail("%s:%d: reference emulator/version is required" %
+                             (path, line_number))
+                    if record.get("access_semantics") != "data-only":
+                        fail("%s:%d: trace must exclude opcode, operand, and dummy accesses" %
+                             (path, line_number))
+                    if record.get("polls_excluded") is not True:
+                        fail("%s:%d: trace must exclude poll-loop accesses and gaps" %
+                             (path, line_number))
+                    if record.get("dummy_access_cycles_removed") is not True:
+                        fail("%s:%d: trace must remove tagged dummy bus-access cycles" %
+                             (path, line_number))
+                    if record.get("dma_access_cycles_removed") is not True:
+                        fail("%s:%d: trace must remove tagged DMA bus-access cycles" %
+                             (path, line_number))
+                    if record.get("dma_stall_cycles_included") is not True:
+                        fail("%s:%d: trace must disclose that untagged DMA stall cycles remain" %
+                             (path, line_number))
+                    if record.get("cycle_basis") != "cpu_cycles_including_dma_stalls":
+                        fail("%s:%d: unsupported CPU cycle basis" % (path, line_number))
+                    if record.get("kind_map") != "nnes-profile-kinds-v1":
+                        fail("%s:%d: unsupported or missing access kind map" %
+                             (path, line_number))
+                    headers.append(record)
+                    continue
+
+                if record.get("type") != "window":
+                    fail("%s:%d: expected a window record" % (path, line_number))
+                counts = record.get("counts")
+                gap = record.get("gap_cycles")
+                if (not isinstance(counts, list) or len(counts) != 8 or
+                        any(type(value) is not int or value < 0 for value in counts)):
+                    fail("%s:%d: counts must be 8 non-negative integers" %
+                         (path, line_number))
+                if type(gap) is not int or gap < 0:
+                    fail("%s:%d: gap_cycles must be a non-negative integer" %
+                         (path, line_number))
+                windows.append({"counts": counts, "gap": gap,
+                                "trace": os.path.basename(path),
+                                "window": record.get("index", line_number - 1)})
+            if not have_header:
+                fail("%s: empty trace" % path)
+
+    if not windows:
+        fail("no capture windows found")
+    identity = {(str(header["rom_sha1"]).lower(), header["reference"],
+                 header["kind_map"], header["cycle_basis"],
+                 header["dummy_access_cycles_removed"],
+                 header["dma_access_cycles_removed"],
+                 header["dma_stall_cycles_included"]) for header in headers}
+    if len(identity) != 1:
+        fail("traces must use the same ROM SHA-1, reference, and kind map")
+    return headers, windows
+
+
+def solve_subset(gram, rhs, selected):
+    """Solve a scaled normal-equation subset, or return None if singular."""
+    size = len(selected)
+    if not size:
+        return [0.0] * len(rhs)
+    scale = [math.sqrt(gram[index][index]) for index in selected]
+    if any(value <= 0 for value in scale):
+        return None
+    matrix = [
+        [gram[selected[row]][selected[col]] / (scale[row] * scale[col])
+         for col in range(size)] + [rhs[selected[row]] / scale[row]]
+        for row in range(size)
+    ]
+    for col in range(size):
+        pivot = max(range(col, size), key=lambda row: abs(matrix[row][col]))
+        if abs(matrix[pivot][col]) <= 1e-10:
+            return None
+        matrix[col], matrix[pivot] = matrix[pivot], matrix[col]
+        divisor = matrix[col][col]
+        matrix[col] = [value / divisor for value in matrix[col]]
+        for row in range(size):
+            if row == col:
+                continue
+            factor = matrix[row][col]
+            matrix[row] = [a - factor * b
+                           for a, b in zip(matrix[row], matrix[col])]
+
+    solution = [0.0] * len(rhs)
+    for row, index in enumerate(selected):
+        solution[index] = matrix[row][size] / scale[row]
+    return solution
+
+
+def fit_weights(windows, minimum_accesses):
+    totals = [sum(window["counts"][index] for window in windows)
+              for index in range(8)]
+    measured = [index for index, total in enumerate(totals)
+                if total > 0 and total >= minimum_accesses]
+    gram = [[0.0] * 8 for _ in range(8)]
+    rhs = [0.0] * 8
+    for window in windows:
+        counts, gap = window["counts"], window["gap"]
+        for i in measured:
+            rhs[i] += counts[i] * gap
+            for j in measured:
+                gram[i][j] += counts[i] * counts[j]
+
+    candidates = []
+    for size in range(len(measured) + 1):
+        for selected in itertools.combinations(measured, size):
+            weights = solve_subset(gram, rhs, selected)
+            if weights is None or any(weights[i] < -1e-8 for i in selected):
+                continue
+            weights = [max(0.0, value) for value in weights]
+            error = sum((window["gap"] - sum(count * weight for count, weight
+                                              in zip(window["counts"], weights))) ** 2
+                        for window in windows)
+            nonzero = tuple(i for i, weight in enumerate(weights) if weight > 1e-9)
+            candidates.append((error, len(nonzero), nonzero, weights))
+    if not candidates:
+        return [0.0] * 8, totals, measured
+    least = min(candidate[0] for candidate in candidates)
+    tolerance = 1e-9 * max(abs(least), 1.0)
+    tied = [candidate for candidate in candidates
+            if candidate[0] <= least + tolerance]
+    tied.sort(key=lambda candidate: (candidate[1], candidate[2]))
+    return tied[0][3], totals, measured
+
+
+def c_identifier(text):
+    name = re.sub(r"[^A-Za-z0-9_]", "_", text)
+    if not name or name[0].isdigit():
+        name = "nnes_" + name
+    return name
+
+
+def fit_command(args):
+    headers, windows = read_traces(args.traces)
+    if args.minimum_accesses < 0:
+        fail("--minimum-accesses must be non-negative")
+    weights, totals, measured = fit_weights(windows, args.minimum_accesses)
+    if not any(totals):
+        fail("trace windows contain no classified data accesses")
+    weights_tenths = [int(math.floor(weight * 10 + 0.5)) for weight in weights]
+    name = c_identifier(args.name or "nnes_game")
+    rom_sha1, reference, kind_map = next(iter({
+        (str(header["rom_sha1"]).lower(), header["reference"], header["kind_map"])
+        for header in headers
+    }))
+    cycle_basis = headers[0]["cycle_basis"]
+    residuals = [sum(count * weight / 10 for count, weight in
+                     zip(window["counts"], weights_tenths)) - window["gap"]
+                 for window in windows]
+    rmse = math.sqrt(sum(error * error for error in residuals) / len(residuals))
+    relative = [error / max(window["gap"], 1)
+                for error, window in zip(residuals, windows)]
+    abs_relative = sorted(abs(value) for value in relative)
+    p95 = abs_relative[int(0.95 * (len(abs_relative) - 1))]
+    output_dir = os.path.abspath(args.out)
+    os.makedirs(output_dir, exist_ok=True)
+
+    profile = {
+        "format": "nnes-cost-profile",
+        "version": 1,
+        "tool": TOOL_VERSION,
+        "rom_sha1": rom_sha1,
+        "reference": reference,
+        "kind_map": kind_map,
+        "cycle_basis": cycle_basis,
+        "dummy_access_cycles_removed": True,
+        "dma_access_cycles_removed": True,
+        "dma_stall_cycles_included": True,
+        "trace_files": [os.path.basename(path) for path in args.traces],
+        "window_count": len(windows),
+        "minimum_accesses": args.minimum_accesses,
+        "access_totals": dict(zip(FEATURES, totals)),
+        "measured_features": [FEATURES[index] for index in measured],
+        "weights_tenths": {"read": weights_tenths[:4],
+                           "write": weights_tenths[4:]},
+        "fit": {"rmse_gap_cycles": rmse,
+                "mean_relative_bias": sum(relative) / len(relative),
+                "p95_absolute_relative_error": p95},
+    }
+    with open(os.path.join(output_dir, "profile.json"), "w", encoding="utf-8") as out:
+        json.dump(profile, out, indent=2, sort_keys=True)
+        out.write("\n")
+
+    symbol = name + "_cost_profile"
+    c_path = os.path.join(output_dir, "profile.c")
+    with open(c_path, "w", encoding="utf-8") as out:
+        out.write("/* Generated by nnes-profile %s from ROM SHA-1 %s. */\n" %
+                  (TOOL_VERSION, rom_sha1))
+        out.write("/* Dummy bus cycles were removed from the fit; model required dummy accesses in native C. */\n")
+        out.write("/* Provisional when DMA is used: untagged stall cycles may remain in these weights. */\n")
+        out.write('#include "nnes/nes.h"\n\n')
+        out.write("const nnes_cost_profile %s = {\n" % symbol)
+        out.write("    .version = NNES_COST_PROFILE_VERSION,\n")
+        out.write("    .cpu_tenths = {\n")
+        out.write("        { %s }, /* read: WRAM, ROM, cart RAM, I/O */\n" %
+                  ", ".join(map(str, weights_tenths[:4])))
+        out.write("        { %s }  /* write: WRAM, ROM, cart RAM, I/O */\n" %
+                  ", ".join(map(str, weights_tenths[4:])))
+        out.write("    }\n};\n")
+
+    report_path = os.path.join(output_dir, "report.txt")
+    with open(report_path, "w", encoding="utf-8") as out:
+        out.write("nnes-profile %s report\n" % TOOL_VERSION)
+        out.write("ROM SHA-1: %s\nReference: %s\nWindows: %d\n\n" %
+                  (rom_sha1, reference, len(windows)))
+        for index, feature in enumerate(FEATURES):
+            state = ("measured" if index in measured else
+                     "below minimum access count; set to zero")
+            out.write("%-18s %4d tenths (%d accesses; %s)\n" %
+                      (feature, weights_tenths[index], totals[index], state))
+        out.write("\nGap RMSE: %.3f cycles; mean relative bias: %+.2f%%; p95 abs relative error: %.2f%%\n" %
+                  (rmse, 100 * sum(relative) / len(relative), 100 * p95))
+        out.write("Fit applies only to the supplied reference spans; it is not a parity qualification.\n")
+        out.write("Tagged dummy bus cycles were removed; decompiled code must represent them with dummy-access helpers where required.\n")
+        out.write("DMA access cycles tagged by the trace were removed; untagged DMA stall cycles may remain and are folded into fitted weights.\n")
+        out.write("Regenerate profiles after nnes models DMA timing; these weights are provisional when a game uses DMA.\n")
+    print("Wrote %s and %s" % (c_path, report_path))
+
+
+def normalize_command(args):
+    if os.path.abspath(args.raw_trace) == os.path.abspath(args.out):
+        fail("--out must differ from the raw trace path")
+    try:
+        source = open(args.raw_trace, encoding="utf-8")
+    except OSError as exc:
+        fail("cannot open %s: %s" % (args.raw_trace, exc))
+    try:
+        output = open(args.out, "w", encoding="utf-8")
+    except OSError as exc:
+        source.close()
+        fail("cannot create %s: %s" % (args.out, exc))
+
+    with source, output:
+        first = None
+        header_line = 0
+        for line_number, line in enumerate(source, 1):
+            if not line.strip():
+                continue
+            header_line = line_number
+            try:
+                first = json.loads(line)
+            except json.JSONDecodeError as exc:
+                fail("%s:%d: invalid JSON: %s" % (args.raw_trace, line_number, exc))
+            break
+        if (not isinstance(first, dict) or first.get("type") != "header" or
+                first.get("format") != "nnes-cpu-op-trace" or
+                first.get("version") != 1):
+            fail("raw trace must start with an nnes-cpu-op-trace version 1 header")
+        rom_sha1 = str(first.get("rom_sha1", "")).lower()
+        if not re.fullmatch(r"[0-9a-f]{40}", rom_sha1):
+            fail("raw trace header rom_sha1 must be 40 hex characters")
+        if not isinstance(first.get("reference"), str) or not first["reference"]:
+            fail("raw trace header must name the reference emulator/version")
+        if first.get("operation_types_included") is not True:
+            fail("raw trace must preserve data, exec, dummy, and DMA operation types")
+        if first.get("cycle_basis") != "cpu_cycles_including_dma_stalls":
+            fail("raw trace must declare cpu_cycles_including_dma_stalls")
+        if first.get("kind_map") != "nnes-profile-kinds-v1":
+            fail("raw trace uses an unsupported or missing kind map")
+
+        normalized_header = {
+            "type": "header",
+            "format": TRACE_FORMAT,
+            "version": TRACE_VERSION,
+            "rom_sha1": rom_sha1,
+            "reference": first["reference"],
+            "kind_map": first["kind_map"],
+            "access_semantics": "data-only",
+            "polls_excluded": True,
+            "dummy_access_cycles_removed": True,
+            "dma_access_cycles_removed": True,
+            "dma_stall_cycles_included": True,
+            "cycle_basis": first["cycle_basis"],
+            "normalizer": TOOL_VERSION,
+            "poll_read_limit": args.poll_read_limit,
+            "max_gap_cycles": args.max_gap_cycles,
+        }
+        output.write(json.dumps(normalized_header, sort_keys=True) + "\n")
+
+        windows = {}
+        pending_reads = []
+        poll_run = False
+        poll_address = None
+        previous_data_cycle = None
+        previous_data_dummy_count = 0
+        previous_data_dma_count = 0
+        dummy_access_count = 0
+        dma_access_count = 0
+        last_cycle = -1
+        last_frame = -1
+
+        def row_for(frame):
+            if frame not in windows:
+                windows[frame] = {"counts": [0] * 8, "gap_cycles": 0}
+            return windows[frame]
+
+        def include_data_access(event):
+            nonlocal previous_data_cycle, previous_data_dummy_count
+            nonlocal previous_data_dma_count
+            row = row_for(event["frame"])
+            offset = 4 if event["operation"] == "write" else 0
+            row["counts"][offset + KIND_NAMES.index(event["kind"])] += 1
+            if previous_data_cycle is not None:
+                dma_between = event["dma_access_count"] - previous_data_dma_count
+                dummy_between = (event["dummy_access_count"] -
+                                 previous_data_dummy_count)
+                gap = (event["cycle"] - previous_data_cycle - 1 -
+                       dma_between - dummy_between)
+                if gap < 0:
+                    fail("%s: filtered bus-access count exceeds elapsed cycle gap" %
+                         args.raw_trace)
+                if gap <= args.max_gap_cycles:
+                    row["gap_cycles"] += gap
+            previous_data_cycle = event["cycle"]
+            previous_data_dummy_count = event["dummy_access_count"]
+            previous_data_dma_count = event["dma_access_count"]
+
+        allowed_operations = {"read", "write", "opcode", "operand", "dummy_read",
+                              "dummy_write", "dma_read", "dma_write",
+                              "ppu_rendering_read", "idle"}
+        for line_number, line in enumerate(source, header_line + 1):
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError as exc:
+                fail("%s:%d: invalid JSON: %s" % (args.raw_trace, line_number, exc))
+            if not isinstance(event, dict) or event.get("type") != "access":
+                fail("%s:%d: expected an access record" % (args.raw_trace, line_number))
+            frame, cycle, operation = (event.get("frame"), event.get("cycle"),
+                                       event.get("operation"))
+            if type(frame) is not int or frame < 0 or type(cycle) is not int or cycle < 0:
+                fail("%s:%d: frame and cycle must be non-negative integers" %
+                     (args.raw_trace, line_number))
+            if cycle < last_cycle or frame < last_frame:
+                fail("%s:%d: trace frame/cycle order moved backwards" %
+                     (args.raw_trace, line_number))
+            last_cycle, last_frame = cycle, frame
+            if not isinstance(operation, str) or operation not in allowed_operations:
+                fail("%s:%d: unknown operation type %r" %
+                     (args.raw_trace, line_number, operation))
+            address = event.get("address")
+            if operation in ("read", "write") and (
+                    type(address) is not int or address < 0 or address > 0xFFFF):
+                fail("%s:%d: data access address must be in $0000-$FFFF" %
+                     (args.raw_trace, line_number))
+
+            if operation in ("dma_read", "dma_write"):
+                dma_access_count += 1
+            if operation in ("dummy_read", "dummy_write"):
+                dummy_access_count += 1
+            event["dummy_access_count"] = dummy_access_count
+            event["dma_access_count"] = dma_access_count
+
+            if operation == "read":
+                kind = event.get("kind")
+                if not isinstance(kind, str) or kind not in KIND_NAMES:
+                    fail("%s:%d: data read has missing/unknown access kind" %
+                         (args.raw_trace, line_number))
+                if poll_run:
+                    if address == poll_address:
+                        previous_data_cycle = cycle
+                        previous_data_dummy_count = dummy_access_count
+                        previous_data_dma_count = dma_access_count
+                        continue
+                    poll_run = False
+                    poll_address = None
+                    pending_reads.clear()
+                if pending_reads and address != pending_reads[-1]["address"]:
+                    for pending in pending_reads:
+                        include_data_access(pending)
+                    pending_reads.clear()
+                pending_reads.append({"frame": frame, "cycle": cycle,
+                                      "operation": operation, "kind": kind,
+                                      "address": address,
+                                      "dummy_access_count": dummy_access_count,
+                                      "dma_access_count": dma_access_count})
+                if len(pending_reads) > args.poll_read_limit:
+                    poll_run = True
+                    poll_address = address
+                    previous_data_cycle = cycle
+                    previous_data_dummy_count = dummy_access_count
+                    previous_data_dma_count = dma_access_count
+                    pending_reads.clear()
+            elif operation == "write":
+                kind = event.get("kind")
+                if not isinstance(kind, str) or kind not in KIND_NAMES:
+                    fail("%s:%d: data write has missing/unknown access kind" %
+                         (args.raw_trace, line_number))
+                if poll_run:
+                    poll_run = False
+                    poll_address = None
+                for pending in pending_reads:
+                    include_data_access(pending)
+                pending_reads.clear()
+                include_data_access({"frame": frame, "cycle": cycle,
+                                     "operation": operation, "kind": kind,
+                                     "dummy_access_count": dummy_access_count,
+                                     "dma_access_count": dma_access_count})
+
+        if pending_reads and not poll_run:
+            for pending in pending_reads:
+                include_data_access(pending)
+        for frame in sorted(windows):
+            row = windows[frame]
+            output.write(json.dumps({"type": "window", "index": frame,
+                                     "counts": row["counts"],
+                                     "gap_cycles": row["gap_cycles"]},
+                                    sort_keys=True) + "\n")
+    print("Wrote normalized reference trace %s" % args.out)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Fit an nnes profile from reference traces")
+    commands = parser.add_subparsers(dest="command", required=True)
+    normalize_parser = commands.add_parser("normalize", help="filter a typed CPU operation trace")
+    normalize_parser.add_argument("raw_trace")
+    normalize_parser.add_argument("--out", required=True)
+    normalize_parser.add_argument("--poll-read-limit", type=int, default=64)
+    normalize_parser.add_argument("--max-gap-cycles", type=int, default=1024)
+    fit_parser = commands.add_parser("fit", help="fit a cost profile from trace windows")
+    fit_parser.add_argument("traces", nargs="+", help="normalized reference trace JSONL files")
+    fit_parser.add_argument("--out", required=True, help="output directory")
+    fit_parser.add_argument("--name", help="C symbol stem")
+    fit_parser.add_argument("--minimum-accesses", type=int, default=DEFAULT_MIN_ACCESSES)
+    args = parser.parse_args()
+    if args.command == "normalize":
+        if args.poll_read_limit < 1 or args.max_gap_cycles < 0:
+            fail("poll-read-limit must be positive and max-gap-cycles non-negative")
+        normalize_command(args)
+    else:
+        if args.minimum_accesses < 0:
+            fail("--minimum-accesses must be non-negative")
+        fit_command(args)
+
+
+if __name__ == "__main__":
+    main()
