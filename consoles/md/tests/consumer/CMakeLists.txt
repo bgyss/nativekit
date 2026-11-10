@@ -14,3 +14,7 @@ add_subdirectory("${NATIVEKIT_ROOT}" nativekit)
 
 add_executable(md_consumer main.c)
 target_link_libraries(md_consumer PRIVATE nmd)
+
+# A game with native execution: reset, main, VINT and Z80 sound program as C.
+add_executable(md_native native.c)
+target_link_libraries(md_native PRIVATE nmd)

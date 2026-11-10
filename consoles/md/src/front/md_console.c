@@ -2,6 +2,7 @@
  * md_console.c: the nativekit console adapter. Remaining Stage 2 work fills
  * in VDP ports, rendering, and variable frame dimensions.
  */
+#include <stddef.h>
 #include <stdint.h>
 
 #include "nk/nk.h"
@@ -117,6 +118,24 @@ static int count_group(uint32_t addr)
     return (addr & 0xFF000000u) == MD_Z80_COUNT_MARKER;
 }
 
+/* The script's `dump`: memories as they stand, read with no bus access. */
+static const void *region_work_ram(size_t *bytes)
+{
+    *bytes = 0x10000u;
+    return nmd_work_ram();
+}
+
+static const void *region_z80_ram(size_t *bytes)
+{
+    *bytes = 0x2000u;
+    return nmd_z80_ram();
+}
+
+static const nk_region regions[] = {
+    { ".wram", region_work_ram, 0 },
+    { ".zram", region_z80_ram, 0 },
+};
+
 const nk_console nmd_console = {
     .name = "nativemd",
     .env = "NMD",
@@ -137,6 +156,8 @@ const nk_console nmd_console = {
     .buttons = buttons,
     .button_count = (int)(sizeof buttons / sizeof buttons[0]),
     .input = input,
+    .regions = regions,
+    .region_count = (int)(sizeof regions / sizeof regions[0]),
     .counts_hooks = counts_hooks,
     .access_kind = nmd_access_kind,
     .count_group = count_group,
