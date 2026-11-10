@@ -19,6 +19,7 @@ the standards every console here keeps). It is at 1.0.0.
 |---|---|---|
 | **nativeshvc**, the Super Famicom / Super Nintendo | [`consoles/snes/`](consoles/snes/) | the original native console; see below |
 | **nativemd**, the Sega Mega Drive / Genesis | [`consoles/md/`](consoles/md/) | a native C console for the 68000 and Z80; see [its guide](consoles/md/docs/nativemd.md) |
+| **nativenes**, the NES / Famicom | [`consoles/nes/`](consoles/nes/) | a hardware foundation (`nnes`) for the 6502's C; not yet on the kit's loop, and no picture or sound yet; see [its README](consoles/nes/README.md) |
 
 nativeshvc was created by Jeffrey Wilbur ([github.com/jeff-strutb/nativeshvc](https://github.com/jeff-strutb/nativeshvc)),
 and nativekit is extracted from it: this repository
