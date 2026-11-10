@@ -13,10 +13,10 @@ import tempfile
 ROOT = pathlib.Path(__file__).resolve().parents[4]
 ASSEMBLERS = {
     "m68k": ("vasmm68k_mot", ["-m68000", "-no-opt"]),
-    "z80": ("vasmz80_oldstyle", ["-no-opt"]),
+    "z80": ("vasmz80_oldstyle", []),
 }
-_START = re.compile(r"^[0-9A-F]{2,}:[0-9A-F]{8} ([0-9A-F]+)\s*\t\s*(\d+):")
-_MORE = re.compile(r"^[0-9A-F]{2,}:[0-9A-F]{8} ([0-9A-F]+)\s*$")
+_START = re.compile(r"^[0-9A-F]{2,}:[0-9A-F]{4,8} ([0-9A-F]+)\s*\t\s*(\d+):")
+_MORE = re.compile(r"^[0-9A-F]{2,}:[0-9A-F]{4,8} ([0-9A-F]+)\s*$")
 _BLANK = re.compile(r"^\s+\t\s*(\d+):")
 
 
