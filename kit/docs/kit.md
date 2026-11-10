@@ -238,3 +238,4 @@ build) runs the name check and every check in [`tests/`](../tests/):
 | `input_check` | keys to positional bits and back to their names, a stick past half on the d-pad, a new press making a controller its player's source (reported once), the mouse's motion over a frame, two touches |
 | `states_check.py` | the script on the stub console: steps and their errors, dumps, `save` and `load` with fork and without, a state rebuilt from a play |
 | `profile_lib_check.py` | the fitter on made-up kinds: known weights given back, a kind not measured kept at its default, a chip's program fitted |
+| `click_macos.m` | the macOS host's mouse buttons from each press and release, a click quicker than a poll heard (a window; by hand: `build/macos/kit/tests/kit_click_macos`) |
