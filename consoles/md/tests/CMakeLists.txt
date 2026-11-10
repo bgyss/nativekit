@@ -23,6 +23,11 @@ target_include_directories(interrupt_check PRIVATE ../src/console)
 target_link_libraries(interrupt_check PRIVATE nmd)
 set_target_properties(interrupt_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
 
+add_executable(execution_check unit/execution_check.c)
+target_include_directories(execution_check PRIVATE ../src/console)
+target_link_libraries(execution_check PRIVATE nmd)
+set_target_properties(execution_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
 add_executable(vdp_check unit/vdp_check.c)
 target_include_directories(vdp_check PRIVATE ../src/console)
 target_link_libraries(vdp_check PRIVATE nmd)

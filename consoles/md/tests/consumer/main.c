@@ -8,7 +8,7 @@
 #include <nmd/version.h>
 #include <nmd/z80.h>
 
-_Static_assert(NMD_VERSION_MAJOR == 1 && NMD_VERSION_MINOR == 0 && NMD_VERSION_PATCH == 0,
+_Static_assert(NMD_VERSION_MAJOR == 1 && NMD_VERSION_MINOR == 1 && NMD_VERSION_PATCH == 0,
                "nativemd consumer contract version");
 
 static const uint8_t rom[0x400] = { 0 };

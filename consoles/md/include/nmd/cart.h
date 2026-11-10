@@ -25,6 +25,16 @@ typedef enum {
     NMD_PORT_PAD3 = 1
 } nmd_port_type;
 
+/* Who runs the game's 68000 main logic. A zeroed cart keeps the 1.0
+ * behavior: the caller of nmd_run_frame drives the machine from its own
+ * stack. NMD_EXECUTION_NATIVE enters the C routine at the ROM's reset vector
+ * on the console's 68000 coroutine and resumes it every frame; interrupts
+ * of both CPUs then return through their guest stacks (docs/contract.md). */
+typedef enum {
+    NMD_EXECUTION_HOST = 0,
+    NMD_EXECUTION_NATIVE = 1
+} nmd_execution;
+
 typedef struct nmd_cost_profile nmd_cost_profile;
 
 typedef struct nmd_routine {
@@ -45,6 +55,7 @@ typedef struct nmd_cart {
     nmd_model model;
     nmd_port_type ports[2];
     const nmd_cost_profile *cost_profile;
+    nmd_execution execution; /* since 1.1 */
 } nmd_cart;
 
 #endif

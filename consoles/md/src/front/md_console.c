@@ -151,6 +151,7 @@ int nmd_main(const nmd_cart *cart, int argc, char **argv)
 
 void nmd_power(const nmd_cart *cart)
 {
+    md_m68k_abandon();
     active_cart = cart;
     md_io_reset(cart);
     md_bus_reset(cart);
@@ -161,6 +162,10 @@ void nmd_run_frame(void)
 {
     if (!active_cart)
         nk_fatal("nmd_run_frame before nmd_power");
+    if (md_m68k_native()) {
+        md_m68k_run_frame();
+        return;
+    }
     md_advance_to(md_vdp_next_vblank_clock());
     md_irq_dispatch_pending();
 }

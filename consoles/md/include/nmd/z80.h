@@ -10,6 +10,8 @@ typedef struct nmd_z80_state {
     uint8_t a, f, b, c, d, e, h, l;
     uint8_t i, r, iff1, iff2, im;
     uint16_t ix, iy, sp, pc;
+    /* Since 1.1: the alternate set (EX AF,AF' and EXX exchange with it). */
+    uint8_t a2, f2, b2, c2, d2, e2, h2, l2;
 } nmd_z80_state;
 
 typedef struct nmd_z80_routine {

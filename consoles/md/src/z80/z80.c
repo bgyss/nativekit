@@ -61,6 +61,38 @@ static uint16_t z80_vint_vector(void)
     }
 }
 
+/* Native execution: the acceptance pushes PC on the Z80's own stack and the
+ * handler's return pops it; IFF1/IFF2 stay as the handler leaves them (its
+ * EI), and a changed return address restarts the Z80 there. */
+static void deliver_vint_native(void)
+{
+    const nmd_z80_routine *routine;
+    uint16_t entry_pc = nmd_z80.pc;
+    uint16_t vector;
+    uint16_t return_pc;
+
+    z80_vint_pending = 0;
+    nmd_z80.iff1 = 0;
+    nmd_z80.iff2 = 0;
+    nmd_z80.sp--;
+    zwr(nmd_z80.sp, (uint8_t)(entry_pc >> 8));
+    nmd_z80.sp--;
+    zwr(nmd_z80.sp, (uint8_t)entry_pc);
+    vector = z80_vint_vector();
+    routine = find_routine(vector);
+    if (!routine || !routine->abi)
+        nk_fatal("Z80 VINT vector $%04X has no C routine", vector);
+    nmd_z80.pc = vector;
+    routine->abi();
+    return_pc = zrd(nmd_z80.sp);
+    nmd_z80.sp++;
+    return_pc |= (uint16_t)((uint16_t)zrd(nmd_z80.sp) << 8);
+    nmd_z80.sp++;
+    nmd_z80.pc = return_pc;
+    if (return_pc != entry_pc)
+        nmd_z80_restart(return_pc);
+}
+
 static void deliver_vint(void)
 {
     uint16_t vector;
@@ -72,6 +104,10 @@ static void deliver_vint(void)
         md_z80_busreq || md_z80_reset)
         return;
 
+    if (active_cart->execution == NMD_EXECUTION_NATIVE) {
+        deliver_vint_native();
+        return;
+    }
     z80_vint_pending = 0;
     saved_pc = nmd_z80.pc;
     saved_iff1 = nmd_z80.iff1;

@@ -50,6 +50,11 @@ void nmd_run_frame(void);
 void nmd_set_cpu_costs(int on);
 int nmd_access_kind(uint32_t addr);
 int nmd_z80_access_kind(uint16_t addr);
+/* Observation, since 1.1: the 65,536 bytes of work RAM and the 8,192 bytes
+ * of Z80 RAM as they stand. Reading them takes no bus time and makes no
+ * access the game could see; a game's own logic uses the bus calls. */
+const uint8_t *nmd_work_ram(void);
+const uint8_t *nmd_z80_ram(void);
 
 #ifdef __cplusplus
 }

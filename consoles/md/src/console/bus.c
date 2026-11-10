@@ -531,6 +531,16 @@ void md_bus_reset(const nmd_cart *cart)
     md_irq_defer_depth = 0;
 }
 
+const uint8_t *nmd_work_ram(void)
+{
+    return work_ram;
+}
+
+const uint8_t *nmd_z80_ram(void)
+{
+    return md_z80_ram;
+}
+
 void md_irq_defer_begin(void)
 {
     md_irq_defer_depth++;

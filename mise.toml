@@ -48,6 +48,11 @@ description = "Check the 68000 clock scheduler, VDP interrupts, and waits"
 depends = ["build:null", "tools:md"]
 run = "python3 consoles/md/tests/interrupt_check.py"
 
+[tasks."test:md-execution"]
+description = "Check the native reset entry, frame resume, interrupt returns, restart, and re-power"
+depends = ["build:null"]
+run = "cmake --build build/null --target execution_check && python3 consoles/md/tests/execution_check.py"
+
 [tasks."test:md-vdp"]
 description = "Check VDP control/data ports, memory, reads, and FIFO timing"
 depends = ["build:null"]

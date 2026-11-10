@@ -48,6 +48,10 @@ void md_irq_defer_begin(void);
 void md_irq_defer_end(void);
 
 void md_timing_reset(const nmd_cart *cart);
+/* The game's 68000 run (nmd_cart.execution NMD_EXECUTION_NATIVE). */
+void md_m68k_abandon(void);
+void md_m68k_run_frame(void);
+int md_m68k_native(void);
 void md_advance_to(uint64_t to_clock);
 void md_z80_power(const nmd_cart *cart);
 void md_z80_sync_to(uint64_t master_clock);
