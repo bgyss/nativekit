@@ -12,7 +12,7 @@
 
 **Execution method:** Native single-session execution.
 
-**Outcome (2026-11-10):** Tasks 1-6 executed; Task 6 needed evidence loading to stream from disk (`codemap._Evidence`) and stopped at a 250-frame capture. Deviations: the code map has no separate `codemap_check.py` (its controls are in `census_check.py`); `census.py` was folded into `intake.py`; checks were written with the code and rely on planted errors rather than observed red runs. Results are in the [milestone file](2026-11-04-nativemd-decomp/d03-lossless-intake-and-code-census.md#results).
+**Outcome (2026-11-10):** Tasks 1-6 executed; Task 6 needed evidence loading to stream from disk (`codemap._Evidence`) and first stopped at a 250-frame capture; a 900-frame capture completed after reference-core patch 0003. Deviations: the code map has no separate `codemap_check.py` (its controls are in `census_check.py`); `census.py` was folded into `intake.py`; checks were written with the code and rely on planted errors rather than observed red runs. Results are in the [milestone file](2026-11-04-nativemd-decomp/d03-lossless-intake-and-code-census.md#results).
 
 ## Refreshed Baseline
 

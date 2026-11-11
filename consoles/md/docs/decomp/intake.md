@@ -3,7 +3,7 @@
 The shared tooling that turns a Mega Drive image and reference captures into
 an auditable byte map and an assembly skeleton that rebuilds the image
 exactly. Its gates are held by authored synthetic cartridges; the first title
-has been run through it once, with the [results and findings below](#first-title).
+has been run through it at 250 and 900 frames, with the [results and findings below](#first-title).
 
 ## Commands
 
@@ -121,49 +121,66 @@ instruction raw.
 is under ignored `build/decomp/md-f68818ae1a61/`, whose `WORKSPACE.md` holds
 the exact commands; nothing from the image is tracked.
 
-Evidence: one complete 250-frame capture on the pinned reference core (region
-U, model `md1va3`, two three-button pads, START on frames 180-187 and
-240-247; scenario SHA-256 `c70855a3…fa79e`; 16,202,726 events, 5.4 GB). Its
-caps were raised from the 256 MB default to 16 GiB and 560 s. The intake read
-it in 294 s with a 120 MB peak.
+Evidence: two complete captures on the pinned reference core (region U, model
+`md1va3`, two three-button pads), each taken through its own intake:
 
-| Result | Value |
-|---|---|
-| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture |
-| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static |
-| ROM code kept raw (noncanonical encoding) | 20 bytes |
-| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) |
-| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` |
-| ROM entries | 168: 71 traced (T1), 4 vector, 93 static |
-| Computed transfers in ROM | 14, of which 9 have no observed target |
-| Conflicts, undecodable entries | 0, 0 |
-| Orphan candidates | 18 |
-| Z80 RAM program identities | 506, all at `$0000`; no 68000 RAM code ran |
+- 250 frames, START on frames 180-187 and 240-247; scenario SHA-256
+  `c70855a3…fa79e`; 16,202,726 events, 5.4 GB; caps raised from the 256 MB
+  default to 16 GiB and 560 s. The intake read it in 294 s with a 120 MB peak.
+- 900 frames, an eight-frame START press every 60 frames from 180 to 660 and
+  pad inputs from frame 420; scenario SHA-256 `4a434d8b…d4d690`; 61,716,550
+  events (8,991,561 68000 and 4,843,565 Z80 instructions), 20.6 GB, 939 s;
+  caps 64 GiB and 3,000 s. It needs the core with patch 0003 (below). Its
+  intake took about 56 minutes by file timestamps and wrote a 452 MB code map.
+
+| Result | 250 frames | 900 frames |
+|---|---|---|
+| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture | identical, same three measures |
+| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static | 12,060 traced, 100 vector, 8,148 static |
+| ROM code kept raw (noncanonical encoding) | 20 bytes | 20 bytes |
+| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) | 340 |
+| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` | 503,620, same split |
+| ROM entries | 168: 71 traced (T1), 4 vector, 93 static | 222: 189 traced (T1), 4 vector, 29 static |
+| Computed transfers in ROM | 14, of which 9 have no observed target | 14, of which 5 have none |
+| Conflicts, undecodable entries | 0, 0 | 0, 0 |
+| Orphan candidates | 18 | 19 |
+| Z80 RAM program identities | 506, all at `$0000`; no 68000 RAM code ran | 30,121, all at `$0000`; none on the 68000 |
 
 Findings, none of them fixed here:
 
-- **This is one second of boot and about three seconds after it.** 19,568 of
-  524,288 bytes are decoded, and 72% of those only by static reach. The
-  census says nothing about the game's main code yet.
-- **A longer capture did not complete.** A 900-frame run ended
-  `incomplete_core_error`: the reference core's NMDT stream stopped near frame
-  258, about 17 frames after the first YM2612 write. The cause is not
-  diagnosed (the stream's per-device clock ordering rule is the suspect). The
-  intake refuses incomplete captures, so traced evidence currently ends at
-  frame 250.
-- **503 of the 506 Z80 identities are one 254-byte program** whose two 16-bit
-  immediate operands the 68000 rewrites between runs. Each rewrite is a new
-  generation by the "address and bytes" rule, so the catalog holds 503 T1
-  entries for one routine. The rule's false split is real at title scale;
-  identities need an operand-patch notion before the catalog count means
-  routines.
+- **Fifteen seconds found little new code.** The 900-frame run decodes 20,308
+  of 524,288 ROM bytes against 19,568 at 250 frames: 740 more. Most of what it
+  traced was already reached statically. Whether the inputs reached gameplay
+  is unknown: the runner shows no picture, and the scenario was written blind.
+  Either the title's code is small and the rest is data, or the run stayed in
+  the title and demonstration screens. The census cannot tell these apart.
+- **The first 900-frame run failed in the reference core, since patched.** It
+  ended `incomplete_core_error` near frame 258. BlastEm's Z80 bank-window
+  handlers set the Z80 clock to the 68000's clock whenever the 68000 was
+  stalled on a VDP transfer, even when the Z80 was already ahead, so a Z80 bus
+  event ran three master clocks backward and the NMDT stream latched its
+  per-device ordering error. Patch
+  `tools/toolchains/patches/blastem/0003-z80-bank-wait-never-rewinds.patch`
+  only ever delays the Z80; `bank_stall_check.py` is its authored control.
+  This is a deliberate timing difference from upstream, and which of the two
+  real hardware matches is not verified.
+- **30,118 of the 30,121 Z80 identities share five lengths** (254, 240, 227,
+  209 and 241 bytes: 14,591, 6,765, 4,415, 2,821 and 1,524 identities). At 250
+  frames the 254-byte one was checked to be a single program whose two 16-bit
+  immediate operands the 68000 rewrites between runs; the other four lengths
+  are not yet checked the same way. Each rewrite is a new generation by the
+  "address and bytes" rule, so the catalog holds 30,171 Z80 T1 entries for
+  what is probably five routines, and the skeleton holds 30,121 program
+  files. Identities need an operand-patch notion before the catalog count
+  means routines, and before a longer capture is worth its intake time.
 - **Every non-code ROM byte is `read`** because the boot checksum reads the
   whole image; the class separates nothing for this title.
 - One 40-byte Z80 generation has 4 traced bytes, 36 unknown and no ROM source.
 
 ## Not done
 
-- Diagnosing the reference core's NMDT failure, and any capture past frame 250.
+- Confirming what the 900-frame scenario reached, and any capture past it.
+- Checking patch 0003's bank-wait timing against hardware.
 - Collapsing operand-patched generations of one program into one identity.
 - Compressed program sources are not reconstructed, only identified as absent.
 - No static discovery of jump tables; computed targets come from traces only.

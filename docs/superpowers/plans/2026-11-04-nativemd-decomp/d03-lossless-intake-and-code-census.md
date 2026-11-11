@@ -1,6 +1,6 @@
 # D03: Recover code identities and a lossless assembly skeleton
 
-**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence covers 250 frames only, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence covers 900 frames of unconfirmed content, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -57,7 +57,7 @@ ignored `build/decomp/md-f68818ae1a61/` and only hashes and counts are tracked.
 | Acceptance line | State |
 |---|---|
 | Full original image rebuilds with identical length, SHA-256, zero differing bytes | Met for the first title (524,288 bytes, 0 differing) and the authored control images. |
-| All-incbin rebuild labelled raw preservation; decoded and unknown bytes reported separately | Met in tooling (`--raw`, `census.json`), on controls; the first title's census reports 19,568 decoded and 20 raw code bytes. |
+| All-incbin rebuild labelled raw preservation; decoded and unknown bytes reported separately | Met in tooling (`--raw`, `census.json`), on controls; the first title's census reports 20,308 decoded and 20 raw code bytes at 900 frames. |
 | Synthetic dead code, computed targets, two programs at one RAM address without false merges | Met (`census_check.py`). |
 | Changed instruction, data byte, placement or source-ROM identity fails its gate | Met (seven planted errors). |
 
@@ -67,14 +67,15 @@ Artifacts: `consoles/md/tools/decomp/{m68k_dis,z80_dis,asmverify,codemap,skeleto
 rules, decoder control counts and limits).
 
 Commands run: `mise run test:md-decomp`, exit 0 (all D01 gates plus the three
-new ones); for the first title, `run.py --mode estimate|capture` (250 frames,
-complete) and `intake.py intake|rebuild`, exit 0, exact lines in the
+new ones); for the first title, `run.py --mode estimate|capture` (250 and 900
+frames, complete) and `intake.py intake|rebuild`, exit 0, exact lines in the
 workspace's `WORKSPACE.md`.
 
 Open, in [intake.md](../../../../consoles/md/docs/decomp/intake.md#first-title):
-a 900-frame capture failed in the reference core's NMDT stream near frame 258,
-so traced evidence ends at frame 250 and covers boot only; one Z80 program
-whose operands the 68000 patches is counted as 503 identities; uploaded or
+the 900-frame capture added only 740 decoded ROM bytes and what its blind
+inputs reached is unconfirmed; it completes only with reference-core patch
+0003, whose Z80 bank-wait timing is unverified against hardware; Z80 programs
+whose operands the 68000 patches are counted as 30,118 identities; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item
 5); the skeleton lives in the ignored workspace because no game repository is
 bound. D06 needs the first two closed.
