@@ -3,9 +3,15 @@
 A *space* is a run of bytes one CPU executes from: the ROM image (offsets are
 file offsets; the base cartridge maps offset n at 68000 address n) or one
 *generation* of a program in RAM (work RAM for the 68000, Z80 RAM for the
-Z80), identified by CPU, load address and the SHA-256 of its bytes. One RAM
-address holds different generations over time; they are never merged unless
-both the address and the bytes are equal.
+Z80). One RAM address holds different generations over time. Two generations
+are one program, a *family*, only when they overlap and every byte that
+differs between them lies in an instruction both decode to the same length,
+flow, transfer targets and text apart from its numeric literals: a program
+whose immediate operands another CPU rewrites is one program with variants.
+A differing opcode, register, branch target or non-instruction byte keeps
+two generations apart. A family's space is named by CPU, load address and
+the SHA-256 of one variant's bytes (the one with a verbatim ROM source when
+there is one); the others are listed by hash with the bytes that vary.
 
 Per-byte classes, strongest first:
   opcode / operand   part of an instruction reached from an entry
@@ -22,6 +28,7 @@ trace saw. Nothing here guesses.
 """
 import hashlib
 import json
+import re
 
 import m68k_dis
 import z80_dis
@@ -61,6 +68,8 @@ class Space:
         self.external = set()       # direct targets outside the space
         self.source_rom_offset = None
         self.occurrences = 1
+        self.variant_sha256 = [sha256(self.data)]   # every content this program had
+        self.patched = []           # offsets whose value differs between variants
 
     def sha256(self):
         return sha256(self.data)
@@ -183,6 +192,7 @@ class Space:
             "id": self.id, "cpu": self.cpu, "kind": self.kind, "base": self.base,
             "size": len(self.data), "sha256": sha256(self.data),
             "source_rom_offset": self.source_rom_offset, "occurrences": self.occurrences,
+            "variant_sha256": self.variant_sha256, "patched": _runs(self.patched),
             "classes": runs,
             "instructions": [dict(self.instructions[a], at=a) for a in sorted(self.instructions)],
             "entries": [{"at": a, "kinds": sorted(e["kinds"]), "evidence": e["evidence"]}
@@ -194,6 +204,128 @@ class Space:
             "external_targets": sorted(self.external),
             "orphan_candidates": self.orphan_candidates(),
         }
+
+
+def _runs(offsets):
+    """Sorted offsets as [start, length] runs."""
+    runs = []
+    for offset in sorted(offsets):
+        if runs and runs[-1][0] + runs[-1][1] == offset:
+            runs[-1][1] += 1
+        else:
+            runs.append([offset, 1])
+    return runs
+
+
+_LITERAL = re.compile(r"(?<![A-Za-z0-9_$])(\$[0-9A-Fa-f]+|[0-9]+)")
+
+
+def _shape(text):
+    """Instruction text with its numeric literals blanked; register numbers
+    are part of a name and stay."""
+    return _LITERAL.sub("#", text)
+
+
+class _Family:
+    """Generations of one RAM program: equal except in the numeric operands
+    of instructions that otherwise decode alike (see the module text)."""
+
+    def __init__(self, cpu, origin, generation):
+        snapshot, executed, edges = generation
+        self.cpu = cpu
+        self.origin = origin
+        self.members = [snapshot]
+        self.low = min(executed)
+        self.high = max(offset + length for offset, length in executed.items())
+        self.starts = set(executed)
+        self.edges = set(edges)
+        self.space, self.owner = self._walk(snapshot, self.low, self.high, self.starts)
+
+    def _walk(self, snapshot, low, high, starts):
+        space = Space("", self.cpu, "ram", self.origin + low, snapshot[low:high])
+        space.walk(sorted((self.origin + offset for offset in starts), reverse=True), "traced")
+        owner = {}
+        for address, record in space.instructions.items():
+            for index in range(address - space.base, address - space.base + record["length"]):
+                owner[index] = None if index in owner else address   # None: overlapping
+        return space, owner
+
+    @staticmethod
+    def _alike(space, owner, other):
+        """Whether `other` (bytes over the space's extent) is the space's
+        program; returns the differing offsets, or None when it is not."""
+        if other == space.data:
+            return []
+        differing = [index for index, (mine, theirs) in enumerate(zip(space.data, other))
+                     if mine != theirs]
+        touched = set()
+        for index in differing:
+            address = owner.get(index)
+            if address is None:
+                return None     # not in an instruction, or in overlapping ones
+            touched.add(address)
+        for address in touched:
+            record = space.instructions[address]
+            insn = DECODERS[space.cpu](other, address - space.base, address)
+            if insn is None or insn.text is None or record["text"] is None or \
+                    insn.length != record["length"] or insn.flow != record["flow"] or \
+                    list(insn.targets) != record["targets"] or \
+                    insn.indirect != record["indirect"] or \
+                    _shape(insn.text) != _shape(record["text"]):
+                return None
+        return differing
+
+    def admit(self, generation):
+        """Add the generation if it is this program; False when it is not."""
+        snapshot, executed, edges = generation
+        low = min(executed)
+        high = max(offset + length for offset, length in executed.items())
+        if low >= self.high or high <= self.low:
+            return False
+        low, high = min(low, self.low), max(high, self.high)
+        if (low, high) == (self.low, self.high) and self.starts.issuperset(executed):
+            space, owner, recheck = self.space, self.owner, ()
+        else:   # more of the program ran: every member must hold over the larger walk
+            space, owner = self._walk(self.members[0], low, high, self.starts | set(executed))
+            recheck = self.members[1:]
+        if self._alike(space, owner, snapshot[low:high]) is None or any(
+                self._alike(space, owner, member[low:high]) is None for member in recheck):
+            return False
+        self.members.append(snapshot)
+        self.low, self.high, self.space, self.owner = low, high, space, owner
+        self.starts.update(executed)
+        self.edges.update(edges)
+        return True
+
+    def finish(self, rom):
+        """The family's space: walked from every start a variant ran."""
+        contents = {}
+        for member in self.members:
+            contents.setdefault(bytes(member[self.low:self.high]), 0)
+        chosen, found = next(iter(contents)), None
+        for data in contents:
+            at = rom.find(data)
+            if at >= 0 and rom.find(data, at + 1) < 0:
+                chosen, found = data, at
+                break
+        base = self.origin + self.low
+        space = Space("%s-ram-%06X-%s" % (self.cpu, base, sha256(chosen)[:12]),
+                      self.cpu, "ram", base, chosen)
+        ran = {self.origin + offset for offset in self.starts}
+        space.walk(sorted(ran, reverse=True), "traced")
+        _downgrade_untraced(space, ran)
+        for source, target in sorted(self.edges):
+            if source in space.unresolved:
+                space.unresolved[source].add(target)
+                if space.contains(target):
+                    space.add_entry(target, "computed", "traced")
+        space.source_rom_offset = found
+        space.occurrences = len(self.members)
+        space.variant_sha256 = sorted(sha256(data) for data in contents)
+        space.patched = sorted({index for data in contents
+                                for index, (mine, theirs) in enumerate(zip(chosen, data))
+                                if mine != theirs})
+        return space
 
 
 class _Ram:
@@ -355,33 +487,12 @@ def build(rom, evidence_sets=()):
         rom_space.mark(address, width, READ)
 
     spaces = [rom_space]
-    by_identity = {}
     for cpu, ram in rams.items():
-        for snapshot, executed, edges in ram.closed:
-            # the generation's extent is what ran: first executed byte to last
-            low = min(executed)
-            high = max(offset + length for offset, length in executed.items())
-            data = snapshot[low:high]
-            base = ram.origin + low
-            identity = (cpu, base, sha256(data))
-            if identity in by_identity:
-                by_identity[identity].occurrences += 1
-                continue
-            name = "%s-ram-%06X-%s" % (cpu, base, identity[2][:12])
-            space = Space(name, cpu, "ram", base, data)
-            ran = {ram.origin + offset for offset in executed}
-            space.walk(sorted(ran, reverse=True), "traced")
-            _downgrade_untraced(space, ran)
-            for source, target in sorted(edges):
-                if source in space.unresolved:
-                    space.unresolved[source].add(target)
-                    if space.contains(target):
-                        space.add_entry(target, "computed", "traced")
-            found = rom.find(data)
-            if found >= 0 and rom.find(data, found + 1) < 0:
-                space.source_rom_offset = found
-            by_identity[identity] = space
-            spaces.append(space)
+        families = []
+        for generation in ram.closed:
+            if not any(family.admit(generation) for family in families):
+                families.append(_Family(cpu, ram.origin, generation))
+        spaces.extend(family.finish(rom) for family in families)
     return spaces
 
 

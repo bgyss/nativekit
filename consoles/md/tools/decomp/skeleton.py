@@ -58,6 +58,10 @@ def emit(space, verified, includes=(), raw_only=False):
     lines = ["%s space %s: %s, %d bytes at $%X, sha256 %s"
              % (comment, space.id, space.cpu, len(space.data), space.base, space.sha256()),
              "\torg\t$%X" % space.base]
+    patched = set(space.patched)
+    if patched:
+        lines.insert(1, "%s one of %d variants; %d operand bytes are rewritten at run time"
+                     % (comment, len(space.variant_sha256), len(patched)))
     states = ["baserom"] * len(space.data)
     conflicted = space.conflicted_bytes()
     include_at = {offset: (length, name) for offset, length, name in includes}
@@ -97,7 +101,9 @@ def emit(space, verified, includes=(), raw_only=False):
             if address in space.entries:
                 lines.append("loc_%06X:" % address)
             if reason is None:
-                lines.append("\t" + record["text"])
+                lines.append("\t" + record["text"] + (
+                    "\t%s operand rewritten at run time" % comment
+                    if patched.intersection(range(offset, offset + record["length"])) else ""))
                 state = "code"
             else:
                 raw(offset, record["length"], "raw code: " + reason)

@@ -59,15 +59,28 @@ to an author-published archive remains unverified (`tools/toolchains/README.md`)
 
 A **space** is bytes one CPU executes from: the ROM image (file offset *n* is
 68000 address *n* in the base cartridge map; offsets and CPU addresses are
-separate fields everywhere) or one **generation** of a RAM program, identified
-by CPU, load address and the SHA-256 of its bytes. Generations are rebuilt by
-replaying a capture's bus writes: a write that changes a byte of code the
-current generation executed closes it, and the next executed instruction opens
-another. Its extent is the first to the last executed byte. Two generations
-merge only when address and bytes are both equal, so data bytes inside the
-extent that differ make two identities (a false split, never a false merge).
-A generation whose bytes occur exactly once in the ROM records that
-`source_rom_offset`; otherwise it has none (generated, patched or decompressed).
+separate fields everywhere) or one RAM **program**. Generations of RAM code
+are rebuilt by replaying a capture's bus writes: a write that changes a byte
+of code the current generation executed closes it, and the next executed
+instruction opens another. A generation's extent is the first to the last
+executed byte.
+
+Two generations are the same program, one **family**, only when their extents
+overlap and, over the union of the extents, every byte that differs lies in an
+instruction that both decode to the same length, flow, transfer targets and
+text apart from its numeric literals. So a program whose immediate operands
+another CPU rewrites, or of which one run reached further than another, is one
+space with **variants**. A differing opcode, register, branch target or byte
+outside any instruction keeps generations apart (data bytes inside the extent
+that differ still make a false split, never a false merge). A generation is
+tried against the families in the order they first ran and joins the first
+that takes it. The space holds one variant's bytes (the one occurring exactly
+once in the ROM when there is one, recorded as `source_rom_offset`; otherwise
+the first to run), is named by CPU, load address and that variant's SHA-256,
+and lists every variant's SHA-256 (`variant_sha256`), the byte runs that vary
+(`patched`) and the number of generations (`occurrences`). Its instruction
+evidence is the union of what its variants ran. The census adds `variants` and
+`patched_operand_bytes`; the skeleton marks each rewritten instruction.
 
 Per-byte class: `opcode`, `operand`, `structure` (vector table, header), `read`
 (a traced CPU data read; a checksum loop reads unexecuted code too, so this is
@@ -100,8 +113,11 @@ rebuilt identically; every other entry has no tier.
 
 ## Evidence
 
-`mise run test:md-decomp` (exit 0, 165 s) now also runs
-`m68k_decoder_check.py`, `z80_decoder_check.py` and `census_check.py`. The
+`mise run test:md-decomp` (exit 0, 180 s) now also runs
+`m68k_decoder_check.py`, `z80_decoder_check.py`, `census_check.py` and
+`identity_check.py` (an authored cartridge whose 68000 rewrites a Z80
+immediate, then an opcode: the first is merged as a variant, the second kept
+apart; five refusals of the rule on bytes; two planted rule errors). The
 census control captures an authored cartridge on the pinned reference core
 (dead code, a three-entry computed call table with one entry taken, a
 vector-only handler, decoy bytes, and two different Z80 programs uploaded to
@@ -131,7 +147,7 @@ Evidence: two complete captures on the pinned reference core (region U, model
   pad inputs from frame 420; scenario SHA-256 `4a434d8b…d4d690`; 61,716,550
   events (8,991,561 68000 and 4,843,565 Z80 instructions), 20.6 GB, 939 s;
   caps 64 GiB and 3,000 s. It needs the core with patch 0003 (below). Its
-  intake took about 56 minutes by file timestamps and wrote a 452 MB code map.
+  intake took 1,111 s with a 1.2 GB peak.
 
 | Result | 250 frames | 900 frames |
 |---|---|---|
@@ -144,7 +160,7 @@ Evidence: two complete captures on the pinned reference core (region U, model
 | Computed transfers in ROM | 14, of which 9 have no observed target | 14, of which 5 have none |
 | Conflicts, undecodable entries | 0, 0 | 0, 0 |
 | Orphan candidates | 18 | 19 |
-| Z80 RAM program identities | 506, all at `$0000`; no 68000 RAM code ran | 30,121, all at `$0000`; none on the 68000 |
+| Z80 RAM programs | 3, all at `$0000` (one with 504 variants over 4 rewritten bytes); no 68000 RAM code ran | 3, all at `$0000` (one with 34,776 variants in 45,193 generations over 12 rewritten bytes); none on the 68000 |
 
 Findings, none of them fixed here:
 
@@ -164,15 +180,15 @@ Findings, none of them fixed here:
   only ever delays the Z80; `bank_stall_check.py` is its authored control.
   This is a deliberate timing difference from upstream, and which of the two
   real hardware matches is not verified.
-- **30,118 of the 30,121 Z80 identities share five lengths** (254, 240, 227,
-  209 and 241 bytes: 14,591, 6,765, 4,415, 2,821 and 1,524 identities). At 250
-  frames the 254-byte one was checked to be a single program whose two 16-bit
-  immediate operands the 68000 rewrites between runs; the other four lengths
-  are not yet checked the same way. Each rewrite is a new generation by the
-  "address and bytes" rule, so the catalog holds 30,171 Z80 T1 entries for
-  what is probably five routines, and the skeleton holds 30,121 program
-  files. Identities need an operand-patch notion before the catalog count
-  means routines, and before a longer capture is worth its intake time.
+- **The Z80 runs three programs, one of them in 34,776 variants.** Before the
+  family rule the 900-frame census held 30,121 Z80 identities, 30,118 of them
+  in five lengths (254, 240, 227, 209 and 241 bytes), and 30,171 Z80 T1
+  entries. They are one 303-byte program with a verbatim ROM source: the
+  68000 rewrites six 16-bit immediates in it (12 bytes; two of the six within
+  the first 250 frames), and its runs ended at five different last
+  instructions. The census now holds 3 Z80 programs and 3 Z80 T1 entries;
+  the 900-frame intake fell from about 56 minutes to 1,111 s (1.2 GB peak) and
+  its code map from 452 MB to 3 MB. ROM counts are unchanged.
 - **Every non-code ROM byte is `read`** because the boot checksum reads the
   whole image; the class separates nothing for this title.
 - One 40-byte Z80 generation has 4 traced bytes, 36 unknown and no ROM source.
@@ -181,7 +197,9 @@ Findings, none of them fixed here:
 
 - Confirming what the 900-frame scenario reached, and any capture past it.
 - Checking patch 0003's bank-wait timing against hardware.
-- Collapsing operand-patched generations of one program into one identity.
+- Generations that differ in data bytes inside their extent are still split;
+  no title or control has needed that yet.
+- What the rewritten operands are (they are listed by offset, not interpreted).
 - Compressed program sources are not reconstructed, only identified as absent.
 - No static discovery of jump tables; computed targets come from traces only.
 - 68000 RAM generations are implemented but exercised only by D01's fixture

@@ -32,6 +32,8 @@ CHECKS = (
      "consoles/md/tests/decomp/z80_decoder_check.py"),
     ("intake code map, rebuild gate, census and planted errors",
      "consoles/md/tests/decomp/census_check.py"),
+    ("operand-patched RAM programs as one identity with variants",
+     "consoles/md/tests/decomp/identity_check.py"),
 )
 
 

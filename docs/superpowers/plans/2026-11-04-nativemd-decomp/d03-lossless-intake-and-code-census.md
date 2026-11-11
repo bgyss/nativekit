@@ -62,7 +62,7 @@ ignored `build/decomp/md-f68818ae1a61/` and only hashes and counts are tracked.
 | Changed instruction, data byte, placement or source-ROM identity fails its gate | Met (seven planted errors). |
 
 Artifacts: `consoles/md/tools/decomp/{m68k_dis,z80_dis,asmverify,codemap,skeleton,intake}.py`,
-`consoles/md/tests/decomp/{m68k_decoder_check,z80_decoder_check,census_fixture,census_check}.py`,
+`consoles/md/tests/decomp/{m68k_decoder_check,z80_decoder_check,census_fixture,census_check,identity_check}.py`,
 [intake.md](../../../../consoles/md/docs/decomp/intake.md) (schemas, credit
 rules, decoder control counts and limits).
 
@@ -74,11 +74,11 @@ workspace's `WORKSPACE.md`.
 Open, in [intake.md](../../../../consoles/md/docs/decomp/intake.md#first-title):
 the 900-frame capture added only 740 decoded ROM bytes and what its blind
 inputs reached is unconfirmed; it completes only with reference-core patch
-0003, whose Z80 bank-wait timing is unverified against hardware; Z80 programs
-whose operands the 68000 patches are counted as 30,118 identities; uploaded or
+0003, whose Z80 bank-wait timing is unverified against hardware; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item
 5); the skeleton lives in the ignored workspace because no game repository is
-bound. D06 needs the first two closed.
+bound. Operand-patched Z80 generations are now one program with variants
+(30,121 identities became 3). D06 needs the first item closed.
 
 ## Copy-ready goal prompt
 

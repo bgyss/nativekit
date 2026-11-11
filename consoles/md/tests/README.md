@@ -41,6 +41,8 @@ The same task runs the D03 intake gates: both decoders swept against the
 pinned vasm, and an authored cartridge captured on the candidate core, mapped,
 rebuilt byte-identically and attacked with planted errors. Counts, schemas and
 limits are in [`decomp/intake.md`](../docs/decomp/intake.md).
+`decomp/identity_check.py` holds the RAM program family rule: a rewritten
+immediate is a variant, a rewritten opcode is another program.
 `decomp/bank_stall_check.py` captures an authored cartridge whose Z80 reads
 its bank window while the 68000 repeats short VDP DMA stalls; it was observed
 failing ("core reported an NMDT trace error") on the core without patch 0003.

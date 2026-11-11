@@ -47,6 +47,8 @@ def census(rom, spaces, states, manifest, rebuilt):
             "source_rom_offset": space.source_rom_offset,
             "included_in_image": bool(program and program["included_in_image"]),
             "occurrences": space.occurrences,
+            "variants": len(space.variant_sha256),
+            "patched_operand_bytes": len(space.patched),
             "class_bytes": classes,
             "instruction_bytes_by_evidence": by_evidence,
             "decoded_code_bytes": decoded if rebuilt else dict.fromkeys(decoded, 0),
@@ -125,6 +127,9 @@ def summary(counts):
                 decoded["static"], space["raw_code_bytes"], space["class_bytes"]["structure"],
                 space["class_bytes"]["read"], space["unknown_bytes"], space["entries"],
                 space["unresolved_indirect"], space["conflicts"], space["orphan_candidates"]))
+        if space.get("variants", 1) > 1:
+            lines[-1] += "; %d variants over %d generations, %d operand bytes rewritten" % (
+                space["variants"], space["occurrences"], space["patched_operand_bytes"])
     if counts["mode"] != "decoded skeleton":
         lines.append("  raw preservation only: no recovered-code credit")
     return "\n".join(lines)
