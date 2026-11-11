@@ -164,12 +164,24 @@ Evidence: two complete captures on the pinned reference core (region U, model
 
 Findings, none of them fixed here:
 
-- **Fifteen seconds found little new code.** The 900-frame run decodes 20,308
-  of 524,288 ROM bytes against 19,568 at 250 frames: 740 more. Most of what it
-  traced was already reached statically. Whether the inputs reached gameplay
-  is unknown: the runner shows no picture, and the scenario was written blind.
-  Either the title's code is small and the rest is data, or the run stayed in
-  the title and demonstration screens. The census cannot tell these apart.
+- **Fifteen seconds found little new code, and about 100 of its frames were
+  play.** The 900-frame run decodes 20,308 of 524,288 ROM bytes against
+  19,568 at 250 frames: 740 more. Most of what it traced was already reached
+  statically. The scenario was written blind; its picture was checked
+  afterwards (2026-11-11) by running the same inputs through
+  `consoles/md/tests/oracle/run.py`, which writes every frame. The 900 frames
+  it wrote hash, as XRGB rows, to the capture's `video_sha256`
+  (`a4b7a934…341fe`), so they are the capture's picture. They show: black
+  until frame 64; the publisher logo to 182; the title animation from 198;
+  the START/OPTION menu after the press at 240; the game started by the press
+  at 300; the first stage's opening sequence from about frame 308 to 799; and
+  first-stage play, with the score rising, from about frame 800 to 900. The
+  presses at 360, 480 and 600 paused the game and those at 420, 540 and 660
+  resumed it, so 180 frames show a still paused picture. The capture
+  therefore holds boot, logo, title, menu, one opening sequence, pause and
+  about 100 frames of one stage. It holds no options screen, demonstration,
+  later stage, loss of a life, game over or ending, and the census does not
+  say how much code those would add.
 - **The first 900-frame run failed in the reference core, since patched.** It
   ended `incomplete_core_error` near frame 258. BlastEm's Z80 bank-window
   handlers set the Z80 clock to the 68000's clock whenever the 68000 was
@@ -195,7 +207,10 @@ Findings, none of them fixed here:
 
 ## Not done
 
-- Confirming what the 900-frame scenario reached, and any capture past it.
+- Any capture past the first 100 frames of first-stage play: the options
+  screen, the demonstration, later stages, losing a life, game over and the
+  ending are untraced. A scenario should not press START after the game
+  starts, since each press pauses or resumes it.
 - Checking patch 0003's bank-wait timing against hardware.
 - Generations that differ in data bytes inside their extent are still split;
   no title or control has needed that yet.

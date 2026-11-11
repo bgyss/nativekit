@@ -1,6 +1,6 @@
 # nativemd ROM-to-decomp milestones
 
-**Current status: D00 complete; D01 complete; D02 complete; D03 acceptance gates met (first title rebuilds byte-identically; its traced evidence covers 900 frames of unconfirmed content and its findings are open); D04-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. D02 completion covers the opt-in native execution path (contract 1.1.0) against authored synthetic controls only; no native run has been compared with the reference or made with a retail title. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
+**Current status: D00 complete; D01 complete; D02 complete; D03 acceptance gates met (first title rebuilds byte-identically; its traced evidence covers 900 frames that end in about 100 frames of first-stage play, and its findings are open); D04-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. D02 completion covers the opt-in native execution path (contract 1.1.0) against authored synthetic controls only; no native run has been compared with the reference or made with a retail title. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
 
 ## What must be added
 

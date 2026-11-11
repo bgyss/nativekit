@@ -1,6 +1,6 @@
 # D03: Recover code identities and a lossless assembly skeleton
 
-**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence covers 900 frames of unconfirmed content, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence covers 900 frames that end in about 100 frames of first-stage play, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -72,13 +72,16 @@ frames, complete) and `intake.py intake|rebuild`, exit 0, exact lines in the
 workspace's `WORKSPACE.md`.
 
 Open, in [intake.md](../../../../consoles/md/docs/decomp/intake.md#first-title):
-the 900-frame capture added only 740 decoded ROM bytes and what its blind
-inputs reached is unconfirmed; it completes only with reference-core patch
+the 900-frame capture added only 740 decoded ROM bytes; its frames, checked
+2026-11-11 against the capture's video hash, show it reached first-stage play
+for about its last 100 frames and spent 180 paused, so everything past that is
+untraced; it completes only with reference-core patch
 0003, whose Z80 bank-wait timing is unverified against hardware; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item
 5); the skeleton lives in the ignored workspace because no game repository is
 bound. Operand-patched Z80 generations are now one program with variants
-(30,121 identities became 3). D06 needs the first item closed.
+(30,121 identities became 3). D06 needs traced
+evidence past those 100 frames.
 
 ## Copy-ready goal prompt
 
