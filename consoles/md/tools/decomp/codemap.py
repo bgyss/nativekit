@@ -207,7 +207,7 @@ class _Ram:
         self.bytes = bytearray(size)
         self.code = bytearray(size)   # 1 where the open generation executed
         self.executed = {}            # offset -> length, the open generation
-        self.edges = []               # (from, to) flow edges seen in it
+        self.edges = set()            # (from, to) flow edges seen in it
         self.closed = []              # (snapshot, executed, edges)
 
     def write(self, address, value):
@@ -232,7 +232,7 @@ class _Ram:
         if self.executed:
             self.closed.append((bytes(self.bytes), self.executed, self.edges))
             self.executed = {}
-            self.edges = []
+            self.edges = set()
             self.code = bytearray(self.size)
 
 
@@ -251,14 +251,29 @@ def load_evidence(capture_directory, rom_sha256):
         raise CodeMapError("capture was made from a different ROM")
     if manifest.get("status") != "complete":
         raise CodeMapError("capture is not complete: %r" % manifest.get("status"))
-    try:
-        events = [event for event in nmdh_trace.read_nmdh(directory / "capture.nmdh")
-                  if event["kind"] in (1, 2, 3)]
-    except (OSError, nmdh_trace.NMDHError) as exc:
-        raise CodeMapError("capture unreadable: %s" % exc)
-    if not any(event["kind"] == 1 for event in events):
-        raise CodeMapError("capture holds no instruction events")
-    return events
+    return _Evidence(directory / "capture.nmdh")
+
+
+class _Evidence:
+    """One capture's instruction, flow and bus events, read from the file on
+    each pass so a capture never has to fit in memory. The file is fully
+    validated before its first event is yielded."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def __iter__(self):
+        import trace as nmdh_trace
+        instructions = 0
+        try:
+            for event in nmdh_trace.read_nmdh(self.path):
+                if event["kind"] in (1, 2, 3):
+                    instructions += event["kind"] == 1
+                    yield event
+        except (OSError, nmdh_trace.NMDHError) as exc:
+            raise CodeMapError("capture unreadable: %s" % exc)
+        if not instructions:
+            raise CodeMapError("capture holds no instruction events")
 
 
 def build(rom, evidence_sets=()):
@@ -271,9 +286,9 @@ def build(rom, evidence_sets=()):
     if rom[0x100:0x104] == b"SEGA":
         rom_space.mark(0x100, 0x100, STRUCTURE)
     rams = {"m68k": _Ram("m68k", WORK_RAM_SIZE, 0xFF0000), "z80": _Ram("z80", Z80_RAM_SIZE, 0)}
-    traced_rom = []
-    rom_edges = []
-    reads = []
+    traced_rom = set()
+    rom_edges = set()
+    reads = set()
 
     for events in evidence_sets:
         for ram in rams.values():   # a new trace starts from power-on
@@ -286,7 +301,7 @@ def build(rom, evidence_sets=()):
                 if cpu == "m68k":
                     pc &= 0xFFFFFF
                     if pc < len(rom):
-                        traced_rom.append(pc)
+                        traced_rom.add(pc)
                     elif pc >= 0xE00000:
                         rams["m68k"].execute(pc)
                 elif pc < Z80_RAM_SIZE:
@@ -294,11 +309,11 @@ def build(rom, evidence_sets=()):
             elif event["kind"] == 2:
                 edge = (event["payload"]["previous_pc"], event["payload"]["current_pc"])
                 if cpu == "m68k" and (edge[0] & 0xFFFFFF) < len(rom):
-                    rom_edges.append((edge[0] & 0xFFFFFF, edge[1] & 0xFFFFFF))
+                    rom_edges.add((edge[0] & 0xFFFFFF, edge[1] & 0xFFFFFF))
                 elif cpu == "m68k":
-                    rams["m68k"].edges.append((edge[0] | 0xFF0000, edge[1] & 0xFFFFFF))
+                    rams["m68k"].edges.add((edge[0] | 0xFF0000, edge[1] & 0xFFFFFF))
                 else:
-                    rams["z80"].edges.append(edge)
+                    rams["z80"].edges.add(edge)
             else:
                 payload = event["payload"]
                 address, width = payload["address"], payload["width"]
@@ -315,13 +330,13 @@ def build(rom, evidence_sets=()):
                             rams["m68k"].write(target & 0xFFFF, value)
                 elif cpu == "m68k" and payload["provenance"] != 1 and \
                         (address & 0xFFFFFF) < len(rom):
-                    reads.append((address & 0xFFFFFF, width))
+                    reads.add((address & 0xFFFFFF, width))
         for ram in rams.values():
             ram.close()
 
     # the ROM: traced code first, then vectors, each followed statically
-    rom_space.walk(sorted(set(traced_rom), reverse=True), "traced")
-    _downgrade_untraced(rom_space, set(traced_rom))
+    rom_space.walk(sorted(traced_rom, reverse=True), "traced")
+    _downgrade_untraced(rom_space, traced_rom)
     reset = int.from_bytes(rom[4:8], "big") & 0xFFFFFF
     rom_space.add_entry(reset, "reset", "vector")
     vectors = [reset]
@@ -331,12 +346,12 @@ def build(rom, evidence_sets=()):
             rom_space.add_entry(target, "vector", "vector")
             vectors.append(target)
     rom_space.walk(vectors, "vector")
-    for source, target in rom_edges:
+    for source, target in sorted(rom_edges):
         if source in rom_space.unresolved:
             rom_space.unresolved[source].add(target)
             if rom_space.contains(target):
                 rom_space.add_entry(target, "computed", "traced")
-    for address, width in reads:
+    for address, width in sorted(reads):
         rom_space.mark(address, width, READ)
 
     spaces = [rom_space]
@@ -357,7 +372,7 @@ def build(rom, evidence_sets=()):
             ran = {ram.origin + offset for offset in executed}
             space.walk(sorted(ran, reverse=True), "traced")
             _downgrade_untraced(space, ran)
-            for source, target in edges:
+            for source, target in sorted(edges):
                 if source in space.unresolved:
                     space.unresolved[source].add(target)
                     if space.contains(target):
