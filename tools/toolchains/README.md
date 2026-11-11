@@ -27,6 +27,15 @@ successful build does not qualify it as the timing or fidelity oracle; see
 [`nativemd-oracle-spike.md`](../../docs/research/nativemd-oracle-spike.md).
 The new tool checkouts refuse a revision change when local work is present.
 
+Two patches add trace and decomp hooks. The third,
+`0003-z80-bank-wait-never-rewinds.patch`, changes emulated timing and is a
+deliberate deviation from the pinned upstream: when the Z80 accesses its bank
+window while the 68000 is stalled on a VDP access, upstream sets the Z80 clock
+to the 68000's clock even if the Z80 is already ahead, moving it back in time;
+the patch only ever delays it. Whether hardware agrees with either is
+unverified. No output of the 59 synthetic reference cases changed.
+`consoles/md/tests/decomp/bank_stall_check.py` fails on the unpatched core.
+
 `mise run test:md-oracle-smoke` exercises the exploratory runner with generated
 cartridges. After `mise run tools:md`, `--trace` requires the candidate trace
 ABI and writes `bus.trace`. The current patch advertises M68K and Z80 CPU
