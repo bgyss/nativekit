@@ -1,6 +1,6 @@
 # D03: Recover code identities and a lossless assembly skeleton
 
-**Status:** Partial 2026-11-10: shared tooling and synthetic controls done ([results](#results)); the first title's intake, census and rebuild have not run. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence covers 250 frames only, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -47,15 +47,17 @@ Do not count unknown bytes as code or data by guess, claim all ISA encodings fro
 
 ## Results
 
-Partial, 2026-11-10, branch `nativemd`, by the
+2026-11-10, branch `nativemd`, by the
 [implementation plan](../2026-11-10-nmd-decomp-d03-implementation.md). Tools:
-vasm and BlastEm at the pins in `tools/toolchains/pins.env`. No ROM input was
-used; every fixture is authored and assembled at test time.
+vasm and BlastEm at the pins in `tools/toolchains/pins.env`. Checks use
+authored fixtures assembled at test time. The first title's ROM (SHA-256
+`f68818ae…f334`) was read from a path given at runtime; its outputs are under
+ignored `build/decomp/md-f68818ae1a61/` and only hashes and counts are tracked.
 
 | Acceptance line | State |
 |---|---|
-| Full original image rebuilds with identical length, SHA-256, zero differing bytes | **Unmet for the first title** (not run). Met for the authored control images. |
-| All-incbin rebuild labelled raw preservation; decoded and unknown bytes reported separately | Met in tooling (`--raw`, `census.json`), on controls. |
+| Full original image rebuilds with identical length, SHA-256, zero differing bytes | Met for the first title (524,288 bytes, 0 differing) and the authored control images. |
+| All-incbin rebuild labelled raw preservation; decoded and unknown bytes reported separately | Met in tooling (`--raw`, `census.json`), on controls; the first title's census reports 19,568 decoded and 20 raw code bytes. |
 | Synthetic dead code, computed targets, two programs at one RAM address without false merges | Met (`census_check.py`). |
 | Changed instruction, data byte, placement or source-ROM identity fails its gate | Met (seven planted errors). |
 
@@ -64,13 +66,18 @@ Artifacts: `consoles/md/tools/decomp/{m68k_dis,z80_dis,asmverify,codemap,skeleto
 [intake.md](../../../../consoles/md/docs/decomp/intake.md) (schemas, credit
 rules, decoder control counts and limits).
 
-Command run: `mise run test:md-decomp`, exit 0 (all D01 gates plus the three
-new ones).
+Commands run: `mise run test:md-decomp`, exit 0 (all D01 gates plus the three
+new ones); for the first title, `run.py --mode estimate|capture` (250 frames,
+complete) and `intake.py intake|rebuild`, exit 0, exact lines in the
+workspace's `WORKSPACE.md`.
 
-First unmet gate: the first title's intake. It needs the user's ROM path at
-runtime (SHA-256 `f68818ae…f334`) and the private workspace
-`build/decomp/md-f68818ae1a61/`, neither of which is in this checkout. Other
-open items are listed under "Not done" in intake.md.
+Open, in [intake.md](../../../../consoles/md/docs/decomp/intake.md#first-title):
+a 900-frame capture failed in the reference core's NMDT stream near frame 258,
+so traced evidence ends at frame 250 and covers boot only; one Z80 program
+whose operands the 68000 patches is counted as 503 identities; uploaded or
+compressed programs without a verbatim source are not reconstructed (work item
+5); the skeleton lives in the ignored workspace because no game repository is
+bound. D06 needs the first two closed.
 
 ## Copy-ready goal prompt
 

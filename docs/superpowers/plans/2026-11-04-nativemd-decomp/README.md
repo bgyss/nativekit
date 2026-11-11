@@ -1,6 +1,6 @@
 # nativemd ROM-to-decomp milestones
 
-**Current status: D00 complete; D01 complete; D02 complete; D03 partial (shared synthetic tooling only; the first title's intake has not run); D04-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. D02 completion covers the opt-in native execution path (contract 1.1.0) against authored synthetic controls only; no native run has been compared with the reference or made with a retail title. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
+**Current status: D00 complete; D01 complete; D02 complete; D03 acceptance gates met (first title rebuilds byte-identically; its traced evidence covers 250 frames and its findings are open); D04-D12 unstarted.** D01 completion covers the pinned candidate tooling and authored synthetic acceptance gates; it does not qualify retail-title behavior or hardware accuracy. D02 completion covers the opt-in native execution path (contract 1.1.0) against authored synthetic controls only; no native run has been compared with the reference or made with a retail title. This suite was written 2026-11-04 from a source review of nativekit `21525cc`; at authoring time, no retail-ROM run or verification gate had been executed.
 
 ## What must be added
 
@@ -32,7 +32,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 | [D00](d00-baseline-and-first-title.md) | Establish the SNES parity target and select the first title | None. Shared preparation can proceed without a commercial ROM | complete |
 | [D01](d01-reference-execution-hooks.md) | Build the decomp verification ABI for both reference CPUs | D00 workflow and baseline inventory | complete |
 | [D02](d02-native-reset-and-execution.md) | Make the native game reset and execution path real | D00 contract inventory | complete |
-| [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | partial |
+| [D03](d03-lossless-intake-and-code-census.md) | Recover code identities and a lossless assembly skeleton | D01 execution/provenance hooks | gates met; findings open |
 | [D04](d04-per-routine-c-verification.md) | Verify C routines against original execution on both CPUs | D01 hooks, D03 shared catalog/decoder controls | unstarted |
 | [D05](d05-whole-image-lockstep.md) | Verify combined C substitution under concurrent hardware execution | D01, D04 | unstarted |
 | [D06](d06-first-native-playable-slice.md) | Deliver the first game slice through the actual native launch path | D00 selected title, D02 execution path, D03 title skeleton, D04 and D05 verified checking infrastructure. | unstarted |
@@ -98,4 +98,4 @@ At a platform release boundary, run `mise run build`, `mise run test`, `mise run
 
 ## How to start
 
-Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00-D02 are complete, D03 is partial and D04-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.
+Use [GOAL.md](GOAL.md) for the complete objective, or paste one milestone's final prompt to run only that milestone. D00-D02 are complete, D03 has met its acceptance gates with open findings and D04-D12 are unstarted. The first-title hash is bound; a separate maintained game repository has not been supplied or authorized, so private generated work remains under ignored `build/decomp/<game-id>/`.

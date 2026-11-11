@@ -2,8 +2,8 @@
 
 The shared tooling that turns a Mega Drive image and reference captures into
 an auditable byte map and an assembly skeleton that rebuilds the image
-exactly. It is held by authored synthetic cartridges only; **no retail image
-has been run through it**, so D03 is partial.
+exactly. Its gates are held by authored synthetic cartridges; the first title
+has been run through it once, with the [results and findings below](#first-title).
 
 ## Commands
 
@@ -100,7 +100,7 @@ rebuilt identically; every other entry has no tier.
 
 ## Evidence
 
-`mise run test:md-decomp` (exit 0, 153 s) now also runs
+`mise run test:md-decomp` (exit 0, 165 s) now also runs
 `m68k_decoder_check.py`, `z80_decoder_check.py` and `census_check.py`. The
 census control captures an authored cartridge on the pinned reference core
 (dead code, a three-entry computed call table with one entry taken, a
@@ -114,12 +114,60 @@ placement, different source ROM, capture of a different ROM, missing capture).
 A second control with no trace holds an overlap conflict and a noncanonical
 instruction raw.
 
+## First title
+
+`md-f68818ae1a61`, SHA-256 `f68818ae1a616562e4c7dc77932bbc9f6bc4e42229f5b5d5796d4b2c2cc3f334`,
+524,288 bytes, run on 2026-11-10 with the ROM path given at runtime. All output
+is under ignored `build/decomp/md-f68818ae1a61/`, whose `WORKSPACE.md` holds
+the exact commands; nothing from the image is tracked.
+
+Evidence: one complete 250-frame capture on the pinned reference core (region
+U, model `md1va3`, two three-button pads, START on frames 180-187 and
+240-247; scenario SHA-256 `c70855a3…fa79e`; 16,202,726 events, 5.4 GB). Its
+caps were raised from the 256 MB default to 16 GiB and 560 s. The intake read
+it in 294 s with a 120 MB peak.
+
+| Result | Value |
+|---|---|
+| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture |
+| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static |
+| ROM code kept raw (noncanonical encoding) | 20 bytes |
+| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) |
+| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` |
+| ROM entries | 168: 71 traced (T1), 4 vector, 93 static |
+| Computed transfers in ROM | 14, of which 9 have no observed target |
+| Conflicts, undecodable entries | 0, 0 |
+| Orphan candidates | 18 |
+| Z80 RAM program identities | 506, all at `$0000`; no 68000 RAM code ran |
+
+Findings, none of them fixed here:
+
+- **This is one second of boot and about three seconds after it.** 19,568 of
+  524,288 bytes are decoded, and 72% of those only by static reach. The
+  census says nothing about the game's main code yet.
+- **A longer capture did not complete.** A 900-frame run ended
+  `incomplete_core_error`: the reference core's NMDT stream stopped near frame
+  258, about 17 frames after the first YM2612 write. The cause is not
+  diagnosed (the stream's per-device clock ordering rule is the suspect). The
+  intake refuses incomplete captures, so traced evidence currently ends at
+  frame 250.
+- **503 of the 506 Z80 identities are one 254-byte program** whose two 16-bit
+  immediate operands the 68000 rewrites between runs. Each rewrite is a new
+  generation by the "address and bytes" rule, so the catalog holds 503 T1
+  entries for one routine. The rule's false split is real at title scale;
+  identities need an operand-patch notion before the catalog count means
+  routines.
+- **Every non-code ROM byte is `read`** because the boot checksum reads the
+  whole image; the class separates nothing for this title.
+- One 40-byte Z80 generation has 4 traced bytes, 36 unknown and no ROM source.
+
 ## Not done
 
-- The first title: intake, captures, census and rebuild in its workspace. The
-  ROM and `build/decomp/md-f68818ae1a61/` are not in this checkout.
+- Diagnosing the reference core's NMDT failure, and any capture past frame 250.
+- Collapsing operand-patched generations of one program into one identity.
 - Compressed program sources are not reconstructed, only identified as absent.
 - No static discovery of jump tables; computed targets come from traces only.
 - 68000 RAM generations are implemented but exercised only by D01's fixture
   shape, not by a dedicated control here.
-- Captures are loaded whole into memory; a title-scale run needs streaming.
+- Captures are streamed from disk (one validation pass, one read pass), but an
+  event costs about 330 bytes on disk: 21.6 MB per frame for this title.

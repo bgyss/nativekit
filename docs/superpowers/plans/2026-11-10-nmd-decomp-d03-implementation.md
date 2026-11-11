@@ -12,7 +12,7 @@
 
 **Execution method:** Native single-session execution.
 
-**Outcome (2026-11-10):** Tasks 1-5 executed; Task 6 open. Deviations: the code map has no separate `codemap_check.py` (its controls are in `census_check.py`); `census.py` was folded into `intake.py`; checks were written with the code and rely on planted errors rather than observed red runs. Results are in the [milestone file](2026-11-04-nativemd-decomp/d03-lossless-intake-and-code-census.md#results).
+**Outcome (2026-11-10):** Tasks 1-6 executed; Task 6 needed evidence loading to stream from disk (`codemap._Evidence`) and stopped at a 250-frame capture. Deviations: the code map has no separate `codemap_check.py` (its controls are in `census_check.py`); `census.py` was folded into `intake.py`; checks were written with the code and rely on planted errors rather than observed red runs. Results are in the [milestone file](2026-11-04-nativemd-decomp/d03-lossless-intake-and-code-census.md#results).
 
 ## Refreshed Baseline
 
@@ -72,6 +72,6 @@
 
 - [x] Authored ROM with dead code, a computed jump table, and two different Z80 programs uploaded to the same RAM address; changed instruction, data byte, placement and ROM identity each fail their gate; wired into `mise run test:md-decomp`.
 
-### Task 6: First title (blocked on input)
+### Task 6: First title
 
-- [ ] Needs the user's ROM path at runtime and a decision on where the private workspace lives. Run intake, capture, census and rebuild under ignored `build/decomp/md-f68818ae1a61/`; publish hashes and counts only.
+- [x] Needs the user's ROM path at runtime and a decision on where the private workspace lives. Run intake, capture, census and rebuild under ignored `build/decomp/md-f68818ae1a61/`; publish hashes and counts only.
