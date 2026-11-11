@@ -1,6 +1,6 @@
 # D03: Recover code identities and a lossless assembly skeleton
 
-**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence covers 900 frames that end in about 100 frames of first-stage play, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence covers 3,000 frames, about 1,900 of them first-stage play and none past the first stage, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -57,7 +57,7 @@ ignored `build/decomp/md-f68818ae1a61/` and only hashes and counts are tracked.
 | Acceptance line | State |
 |---|---|
 | Full original image rebuilds with identical length, SHA-256, zero differing bytes | Met for the first title (524,288 bytes, 0 differing) and the authored control images. |
-| All-incbin rebuild labelled raw preservation; decoded and unknown bytes reported separately | Met in tooling (`--raw`, `census.json`), on controls; the first title's census reports 20,308 decoded and 20 raw code bytes at 900 frames. |
+| All-incbin rebuild labelled raw preservation; decoded and unknown bytes reported separately | Met in tooling (`--raw`, `census.json`), on controls; the first title's census reports 20,704 decoded and 20 raw code bytes at 3,000 frames. |
 | Synthetic dead code, computed targets, two programs at one RAM address without false merges | Met (`census_check.py`). |
 | Changed instruction, data byte, placement or source-ROM identity fails its gate | Met (seven planted errors). |
 
@@ -67,7 +67,7 @@ Artifacts: `consoles/md/tools/decomp/{m68k_dis,z80_dis,asmverify,codemap,skeleto
 rules, decoder control counts and limits).
 
 Commands run: `mise run test:md-decomp`, exit 0 (all D01 gates plus the three
-new ones); for the first title, `run.py --mode estimate|capture` (250 and 900
+new ones); for the first title, `run.py --mode estimate|capture` (250, 900 and 3,000
 frames, complete) and `intake.py intake|rebuild`, exit 0, exact lines in the
 workspace's `WORKSPACE.md`.
 
@@ -75,13 +75,16 @@ Open, in [intake.md](../../../../consoles/md/docs/decomp/intake.md#first-title):
 the 900-frame capture added only 740 decoded ROM bytes; its frames, checked
 2026-11-11 against the capture's video hash, show it reached first-stage play
 for about its last 100 frames and spent 180 paused, so everything past that is
-untraced; it completes only with reference-core patch
+untraced; a 3,000-frame capture (2026-11-11) written against the picture adds
+the options screen and about 1,900 frames of first-stage play and decodes
+20,704 ROM bytes, 396 more, so later stages, the demonstration, game over and
+the ending are where any further code is; the captures complete only with reference-core patch
 0003, whose Z80 bank-wait timing is unverified against hardware; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item
 5); the skeleton lives in the ignored workspace because no game repository is
 bound. Operand-patched Z80 generations are now one program with variants
-(30,121 identities became 3). D06 needs traced
-evidence past those 100 frames.
+(30,121 identities became 3). Whether D06 needs evidence
+past the first stage depends on the slice it declares.
 
 ## Copy-ready goal prompt
 
