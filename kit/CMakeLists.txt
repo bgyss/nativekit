@@ -39,11 +39,15 @@ add_library(nk_dispatch OBJECT ${NK_DIR}/src/dispatch/routines.c)
 # the front: the console's settings, the battery save, the headless script
 add_library(nk_front OBJECT ${NK_DIR}/src/front/env.c ${NK_DIR}/src/front/save.c ${NK_DIR}/src/front/script.c)
 
+if(NK_HOST STREQUAL "none" AND NOT WIN32)
+  target_sources(nk_front PRIVATE ${NK_DIR}/src/host/host_optional.c)
+endif()
+
 # the players' native devices (it reads the host's game controllers)
 add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 
 # the application: main's loop, the window, the pace, the sound out
-add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c)
+add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c ${NK_DIR}/src/front/backdrop.c)
 
 # the presentation backend (NK_RENDER). On Metal and GL its frameworks or
 # libraries are nk_render's link libraries, for the console's library to
@@ -113,6 +117,10 @@ if(_host_src)
   add_library(nk_host OBJECT ${_host_src})
   if(_host_objc)
     set_source_files_properties(${_host_objc} PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  endif()
+  if(NOT WIN32)
+    target_link_libraries(nk_host PUBLIC Threads::Threads)
+    set(NK_HOST_LIBRARIES Threads::Threads PARENT_SCOPE)
   endif()
   set(NK_HOST_TARGETS nk_host)
   set(NK_HOST_OBJECTS $<TARGET_OBJECTS:nk_host>)

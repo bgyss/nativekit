@@ -13,6 +13,7 @@
 #include "snes_internal.h"
 #include "nk/host.h"
 #include "snes_console.h"
+#include "watchdog.h"
 #include "nk/input.h"
 #include "snes_input.h"
 #if defined(NSHVC_RENDER_VULKAN)
@@ -33,28 +34,38 @@ const uint16_t *nshvc_vram(void) { return ppu_vram(); }
 const uint16_t *nshvc_cgram(void) { return ppu_cgram(); }
 const uint8_t *nshvc_oam(void) { return ppu_oam(); }
 uint8_t nshvc_peek(uint32_t addr) { return snes_peek(addr); }
-void nshvc_ext_screen(int width, int height) { ppu_ext_screen(width, height); }
-void nshvc_ext_screen_origin(int x, int y) { ppu_ext_screen_origin(x, y); }
-void nshvc_ext_sprite_x(int sprite, int on) { ppu_ext_sprite_x(sprite, on); }
-void nshvc_ext_sprite_y(int sprite, int on) { ppu_ext_sprite_y(sprite, on); }
-void nshvc_ext_sprite_page(int sprite, int x_page, int y_page) { ppu_ext_sprite_page(sprite, x_page, y_page); }
-void nshvc_ext_sprite_limits(int on) { ppu_ext_sprite_limits(on); }
-void nshvc_ext_sprite_wrap(int on) { ppu_ext_sprite_wrap(on); }
-void nshvc_ext_vram(int kb) { ppu_ext_vram(kb); }
-void nshvc_ext_vram_page(int page) { ppu_ext_vram_page(page); }
-void nshvc_ext_layer_page(int layer, int page) { ppu_ext_layer_page(layer, page); }
-void nshvc_ext_layer_clip(int layer, int on) { ppu_ext_layer_clip(layer, on); }
-void nshvc_ext_layer_outside(int layer, const uint16_t *map, int size) { ppu_ext_layer_outside(layer, map, size); }
-void nshvc_ext_vram_copy(int to_page, int from_page) { ppu_ext_vram_copy(to_page, from_page); }
-void nshvc_ext_vram_direct(int page) { ppu_ext_vram_direct(page); }
+void nshvc_ext_screen(int width, int height) { snes_ppu_catch_up(); ppu_ext_screen(width, height); }
+void nshvc_ext_screen_origin(int x, int y) { snes_ppu_catch_up(); ppu_ext_screen_origin(x, y); }
+void nshvc_ext_sprite_x(int sprite, int on) { snes_ppu_catch_up(); ppu_ext_sprite_x(sprite, on); }
+void nshvc_ext_sprite_y(int sprite, int on) { snes_ppu_catch_up(); ppu_ext_sprite_y(sprite, on); }
+void nshvc_ext_sprite_page(int sprite, int x_page, int y_page) { snes_ppu_catch_up(); ppu_ext_sprite_page(sprite, x_page, y_page); }
+void nshvc_ext_sprite_limits(int on) { snes_ppu_catch_up(); ppu_ext_sprite_limits(on); }
+void nshvc_ext_sprite_wrap(int on) { snes_ppu_catch_up(); ppu_ext_sprite_wrap(on); }
+void nshvc_ext_vram(int kb) { snes_ppu_catch_up(); ppu_ext_vram(kb); }
+void nshvc_ext_vram_page(int page) { snes_ppu_catch_up(); ppu_ext_vram_page(page); }
+void nshvc_ext_layer_page(int layer, int page) { snes_ppu_catch_up(); ppu_ext_layer_page(layer, page); }
+void nshvc_ext_layer_clip(int layer, int on) { snes_ppu_catch_up(); ppu_ext_layer_clip(layer, on); }
+void nshvc_ext_window_edges(int on) { snes_ppu_catch_up(); ppu_ext_window_edges(on); }
+void nshvc_ext_window_map(int on, int32_t scale_q16, int offset) { snes_ppu_catch_up(); ppu_ext_window_map(on, scale_q16, offset); }
+void nshvc_ext_window_columns(int window, int left, int right) { snes_ppu_catch_up(); ppu_ext_window_columns(window, left, right); }
+void nshvc_ext_layer_outside(int layer, const uint16_t *map, int size) { snes_ppu_catch_up(); ppu_ext_layer_outside(layer, map, size); }
+void nshvc_ext_vram_copy(int to_page, int from_page) { snes_ppu_catch_up(); ppu_ext_vram_copy(to_page, from_page); }
+void nshvc_ext_vram_direct(int page) { snes_ppu_catch_up(); ppu_ext_vram_direct(page); }
 int nshvc_ext_canvas_scale(void) { return ppu_canvas_scale(); }
 void nshvc_ext_canvas_chars(int layer, unsigned word_addr, int count, const uint8_t *texels, int k)
 {
+    snes_ppu_catch_up();
     ppu_ext_canvas_chars(layer, word_addr, count, texels, k);
 }
 void nshvc_ext_canvas_screen(int layer, const uint8_t *texels, int w, int h, int k, int priority, int palette)
 {
+    snes_ppu_catch_up();
     ppu_ext_canvas_screen(layer, texels, w, h, k, priority, palette);
+}
+void nshvc_ext_canvas_screen32(int layer, const uint32_t *texels, int w, int h, int k, int priority, int palette)
+{
+    snes_ppu_catch_up();
+    ppu_ext_canvas_screen32(layer, texels, w, h, k, priority, palette);
 }
 
 void nshvc_fatal(const char *fmt, ...)
@@ -77,6 +88,12 @@ const char *nshvc_save_dir(void) { return host_save_dir(); }
 void nshvc_safe_area(float *l, float *t, float *r, float *b) { host_safe_area(l, t, r, b); }
 
 void nshvc_window_size(float *w, float *h) { nk_window_size(w, h); }
+void nshvc_ext_text_input(int on) { host_text_input(on); }
+int nshvc_keyboard_attached(void) { return host_keyboard_attached(); }
+void nshvc_ext_pause(int on, float blur, uint32_t tint) { nk_pause(on, blur, tint); }
+int nshvc_ext_paused(void) { return nk_paused(); }
+void nshvc_overlay_update(int id, const uint32_t *argb) { nk_overlay_update(id, argb); }
+
 
 /* ---- the game's buttons and overlays ---- */
 static uint16_t game_buttons[8];
@@ -119,6 +136,11 @@ int snes_key(int vk, int down)
     return snes_input_key(vk, down);
 }
 
+int snes_pointer(float x, float y, int buttons)
+{
+    return hooks.pointer && hooks.pointer(x, y, buttons);
+}
+
 void snes_touch(int id, int phase, float x, float y)
 {
     if (hooks.touch) {
@@ -133,12 +155,18 @@ void snes_touch(int id, int phase, float x, float y)
 
 void snes_game_frame(void)
 {
+    snes_watchdog_frame();
     if (hooks.frame)
         hooks.frame();
 }
 
 int nshvc_main(const nshvc_cart *cart, int argc, char **argv)
 {
+    int i, headless = 0;
+    for (i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "--headless"))
+            headless = 1;
+    snes_watchdog_start(headless);
     /* the GPU backend's own SNES work, made when it opens (the software
        backend has none) */
 #if defined(NSHVC_RENDER_METAL)

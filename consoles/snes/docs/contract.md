@@ -1,8 +1,8 @@
-# The game contract, version 2.10
+# The game contract, version 2.19 (nativekit)
 
 This is what a decompiled game writes against and what nativeshvc promises in return.
 nativeshvc is a behaviour-exact implementation of the console, not an emulator. The
-contract is at 2.10: the console is behaviour exact, the game's C states no time, and each
+contract is at 2.19: the console is behaviour exact, the game's C states no time, and each
 access it makes costs what the console's bus takes for it, and its cost profile's weight
 (Changes, below). A
 game written to it plays on every later 2.x without a change.
@@ -148,6 +148,43 @@ The SPC700 takes no interrupts. The DSP, timers, ports and boot ROM are the cons
   gives the same machine.
 
 ## Changes
+
+- **2.19 (nativekit compatible sync):** imports the register-level upstream's
+  additive window, input, pause and canvas interfaces through 2.19, plus later
+  scheduling and sound fixes. This is a nativekit contract, not a claim that
+  every policy in upstream 2.19 or 3.0 was adopted; see
+  [upstream-sync.md](upstream-sync.md) for the imported revisions and differences.
+  - `nshvc_ext_window_edges`, `_window_map` and `_window_columns` extend window
+    masks onto larger screens; all are off by default.
+  - `nshvc_ext_text_input` and `nshvc_keyboard_attached` expose native keyboard
+    presence and iOS text entry. `nshvc_hooks.pointer`, appended to the hooks,
+    optionally consumes mouse events before console controller mapping.
+  - `nshvc_ext_key_for`, `_key_bind` and `_key_name` expose player 0's keyboard
+    layout. The original key map remains the default.
+  - `nshvc_overlay_update` replaces an existing overlay's pixels.
+    `nshvc_ext_pause` / `_paused` stop the machine between frames and silence
+    its output while input, overlays and the game's frame hook continue.
+    A CPU backdrop provides the same feature with software rendering.
+  - `nshvc_ext_canvas_screen32` supplies full-colour screen canvases, alongside
+    indexed texels. Screen canvases accept `k = 0` for arbitrary resolution;
+    `nshvc_ext_canvas_presented` reports the size of the presented screen.
+  - `nshvc_chip.direct_read`, `.direct_write`, `.next_change` and
+    `nshvc_cart_direct_changed` allow direct chip memory and deadline-directed
+    waits. The ordinary connector still works when the new fields are zero.
+    `nshvc_set_register_write_hook` observes register writes without disabling
+    direct access for the rest of memory.
+  - Hardware state catches up when observed; safe waits jump to the next
+    possible change, HDMA batches preserve per-line effects, automatic joypad
+    reads derive their bits from the clock, and boot-ROM/DSP work is batched
+    without dropping observable port, RAM or sample events.
+  - `NSHVC_PRESENT=1` explicitly presents every headless frame. Normal headless
+    runs retain the software picture and existing shot/comparison behavior.
+    `NSHVC_WATCHDOG=N` diagnoses a stalled application after N seconds without
+    a frame-hook heartbeat (30 by default, including headless; 0 disables it).
+    Low-level users supplying their own main loop own their stall detection.
+  - Existing aspect-fit presentation, software rendering, and SPC700 timing
+    when only S-CPU costs are disabled remain as before.
+
 
 - **2.10:** `nshvc_ext_layer_outside` takes maps 128 tiles wide: size 4 (128 x 32) and
   5 (128 x 64), rows of 128 entries, so a layer whose scroll wraps at 1,024 pixels wraps

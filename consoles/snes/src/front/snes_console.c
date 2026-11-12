@@ -165,5 +165,6 @@ const nk_console snes_console = {
     .key = snes_key, .touch = snes_touch, .input = snes_input, .frame = snes_game_frame,
     .regions = regions, .region_count = sizeof regions / sizeof regions[0],
     .battery = battery, .counts_hooks = counts_hooks, .access_kind = nshvc_access_kind,
+    .pointer = snes_pointer,
     .kind_count = NSHVC_KINDS, .kind_names = kind_names, .at_exit = snes_at_exit,
 };

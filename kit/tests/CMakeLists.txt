@@ -81,3 +81,16 @@ add_custom_target(kit-check
   DEPENDS kit_coro_check kit_fatal_check kit_routines_check kit_env_check kit_save_check kit_input_check
           kit_stub_console kit_render_check kit_kinds_check ${_loop_target}
   VERBATIM)
+
+if(NK_HOST STREQUAL "null" AND NK_RENDER STREQUAL "soft")
+  add_executable(kit_extensions_check extensions_check.c $<TARGET_OBJECTS:nk_app> $<TARGET_OBJECTS:nk_front>
+    $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_resample>)
+  target_link_libraries(kit_extensions_check PRIVATE ${NK_HOST_TARGETS} ${NK_RENDER_TARGETS})
+  target_include_directories(kit_extensions_check PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
+  set_target_properties(kit_extensions_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/kit/tests)
+  add_custom_target(kit-extensions-check
+    COMMAND $<TARGET_FILE:kit_extensions_check>
+    COMMAND $<TARGET_FILE:kit_extensions_check> --headless
+    DEPENDS kit_extensions_check)
+  add_dependencies(kit-check kit-extensions-check)
+endif()

@@ -32,6 +32,8 @@ target_sources(nmd PRIVATE
   $<TARGET_OBJECTS:nk_app>
   $<TARGET_OBJECTS:nk_render>)
 
+target_link_libraries(nmd PUBLIC ${NK_HOST_LIBRARIES})
+
 if(WIN32)
   target_link_libraries(nmd PUBLIC winmm ole32 uuid xinput9_1_0 shell32 gdi32 user32)
 elseif(APPLE)

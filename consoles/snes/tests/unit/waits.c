@@ -17,11 +17,13 @@
  *                      wait and a DMA still take theirs; with (1), the
  *                      bus's time and the weights again
  *   waits --offpoll    a loop polling a status bit with the costs off,
- *                      where no time passes: must stop the run (exit 70)
+ *                      where no time passes: the front end's watchdog
+ *                      (NSHVC_WATCHDOG=2 here) stops the run, naming $4212
+ *                      (exit 70, in about 3 seconds)
  *   waits --held       a wait with interrupts held: must stop the run
  *                      (exit 70)
  *   waits --heldpoll   a loop polling a status bit with interrupts held,
- *                      where no time passes: must stop the run (exit 70)
+ *                      where no time passes: as --offpoll
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,17 +63,17 @@ static uint64_t refreshes(uint64_t before, uint32_t before_lc, uint64_t after)
 /* an access, and the refreshes it passed */
 static uint64_t timed(uint32_t addr, int write)
 {
-    uint64_t b = snes_clock;
+    uint64_t b = snes_now();
     uint32_t lc = snes_line_clock();
     if (write)
         wr8(addr, 0);
     else
         rd8(addr);
-    return refreshes(b, lc, snes_clock);
+    return refreshes(b, lc, snes_now());
 }
 
 /* the line's start, the clock now less the line's clocks */
-static uint64_t line_start(void) { return snes_clock - snes_line_clock(); }
+static uint64_t line_start(void) { return snes_now() - snes_line_clock(); }
 
 /* ---- the conditions waited on ---- */
 static int hblank(void *ctx) { (void)ctx; return (rd8(0x004212) & 0x40) != 0; }
@@ -81,6 +83,15 @@ static int joy_busy(void *ctx) { (void)ctx; return (rd8(0x004212) & 0x01) != 0; 
 static int not_vblank(void *ctx) { (void)ctx; return !(rd8(0x004212) & 0x80); }
 static int flag_set(void *ctx) { return *(volatile int *)ctx != 0; }
 
+static int reg_seen;
+static uint32_t reg_last;
+static void reg_hook(uint32_t addr, uint8_t value)
+{
+    (void)value;
+    reg_seen++;
+    reg_last = addr;
+}
+
 /* ---- the handlers ---- */
 static int nmis, irqs, nmi_wait;
 static uint64_t nmi_at, irq_at, nmi_waited_to, nmi_irq_seen;
@@ -88,13 +99,13 @@ static uint64_t nmi_at, irq_at, nmi_waited_to, nmi_irq_seen;
 static void abi_nmi(void)
 {
     nmis++;
-    nmi_at = snes_clock;
+    nmi_at = snes_now();
     rd8(0x004210);
     if (nmi_wait) {
         /* a wait in the handler, the IRQ due in it held by the I flag */
         nshvc_wait_until(not_hblank, NULL);
         nshvc_wait_until(hblank, NULL);
-        nmi_waited_to = snes_clock;
+        nmi_waited_to = snes_now();
         nmi_irq_seen = irqs;
     }
 }
@@ -102,7 +113,7 @@ static void abi_nmi(void)
 static void abi_irq(void)
 {
     irqs++;
-    irq_at = snes_clock;
+    irq_at = snes_now();
     rd8(0x004211);
 }
 
@@ -152,12 +163,12 @@ static void abi_reset(void)
             for (j = 0; j < sizeof k / sizeof k[0]; j++) {
                 uint64_t a, lines, want = pass != 1 ? 10000ull * k[j].bus + 1000ull * k[j].tenths : 0;
                 char what[96];
-                a = snes_clock;
+                a = snes_now();
                 lines = 0;
                 for (i = 0; i < 10000; i++)
                     lines += timed(k[j].addr, k[j].write);
                 snprintf(what, sizeof what, "%s, costs %s", k[j].what, pass == 0 ? "on" : pass == 1 ? "off" : "on again");
-                check(snes_clock - a - 40 * lines == want, what, (long long)(snes_clock - a - 40 * lines), (long long)want);
+                check(snes_now() - a - 40 * lines == want, what, (long long)(snes_now() - a - 40 * lines), (long long)want);
             }
         }
         /* the costs off: a wait still ends at its event, and a DMA still
@@ -169,7 +180,7 @@ static void abi_reset(void)
         check(snes_vcounter() == 225 && snes_line_clock() == 0, "costs off: nshvc_wait_vblank ends at line 225's start",
               snes_line_clock(), 0);
         {
-            uint64_t a = snes_clock, b, ls = line_start(), refresh = 0, l, extra;
+            uint64_t a = snes_now(), b, ls = line_start(), refresh = 0, l, extra;
             wr8(0x002115, 0x80);
             wr8(0x002116, 0x00);
             wr8(0x002117, 0x00);
@@ -180,11 +191,11 @@ static void abi_reset(void)
             wr8(0x004304, 0x7E);
             wr8(0x004305, 0xD0);
             wr8(0x004306, 0x07);
-            check(snes_clock == a, "costs off: nine writes take no time", (long long)(snes_clock - a), 0);
+            check(snes_now() == a, "costs off: nine writes take no time", (long long)(snes_now() - a), 0);
             {
                 /* words, longs and read-modify-writes spend their bytes'
                    weights ahead of their first byte: none with the costs off */
-                uint64_t w0 = snes_clock;
+                uint64_t w0 = snes_now();
                 uint16_t v;
                 for (i = 0; i < 1000; i++) {
                     v = rd16(0x7E2000);
@@ -193,12 +204,12 @@ static void abi_reset(void)
                     wr16_rmw(0x7E2004, (uint16_t)(rd16_rmw(0x7E2004) + 1));
                     wr8(0x7E2006, (uint8_t)(rd8_rmw(0x7E2006) + 1));
                 }
-                check(snes_clock == w0, "costs off: 1,000 each of rd16, wr16, rd24, rd16_rmw/wr16_rmw and rd8_rmw/wr8 take no time",
-                      (long long)(snes_clock - w0), 0);
+                check(snes_now() == w0, "costs off: 1,000 each of rd16, wr16, rd24, rd16_rmw/wr16_rmw and rd8_rmw/wr8 take no time",
+                      (long long)(snes_now() - w0), 0);
             }
-            a = snes_clock;
+            a = snes_now();
             wr8(0x00420B, 0x01);
-            b = snes_clock;
+            b = snes_now();
             for (l = ls; l < b; l += 1364)
                 if (l + 534 - (l & 7) >= a && l + 534 - (l & 7) < b)
                     refresh += 40;
@@ -213,18 +224,18 @@ static void abi_reset(void)
 
     /* with no profile, each access takes its bus's time alone, a frame
        passing in enough of them, and the writes land */
-    t0 = snes_clock;
+    t0 = snes_now();
     f0 = nshvc_frames();
     {
         uint64_t lines = 0;
         for (i = 0; i < 100000; i++) {
-            uint64_t b = snes_clock;
+            uint64_t b = snes_now();
             uint32_t lc = snes_line_clock();
             wr8(0x7E2000u + (unsigned)(i & 0xFFF), (uint8_t)(i ^ 0x5A));
-            lines += refreshes(b, lc, snes_clock);
+            lines += refreshes(b, lc, snes_now());
         }
-        check(snes_clock - t0 - 40 * lines == 800000, "100,000 writes of work RAM: 8 clocks each, and the refreshes",
-              (long long)(snes_clock - t0 - 40 * lines), 800000);
+        check(snes_now() - t0 - 40 * lines == 800000, "100,000 writes of work RAM: 8 clocks each, and the refreshes",
+              (long long)(snes_now() - t0 - 40 * lines), 800000);
     }
     check(nshvc_frames() == f0 + 2, "two frames pass in them", nshvc_frames() - f0, 2);
     /* a loop polling with no wait sees the clock move: the vertical blank
@@ -240,23 +251,23 @@ static void abi_reset(void)
     nshvc_wait_vblank();
     check(snes_vcounter() == 225 && snes_line_clock() == 0, "nshvc_wait_vblank ends at line 225's start",
           (long long)snes_vcounter() * 10000 + snes_line_clock(), 2250000);
-    t0 = snes_clock;
+    t0 = snes_now();
     nshvc_wait_vblank();
-    t1 = snes_clock;
+    t1 = snes_now();
     check(t1 - t0 == 262 * 1364 || t1 - t0 == 262 * 1364 - 4, "one vertical blank to the next is a frame",
           (long long)(t1 - t0), 262 * 1364);
 
     /* HVBJOY's horizontal blank: seen at its first clock (1,092 into the
        line: the counters' dot 274), the clocks waited returned */
     nshvc_wait_until(not_hblank, NULL);
-    t0 = snes_clock;
+    t0 = snes_now();
     w = nshvc_wait_until(hblank, NULL);
     /* the first read that takes its value (2 clocks in) at or after 1,092
        sees it: the wait ends 4 clocks after that, 1,096 to 1,098 */
     check(snes_line_clock() >= 1096 && snes_line_clock() <= 1098,
           "a wait for the horizontal blank ends with the first read in it", snes_line_clock(), 1096);
-    check(w == snes_clock - t0, "nshvc_wait_until returns the clocks waited", (long long)w,
-          (long long)(snes_clock - t0));
+    check(w == snes_now() - t0, "nshvc_wait_until returns the clocks waited", (long long)w,
+          (long long)(snes_now() - t0));
     w = nshvc_wait_until(hblank, NULL);
     check(w == READ_4212, "a condition that holds already: only its read", (long long)w, READ_4212);
 
@@ -272,7 +283,7 @@ static void abi_reset(void)
     }
     nshvc_wait_until(joy_busy, NULL);
     nshvc_wait_until(joy_done, NULL);
-    check(snes_clock == want, "a wait for the joypads' read ends as it does", (long long)(snes_clock - ls),
+    check(snes_now() == want, "a wait for the joypads' read ends as it does", (long long)(snes_now() - ls),
           (long long)(want - ls));
     wr8(0x004200, 0x00);
 
@@ -357,10 +368,10 @@ static void abi_reset(void)
     wr8(0x004304, 0x7E);
     wr8(0x004305, 0xD0);
     wr8(0x004306, 0x07);
-    t0 = snes_clock;
+    t0 = snes_now();
     ls = line_start();
     wr8(0x00420B, 0x01);
-    t1 = snes_clock;
+    t1 = snes_now();
     {
         /* the refreshes passed: one each line whose refresh falls in it */
         uint64_t moved = 6 + 8 + 8 + 2000 * 8, refresh = 0, l;   /* the $420B write's own 6 first */
@@ -385,6 +396,28 @@ static void abi_reset(void)
     wr8(0x004206, 0x00);
     check(rd16(0x004214) == 0xFFFF && rd16(0x004216) == 0xBEEF, "a divide by 0: $FFFF, the dividend",
           rd16(0x004214) << 16 | rd16(0x004216), 0xFFFF << 16 | 0xBEEF);
+
+    /* the register write hook (2.19): the console's registers' writes,
+       nothing else's, and their time as without it */
+    {
+        uint64_t a0, a1;
+        reg_seen = 0;
+        nshvc_set_register_write_hook(reg_hook);
+        a0 = snes_now();
+        wr8(0x7E2000, 1);
+        wr16(0x7E2002, 0x1234);
+        wr8(0x702000, 2);
+        wr8(0x002100, 0x0F);
+        wr8(0x804202, 3);
+        wr8(0x004300, 0x01);
+        rd8(0x002137);
+        a1 = snes_now();
+        nshvc_set_register_write_hook(NULL);
+        check(reg_seen == 3 && reg_last == 0x004300, "the register write hook: $2100, $80:4202 and $4300, nothing else",
+              reg_seen, 3);
+        check(a1 - a0 == 8 + 16 + 8 + 6 + 6 + 6 + 6 + 40 * refreshes(a0, (uint32_t)(a0 - line_start()), a1),
+              "and the accesses' time as without it", (long long)(a1 - a0), 56);
+    }
 
     printf("%d check(s) failed\n", fails);
     exit(fails ? 1 : 0);
@@ -420,6 +453,16 @@ int main(int argc, char **argv)
     cart.rom_size = sizeof rom;
     cart.routines = routines;
     cart.routine_count = 3;
+    if (!strcmp(mode, "--offpoll") || !strcmp(mode, "--heldpoll")) {
+        /* (through the front end: its watchdog) */
+        static char *av[] = { (char *)"waits", (char *)"--headless", NULL };
+#ifdef _WIN32
+        _putenv_s("NSHVC_WATCHDOG", "2");
+#else
+        setenv("NSHVC_WATCHDOG", "2", 1);
+#endif
+        return nshvc_main(&cart, 2, av);
+    }
     nshvc_power(&cart);
     for (;;)
         nshvc_run_frame();

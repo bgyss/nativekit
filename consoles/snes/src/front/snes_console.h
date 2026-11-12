@@ -25,6 +25,7 @@ void snes_at_exit(void);
 /* console.c: the table's controllers and the game's hooks */
 void snes_input(int headless, const uint32_t *b);
 int snes_key(int vk, int down);
+int snes_pointer(float x, float y, int buttons);
 void snes_touch(int id, int phase, float x, float y);
 void snes_game_frame(void);
 

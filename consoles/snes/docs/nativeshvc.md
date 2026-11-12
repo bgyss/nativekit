@@ -1,7 +1,7 @@
 # nativeshvc: the console, its interface and its extensions
 
 What a game must do and what the console promises it are fixed in
-[the game contract](contract.md) (2.10); this page describes the interface
+[the game contract](contract.md) (2.19); this page describes the interface
 around it.
 
 ## What it is
@@ -212,3 +212,7 @@ centre texel. A headless run's shots are the console's picture, or with `NSHVC_S
 (or `SXxSY`) the frame as a window that many pixels a console pixel shows
 it, the canvas's scale (`nshvc_ext_canvas_scale`) that window's from power
 on.
+
+The compatible upstream port and additional APIs are described in
+[upstream-sync.md](upstream-sync.md); lazy scheduling is described in
+[lazy-console-design.md](lazy-console-design.md).

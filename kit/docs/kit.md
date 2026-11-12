@@ -14,7 +14,7 @@ A console fills one table (`nk_console`, in [`nk.h`](../include/nk/nk.h)) and ca
 controllers. Games never include the kit's headers: a console's own headers are its
 game's contract.
 
-nativekit is at 1.0.0 ([contract-discipline.md](contract-discipline.md)).
+nativekit is at 1.1.0 ([contract-discipline.md](contract-discipline.md)).
 
 ## The parts
 
@@ -239,3 +239,26 @@ build) runs the name check and every check in [`tests/`](../tests/):
 | `states_check.py` | the script on the stub console: steps and their errors, dumps, `save` and `load` with fork and without, a state rebuilt from a play |
 | `profile_lib_check.py` | the fitter on made-up kinds: known weights given back, a kind not measured kept at its default, a chip's program fitted |
 | `click_macos.m` | the macOS host's mouse buttons from each press and release, a click quicker than a poll heard (a window; by hand: `build/macos/kit/tests/kit_click_macos`) |
+
+
+## Additions in 1.1
+
+- `nk_pause(on, blur, tint)` / `nk_paused()` stop machine frames and silence host
+  audio while input and the console's frame callback continue. Blur is in window
+  points; tint is 0xAARRGGBB. A CPU backdrop keeps this usable on every backend.
+- `nk_overlay_update(id, pixels)` refreshes an overlay and invalidates its cached
+  alpha image. `nk_console.pointer(x, y, buttons)` is an optional final callback;
+  returning 1 consumes a mouse event before native device mapping.
+- `nk_input_key_for(bit)`, `nk_input_key_bind(bit, vk)` and `nk_key_name(vk)`
+  expose and change positional keyboard bindings. Binding clears the moved
+  controls so a key rebound mid-press cannot remain stuck.
+- `host_text_input(on)` and `host_keyboard_attached()` expose text entry and
+  hardware keyboard presence. `host_every(ms, fn)` schedules an independent
+  callback; its callback must synchronize shared state itself. `host_app_active()` lets timer callbacks recognize deliberate host suspension.
+  Existing custom POSIX hosts may leave the new functions to their weak no-op defaults.
+- `<prefix>_PRESENT=1` explicitly draws every headless machine frame without
+  pacing; `<prefix>_FPS_LOG` records run/present times in that mode. Ordinary
+  headless execution and aspect-fit window presentation retain their defaults.
+
+`cmake --build BUILD --target kit-check` includes a software loop-extension
+check of pause, backdrop tint, overlay-cache invalidation and resumption.
