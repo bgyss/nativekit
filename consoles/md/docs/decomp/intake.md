@@ -3,7 +3,7 @@
 The shared tooling that turns a Mega Drive image and reference captures into
 an auditable byte map and an assembly skeleton that rebuilds the image
 exactly. Its gates are held by authored synthetic cartridges; the first title
-has been run through it at 250, 900 and 3,000 frames, with the [results and findings below](#first-title).
+has been run through it with five captures of up to 4,700 frames, with the [results and findings below](#first-title).
 
 ## Commands
 
@@ -137,7 +137,7 @@ instruction raw.
 is under ignored `build/decomp/md-f68818ae1a61/`, whose `WORKSPACE.md` holds
 the exact commands; nothing from the image is tracked.
 
-Evidence: three complete captures on the pinned reference core (region U, model
+Evidence: five complete captures on the pinned reference core (region U, model
 `md1va3`, two three-button pads), each taken through its own intake:
 
 - 250 frames, START on frames 180-187 and 240-247; scenario SHA-256
@@ -153,19 +153,29 @@ Evidence: three complete captures on the pinned reference core (region U, model
   `12859186…d713c0`; 209,186,292 events (30,790,627 68000 and 17,707,113 Z80
   instructions), 73.5 GB, 2,988 s; caps 320 GiB and 12,000 s. Its intake took
   3,728 s with a 6.2 GB peak.
+- 3,100 frames with no input (`idle`); scenario SHA-256 `507c9db6…1c88f2`;
+  211,388,145 events (31,415,168 68000 and 17,089,675 Z80 instructions),
+  74.0 GB, 2,916 s.
+- 4,700 frames (`over`): START on 180, 240 and 300, no input until frame
+  3,960, then a four-frame A press every 12 frames; scenario SHA-256
+  `89ec09c0…56fc64`; 321,891,272 events (45,045,927 and 27,640,595
+  instructions), 112.4 GB, 4,441 s.
 
-| Result | 250 frames | 900 frames | 3,000 frames |
-|---|---|---|---|
-| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture | identical, same three measures | identical, same three measures |
-| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static | 12,060 traced, 100 vector, 8,148 static | 14,616 traced, 100 vector, 5,988 static |
-| ROM code kept raw (noncanonical encoding) | 20 bytes | 20 bytes | 20 bytes |
-| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) | 340 | 340 |
-| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` | 503,620, same split | 503,224, same split |
-| ROM entries | 168: 71 traced (T1), 4 vector, 93 static | 222: 189 traced (T1), 4 vector, 29 static | 240: 218 traced (T1), 4 vector, 18 static |
-| Computed transfers in ROM | 14, of which 9 have no observed target | 14, of which 5 have none | 14, of which 4 have none |
-| Conflicts, undecodable entries | 0, 0 | 0, 0 | 0, 0 |
-| Orphan candidates | 18 | 19 | 17 |
-| Z80 RAM programs | 3, all at `$0000` (one with 504 variants over 4 rewritten bytes); no 68000 RAM code ran | 3, all at `$0000` (one with 34,776 variants in 45,193 generations over 12 rewritten bytes); none on the 68000 | 3, all at `$0000` (one with 262,271 variants in 287,973 generations over the same 12 rewritten bytes); none on the 68000 |
+The last column of the table is one intake over the 3,000-frame, idle and
+`over` captures together (260 GB): 13,068 s with a 16.5 GB peak.
+
+| Result | 250 frames | 900 frames | 3,000 frames | 3,000 + idle + over |
+|---|---|---|---| --|
+| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture | identical, same three measures | identical, same three measures | identical, same three measures |
+| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static | 12,060 traced, 100 vector, 8,148 static | 14,616 traced, 100 vector, 5,988 static | 18,494 traced, 100 vector, 3,944 static |
+| ROM code kept raw (noncanonical encoding) | 20 bytes | 20 bytes | 20 bytes | 20 bytes |
+| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) | 340 | 340 | 340 |
+| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` | 503,620, same split | 503,224, same split | 501,390, same split |
+| ROM entries | 168: 71 traced (T1), 4 vector, 93 static | 222: 189 traced (T1), 4 vector, 29 static | 240: 218 traced (T1), 4 vector, 18 static | 273: 256 traced (T1), 4 vector, 13 static |
+| Computed transfers in ROM | 14, of which 9 have no observed target | 14, of which 5 have none | 14, of which 4 have none | 14, of which 3 have none |
+| Conflicts, undecodable entries | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| Orphan candidates | 18 | 19 | 17 | 14 |
+| Z80 RAM programs | 3, all at `$0000` (one with 504 variants over 4 rewritten bytes); no 68000 RAM code ran | 3, all at `$0000` (one with 34,776 variants in 45,193 generations over 12 rewritten bytes); none on the 68000 | 3, all at `$0000` (one with 262,271 variants in 287,973 generations over the same 12 rewritten bytes); none on the 68000 | the same 3 (the patched one with 630,077 variants in 782,650 generations over the same 12 bytes); none on the 68000 |
 
 Findings, none of them fixed here:
 
@@ -201,15 +211,38 @@ Findings, none of them fixed here:
   This run holds no later stage, demonstration, game over or ending either,
   so it does not show whether the rest of the image is data or unreached
   code; it does show that more first-stage play is not where new code is.
+- **The demonstration and a game over found 1,834 more bytes.** Both
+  scenarios were written against the picture, and each capture's
+  `video_sha256` (`f1b23359…275560`, `f70c43e7…bb5bcd`) equals the hash of the
+  frames `oracle/run.py` wrote for the same inputs. The idle run shows the
+  title animation looping, a digitized still picture near frame 1,500, a
+  self-playing demonstration on another stage from about frame 1,600 to
+  2,700, and the high-score table to about 3,000. The `over` run shows
+  first-stage play without input, lives lost, game over near frame 3,900, a
+  continue taken from its countdown, the stage-clear bonus, and about 450
+  frames of the second stage. With the 3,000-frame capture they decode 22,538
+  ROM bytes against 20,704: 4.3% of the image. 3,944 statically reached bytes
+  have still never executed, and 3 of 14 computed transfers have no observed
+  target.
+- **The reference core stops returning at frame 4,783 of some runs.** Two
+  preview runs through `oracle/run.py` with different inputs (start then no
+  input; the 3,000-frame script continued) each had `retro_run` call 4,783
+  never return while the core went on delivering video frames: one wrote
+  214,000 frames, the other 225,000, before being stopped. The idle run
+  passed 5,000 frames and the `over` inputs passed 4,770. The cause is not
+  diagnosed, and whether upstream or patches 0001-0003 introduce it is not
+  known. Every capture here stays below that frame; a scenario that crossed
+  it would run until its time or byte cap.
 - **The capture cap is split in half, and the preflight does not say so.**
   `run.py` gives the NMDH and NMDT streams half of `--max-bytes` each. A first
   3,000-frame attempt with a 128 GiB cap passed its preflight (83.7 GB
   estimated in total) and ended `incomplete_storage_limit` after 48 minutes
   when the NMDH stream reached 64 GiB; the completed capture's NMDH stream is
   71.1 GB of its 73.5 GB.
-- **Intake memory grows with the variant count.** The 3,000-frame intake
-  peaked at 6.2 GB against 1.2 GB at 900 frames, with 262,271 variants of the
-  one patched Z80 program against 34,776.
+- **Intake memory and time grow with the variant count.** The 3,000-frame
+  intake peaked at 6.2 GB against 1.2 GB at 900 frames, with 262,271 variants
+  of the one patched Z80 program against 34,776; the three-capture intake
+  peaked at 16.5 GB with 630,077 and took 3.6 hours.
 - **The first 900-frame run failed in the reference core, since patched.** It
   ended `incomplete_core_error` near frame 258. BlastEm's Z80 bank-window
   handlers set the Z80 clock to the 68000's clock whenever the 68000 was
@@ -235,10 +268,13 @@ Findings, none of them fixed here:
 
 ## Not done
 
-- Any capture past the first stage: the demonstration, later stages, game
-  over and the ending are untraced, and whether a life was lost in the
-  3,000-frame run was not checked. A scenario should not press START after
-  the game starts, since each press pauses or resumes it.
+- Diagnosing the frame-4,783 stall in the reference core. Until then the
+  score-table name entry (it begins near frame 4,700 when the continue
+  countdown runs out), the third stage and its refuelling sequence (frame
+  5,400 at the earliest), every later stage and the ending are untraced.
+- The second stage is traced for about 450 frames only. A scenario should
+  not press START after the game starts, since each press pauses or resumes
+  it.
 - `run.py`'s preflight compares its estimate with the whole `--max-bytes`,
   not with the half each stream gets.
 - Checking patch 0003's bank-wait timing against hardware.
