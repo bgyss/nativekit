@@ -174,6 +174,31 @@ with tempfile.TemporaryDirectory() as temporary:
     assert result.returncode != 0 and "libretro" in result.stderr.lower(), result.stderr
     assert not (capture_out / "capture.nmdh").exists()
 
+    # the total fits --max-bytes but the NMDH stream alone exceeds the half it is given
+    split_estimate_file = base / "split-estimate.json"
+    split_estimate_file.write_text(json.dumps({
+        "status": "complete", "metadata": matching_metadata, "frames": 3,
+        "estimated_seconds": 0.0, "estimated_bytes": 900_000,
+        "estimated_stream_bytes": {"nmdh": 600_000, "nmdt": 300_000},
+    }))
+    split_out = base / "capture-over-stream-cap"
+    result = subprocess.run([
+        sys.executable, str(runner_path), "--mode", "capture", "--core", str(capable_no_libretro),
+        "--rom", str(rom), "--scenario", str(scenario), "--frames", "3",
+        "--estimate-file", str(split_estimate_file), "--out", str(split_out),
+        "--max-bytes", "1000000",
+    ], capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0 and "NMDH stream needs 600000 bytes" in result.stderr, result.stderr
+    assert not split_out.exists()
+    # the same estimate passes the preflight when each half holds its stream
+    result = subprocess.run([
+        sys.executable, str(runner_path), "--mode", "capture", "--core", str(capable_no_libretro),
+        "--rom", str(rom), "--scenario", str(scenario), "--frames", "3",
+        "--estimate-file", str(split_estimate_file), "--out", str(base / "capture-within-stream-cap"),
+        "--max-bytes", "1200000",
+    ], capture_output=True, text=True, timeout=10)
+    assert result.returncode != 0 and "libretro" in result.stderr.lower(), result.stderr
+
     instruction_event = {"kind": 1, "cpu": 1, "pc": 0x200, "next_pc": 0x206}
     pc_stop = {"cpu": "m68k", "criterion": "pc", "action": "stop", "value": 0x206}
     sentinel_stop = {"cpu": "m68k", "criterion": "return_sentinel",

@@ -1100,6 +1100,18 @@ def _run_parent(args):
             raise RunnerError("invalid preflight resource estimate")
         if (estimated_seconds > args.max_seconds or estimated_bytes > args.max_bytes):
             raise RunnerError("preflight estimate exceeds the capture resource limits")
+        # each stream is capped at half of --max-bytes (see _worker); an estimate that
+        # records per-stream sizes must fit both halves, not only the total
+        stream_estimates = estimate.get("estimated_stream_bytes")
+        if stream_estimates is not None:
+            if (not isinstance(stream_estimates, dict) or set(stream_estimates) != {"nmdh", "nmdt"} or
+                    any(type(value) is not int or value < 0 for value in stream_estimates.values())):
+                raise RunnerError("invalid preflight stream estimate")
+            for stream, value in sorted(stream_estimates.items()):
+                if value > args.max_bytes // 2:
+                    raise RunnerError("preflight estimate exceeds the capture resource limits: "
+                                      "%s stream needs %d bytes, its cap is half of --max-bytes (%d)"
+                                      % (stream.upper(), value, args.max_bytes // 2))
         worker_mode = "capture"
         worker_frames = args.frames
     else:
@@ -1137,6 +1149,9 @@ def _run_parent(args):
         elapsed = max(float(result["elapsed_seconds"]), 1e-9)
         estimated_bytes = (sample_bytes * args.frames + sample_frames - 1) // sample_frames
         estimated_seconds = elapsed * args.frames / sample_frames
+        estimated_stream_bytes = {
+            stream: (result[stream + "_bytes"] * args.frames + sample_frames - 1) // sample_frames
+            for stream in ("nmdh", "nmdt")}
         estimate = {
             "status": "complete",
             "metadata": metadata,
@@ -1145,6 +1160,7 @@ def _run_parent(args):
             "events_per_second": result["events"] / elapsed,
             "bytes_per_frame": sample_bytes / sample_frames,
             "estimated_bytes": estimated_bytes,
+            "estimated_stream_bytes": estimated_stream_bytes,
             "estimated_seconds": estimated_seconds,
         }
         (output / "estimate.json").write_bytes(nmdh_trace.canonical_json(estimate))

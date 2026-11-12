@@ -238,12 +238,15 @@ Findings, none of them fixed here:
   control, and one of the two preview runs now completes 5,200 frames. The
   five captures above were taken before it, all below that frame; no capture
   has been taken past it yet.
-- **The capture cap is split in half, and the preflight does not say so.**
+- **The capture cap is split in half; the preflight now checks each half.**
   `run.py` gives the NMDH and NMDT streams half of `--max-bytes` each. A first
   3,000-frame attempt with a 128 GiB cap passed its preflight (83.7 GB
   estimated in total) and ended `incomplete_storage_limit` after 48 minutes
   when the NMDH stream reached 64 GiB; the completed capture's NMDH stream is
-  71.1 GB of its 73.5 GB.
+  71.1 GB of its 73.5 GB. Since 2026-11-12 an estimate records
+  `estimated_stream_bytes` for each stream and a capture refuses to start
+  when either exceeds its half; `runner_check.py` holds a planted estimate
+  whose total fits and whose NMDH stream does not.
 - **Intake memory and time grow with the variant count.** The 3,000-frame
   intake peaked at 6.2 GB against 1.2 GB at 900 frames, with 262,271 variants
   of the one patched Z80 program against 34,776; the three-capture intake
@@ -282,8 +285,6 @@ Findings, none of them fixed here:
 - The second stage is traced for about 450 frames only. A scenario should
   not press START after the game starts, since each press pauses or resumes
   it.
-- `run.py`'s preflight compares its estimate with the whole `--max-bytes`,
-  not with the half each stream gets.
 - Checking patch 0003's bank-wait timing against hardware.
 - Generations that differ in data bytes inside their extent are still split;
   no title or control has needed that yet.
