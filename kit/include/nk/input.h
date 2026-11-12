@@ -44,6 +44,9 @@ unsigned nk_pad_bits(const host_pad *p);
 /* ---- the keyboard ---- */
 void nk_input_key(int vk, int down);
 void nk_input_keymap(const nk_key *keys, int n);
+int nk_input_key_for(uint32_t bit);
+void nk_input_key_bind(uint32_t bit, int vk);
+const char *nk_key_name(int vk);
 int  nk_input_key_held(int vk);
 uint32_t nk_input_keyboard_bits(void);       /* the keys held, as positional bits */
 const char *nk_input_key_name(uint32_t bit_mask); /* the first key for a positional bit, "" none */

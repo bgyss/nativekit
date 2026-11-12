@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdatomic.h>
 
 #include "nk.h"
 #include "env.h"
@@ -29,6 +30,7 @@
 #include "resample.h"
 #include "rr.h"
 #include "rr_size.h"
+#include "backdrop.h"
 
 static const nk_console *c;
 const nk_console *nk_console_now(void) { return c; }
@@ -90,6 +92,46 @@ void nk_overlay_place(int id, float cx, float cy, float scale, float angle_rad, 
     o->visible = visible != 0;
 }
 
+void nk_overlay_update(int id, const uint32_t *argb)
+{
+    Overlay *o;
+    if (id < 0 || id >= noverlays)
+        return;
+    o = &overlays[id];
+    memcpy(o->argb, argb, (size_t)o->w * (size_t)o->h * sizeof *argb);
+    o->shown_alpha = -1;
+}
+
+static _Atomic int paused;
+static float pause_blur;
+static uint32_t pause_tint;
+static uint32_t *backdrop;
+static int backdrop_w, backdrop_h, backdrop_due;
+
+void nk_pause(int on, float blur, uint32_t tint)
+{
+    if (on && !atomic_load(&paused))
+        backdrop_due = 1;
+    pause_blur = blur < 0 ? 0 : blur;
+    pause_tint = tint;
+    atomic_store(&paused, on != 0);
+}
+
+int nk_paused(void) { return atomic_load(&paused); }
+
+static void make_backdrop(int tw, int th, float scale)
+{
+    uint32_t *f = (uint32_t *)malloc((size_t)tw * (size_t)th * sizeof *f);
+    int cell;
+    backdrop_due = 0;
+    free(backdrop);
+    backdrop = NULL;
+    if (f && rr_read(f))
+        backdrop = backdrop_make(f, tw, th, pause_blur * scale, pause_tint,
+                                 &backdrop_w, &backdrop_h, &cell);
+    free(f);
+}
+
 /* the overlays over the target (tw x th pixels for pw x ph points) */
 static void draw_overlays(int tw, int th)
 {
@@ -131,6 +173,7 @@ static void draw_overlays(int tw, int th)
 
 /* ---- the application ---- */
 static int headless;
+static int present_headless;
 static int quitting;
 
 void nk_quit(void) { quitting = 1; }
@@ -220,6 +263,10 @@ static void audio_cb(float *lr, int frames, void *user)
     int got, made, q;
     double target = c->audio_hz * 0.05, d;
     (void)user;
+    if (nk_paused()) {
+        memset(lr, 0, (size_t)frames * 2 * sizeof *lr);
+        return;
+    }
     while (resample_queued(s_rs) < 12000 && (got = c->audio_take(in, 2048)) > 0)
         resample_push(s_rs, in, got);
     q = resample_queued(s_rs) + c->audio_queued();
@@ -378,8 +425,17 @@ static void show(void)
     shown_tw = tw;
     if (c->scaled)
         c->scaled(w, h);
+    if (nk_paused() && backdrop_due) {
+        float pw, ph;
+        nk_window_size(&pw, &ph);
+        make_backdrop(tw, th, pw > 0 ? (float)tw / pw : 1);
+    }
     rr_begin(0xFF000000u);
-    c->present(d);
+    if (nk_paused() && backdrop) {
+        const float q[6] = { 0, 0, (float)tw, 0, 0, (float)th };
+        rr_overlay(backdrop, backdrop_w, backdrop_h, q);
+    } else
+        c->present(d);
     draw_overlays(tw, th);
     if (fps_on > 0)
         fps_draw();
@@ -488,6 +544,13 @@ static void frame(void)
 {
     uint32_t b[NK_PLAYERS] = { 0 };
     frame_no++;
+    if (headless && nk_paused()) {
+        if (c->frame)
+            c->frame();
+        if (quitting || (max_frames >= 0 && frame_no >= max_frames))
+            exit(0);
+        return;
+    }
     if (headless) {
         static int rc = -1;
         int more;
@@ -497,6 +560,15 @@ static void frame(void)
             rc = nk_getenv("RRCHECK") != NULL;
         if (rc)
             rr_check();
+        if (present_headless) {
+            uint64_t before = host_ticks_ns();
+            fps_ran_ns = fps_frame_start ? before - fps_frame_start : 0;
+            show();
+            fps_present_ns = host_ticks_ns() - before;
+            if (fps_log)
+                fps_frame(before + fps_present_ns, fps_ran_ns, fps_present_ns, 0);
+            fps_frame_start = host_ticks_ns();
+        }
         if (sound_f)
             sound_drain();
         more = nk_script_frame(b);
@@ -531,7 +603,8 @@ static void frame(void)
                 if (!(c->key && c->key(e.vk, e.down)))
                     nk_input_key(e.vk, e.down);
             } else if (e.type == HOST_EV_MOUSE) {
-                nk_input_mouse(e.x, e.y, e.dx, e.dy, e.buttons);
+                if (!(c->pointer && c->pointer(e.x, e.y, e.buttons)))
+                    nk_input_mouse(e.x, e.y, e.dx, e.dy, e.buttons);
             } else if (e.type == HOST_EV_TOUCH) {
                 nk_input_touch(e.id, e.phase, e.x, e.y);
                 if (c->touch)
@@ -614,6 +687,18 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     c->power(cart);
     c->window_size(&ww, &wh);
     rr_set_headless_size(ww, wh);
+    if (headless && nk_getenv("PRESENT") && strcmp(nk_getenv("PRESENT"), "0")) {
+        const char *lf = nk_getenv("FPS_LOG");
+        if (!rr_open())
+            nk_fatal("%s_PRESENT: the renderer cannot open", c->env);
+        if (lf && !(fps_log = fopen(lf, "w")))
+            nk_fatal("%s_FPS_LOG: cannot write %s", c->env, lf);
+        if (fps_log)
+            setvbuf(fps_log, NULL, _IOLBF, 0);
+        fps_on = nk_getenv("FPS") != NULL;
+        present_headless = 1;
+        fps_frame_start = host_ticks_ns();
+    }
     if (headless && c->headless_scale) {
         /* shots as a window <env>_SCALE pixels a console pixel shows them */
         double sx, sy;
@@ -651,7 +736,8 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
         host_audio_open(OUT_RATE, audio_cb, NULL);
     }
     for (;;) {
-        c->run_frame();
+        if (!nk_paused())
+            c->run_frame();
         frame();
     }
 }

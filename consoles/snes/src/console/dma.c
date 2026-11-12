@@ -122,6 +122,7 @@ static void move(const Channel *c, uint32_t a, uint8_t b)
         if (snes_dma_hook)
             snes_dma_hook(a, b, v);
         bus_write_a(a, v);
+        dma_wrote_a();
         return;
     }
     v = bus_read_a(a);
@@ -153,6 +154,46 @@ int dma_direct_only(void)
         if ((dma_mdmaen & (1u << i)) && !direct(&ch[i]))
             return 0;
     return 1;
+}
+
+/* A run of channel c's bytes to the VRAM data port, from byte k: each
+   byte's 8 clocks as move makes them (its A-bus read 4 in, at its clock),
+   while they all end before the console's next deadline, refresh or
+   line's record (snes_run_limit). With none in them, no HDMA comes in at
+   the unit's edges between the bytes and nothing else reads or changes
+   the PPU, so the bytes' writes go to it together
+   (ppu_vram_port_run), in order. Not with a DMA hook, nor for a channel
+   that reads the B bus or writes a register but the port. The bytes it
+   moved (0: none; the next byte moved alone), at most DAS's. */
+#define VRAM_RUN 256
+static unsigned vram_run(Channel *c, unsigned mode, unsigned *k)
+{
+    uint8_t regs[VRAM_RUN], vals[VRAM_RUN];
+    uint64_t next = snes_run_limit();
+    unsigned i, n, left = c->das ? c->das : 0x10000u, len = pattern_len[mode];
+    int step = c->dmap & 0x08 ? 0 : c->dmap & 0x10 ? -1 : 1;
+    if (snes_dma_hook || (c->dmap & 0x80) || next <= snes_clock + 16)
+        return 0;
+    for (i = 0; i < len; i++) {
+        uint8_t b = (uint8_t)(c->bbad + pattern[mode][i]);
+        if (b != 0x18 && b != 0x19)
+            return 0;
+    }
+    n = (unsigned)((next - snes_clock - 1) / 8 < VRAM_RUN ? (next - snes_clock - 1) / 8 : VRAM_RUN);
+    if (n > left)
+        n = left;
+    for (i = 0; i < n; i++) {
+        snes_clock += 4;
+        vals[i] = bus_read_a((uint32_t)c->a1b << 16 | c->a1t);
+        snes_clock += 4;
+        regs[i] = (uint8_t)(c->bbad + pattern[mode][(*k + i) & 3]);
+        c->a1t = (uint16_t)(c->a1t + step);
+    }
+    dma_clocks += 8 * n;
+    *k += n;
+    snes_ppu_catch_up_now();
+    ppu_vram_port_run(regs, vals, n);
+    return n;
 }
 
 /* MDMAEN's channels in turn; the unit's edges inside (dma_edge), after its
@@ -189,19 +230,50 @@ void dma_run(void)
         }
         dma_tick(8);
         dma_edge();
-        do {
+        for (;;) {
+            unsigned n = vram_run(c, mode, &k);
+            if (n) {
+                /* (DAS 0: 65,536 bytes) */
+                c->das = (uint16_t)((c->das ? c->das : 0x10000u) - n);
+                if (!c->das)
+                    break;
+                continue;
+            }
             move(c, (uint32_t)c->a1b << 16 | c->a1t, (uint8_t)(c->bbad + pattern[mode][k & 3]));
             k++;
             /* bits 3-4: fixed (1, 3), decrement (2) or increment (0) */
             if (!(c->dmap & 0x08))
                 c->a1t = (uint16_t)(c->a1t + ((c->dmap & 0x10) ? -1 : 1));
             dma_edge();
-        } while ((dma_mdmaen & bit) && --c->das);
+            if (!((dma_mdmaen & bit) && --c->das))
+                break;
+        }
         dma_mdmaen &= (uint8_t)~bit;
     }
 }
 
 int hdma_enabled(void) { return dma_hdmaen != 0; }
+
+/* an enabled channel writes the A bus (B to A): memory a wait could read */
+int hdma_writes_a(void)
+{
+    int i;
+    for (i = 0; i < 8; i++)
+        if ((dma_hdmaen & (1u << i)) && (ch[i].dmap & 0x80))
+            return 1;
+    return 0;
+}
+
+/* a channel on writes the sound unit's ports ($2140-$217F): up to 4 registers
+   from its B-bus address */
+int hdma_writes_ports(void)
+{
+    int i;
+    for (i = 0; i < 8; i++)
+        if ((dma_hdmaen & (1u << i)) && !(ch[i].dmap & 0x80) && ch[i].bbad >= 0x3D && ch[i].bbad < 0x80)
+            return 1;
+    return 0;
+}
 
 int hdma_active(void)
 {
@@ -259,6 +331,36 @@ void hdma_init(void)
         reload(c, i);
         c->transfer = !c->done;
     }
+}
+
+/* The lines from this one on that move no byte and reload no table: all a
+   line then leaves is each channel's count and the last table byte read as
+   the data bus's value, which the last of them leaves (hdma_skip). None where
+   a table read could be seen: a register's or a chip's. */
+unsigned hdma_quiet(void)
+{
+    unsigned n = ~0u;
+    int i;
+    for (i = 0; i < 8; i++) {
+        const Channel *c = &ch[i];
+        if (c->done || !(dma_hdmaen & (1u << i)))
+            continue;
+        if (c->transfer || (c->ntrl & 0x80) || c->ntrl < 2 ||
+            !bus_read_plain((uint32_t)c->a1b << 16 | c->a2a))
+            return 0;
+        if ((unsigned)c->ntrl - 1 < n)
+            n = (unsigned)c->ntrl - 1;
+    }
+    return n == ~0u ? 0 : n;
+}
+
+/* n lines of those passed, as far as the channels go */
+void hdma_skip(unsigned n)
+{
+    int i;
+    for (i = 0; i < 8; i++)
+        if (!ch[i].done && (dma_hdmaen & (1u << i)))
+            ch[i].ntrl = (uint8_t)(ch[i].ntrl - n);
 }
 
 void hdma_line(void)

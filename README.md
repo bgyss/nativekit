@@ -13,7 +13,7 @@ Windows, headless). A console fills one table and calls the kit's main. The kit 
 console, and the build fails if it does. Its documents are
 [`kit/docs/kit.md`](kit/docs/kit.md) (its parts and how a console uses them) and
 [`kit/docs/contract-discipline.md`](kit/docs/contract-discipline.md) (its versioning, and
-the standards every console here keeps). It is at 1.0.0.
+the standards every console here keeps). It is at 1.1.0.
 
 | console | folder | |
 |---|---|---|
@@ -25,11 +25,20 @@ nativeshvc was created by Jeffrey Wilbur ([github.com/jeff-strutb/nativeshvc](ht
 and nativekit is extracted from it: this repository
 ([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit)) is a fork of
 nativeshvc, its code moved under `consoles/snes/` and its console-independent parts into
-`kit/`, nativeshvc's behaviour, contract (2.10) and tests unchanged. The kit is a work
+`kit/`. That initial extraction preserved nativeshvc's behavior, contract (2.10)
+and tests. The kit is a work
 based on nativeshvc and keeps its copyright and licence, the GNU Affero General Public
 License, version 3 ([LICENSE](LICENSE), [NOTICE](NOTICE)). The fork is maintained by
 Brian Gyss ([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit)); Jeffrey Wilbur
 is nativeshvc's author.
+
+The current compatible sync brings the local SNES contract to **2.19**, with
+later register-level scheduling and sound fixes. nativekit preserves software
+rendering and its console interfaces. Modern upstream is a different engine API;
+its conversion guide does not describe this fork. See the
+[upstream port record](consoles/snes/docs/upstream-sync.md) and
+[lazy-console implementation](consoles/snes/docs/lazy-console-design.md).
+
 
 Built from this folder, with CMake and C11:
 
@@ -376,8 +385,8 @@ nativeshvc is not written for it, and it aligns to nativeshvc as any game does.
 
 ## Status
 
-Version 2.10.0. The game contract, what a game writes against and what the console
-promises it, is in [docs/contract.md](consoles/snes/docs/contract.md), at 2.10: behaviour exact, each
+Version 2.19.0 (nativekit). The game contract, what a game writes against and what the console
+promises it, is in [docs/contract.md](consoles/snes/docs/contract.md), at 2.19: behaviour exact, each
 access costing the bus's time and the game's cost profile's weight, or no time with the
 costs off in a game's Enhanced mode (see [Enhancement support](#enhancement-support)). A game built against it plays on
 every later 2.x unchanged; only a 3.0 may change it. The cost profile's standard is

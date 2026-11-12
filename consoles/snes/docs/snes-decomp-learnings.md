@@ -1,5 +1,11 @@
 # SNES decompilation playbook
 
+> This copy describes nativekit's register-level console and its preservation
+> workflow. Upstream subsequently converted its runtime to a different engine
+> API. Follow this fork's cartridge/bus interfaces here; see
+> [upstream-sync.md](upstream-sync.md) for the boundary and imported updates.
+
+
 A complete method for decompiling a SNES game written in hand assembly.
 **The decompilation is the assembly:** symbolic, commented source that
 rebuilds the ROM **bit exact**. **The C is its companion effort:** readable C

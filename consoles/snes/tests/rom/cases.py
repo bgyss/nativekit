@@ -48,6 +48,35 @@ def sprites(name, obsel, count=128, prio_rotate=None, seed=None, mode=1):
     return shown(t)
 
 
+def stat77(name, n, big=False, row=100, tm=0x17, blank=None, reads=(50, 99, 100, 101, 102, 120, 224, 230, 241)):
+    """$213E, its range and time over flags, read through two frames with n
+    sprites on one row (big: 16 x 16, 2 tiles each), the rest off every row;
+    blank: forced blank over those lines"""
+    t = bg_mode(name, 1, tm=tm, seed=None)
+    t.w(0x2101, 0x00)
+    oam = bytearray()
+    for i in range(128):
+        oam += bytes([(i * 2) & 0xFF, row, 0, 0]) if i < n else bytes([0, 0xF0, 0, 0])
+    oam += bytes([0xAA if big else 0] * 32)
+    t.oam(oam)
+    t.w(0x212C, tm)
+    t.w(0x2100, 0x0F)
+    for _ in range(2):
+        t.wait_frames(1)
+        for line in reads:
+            if blank and line == blank[0]:
+                t.wait_line(line)
+                t.w(0x2100, 0x8F)
+            if blank and line == blank[1]:
+                t.wait_line(line)
+                t.w(0x2100, 0x0F)
+            t.wait_line(line)
+            t.read(0x213E)
+            t.nops(40)
+            t.read(0x213E)
+    return shown(t)
+
+
 def windows(name, seed=None):
     t = bg_mode(name, 1, tm=0x17, ts=0x17, seed=seed)
     for r in (0x2123, 0x2124, 0x2125, 0x2126, 0x2127, 0x2128, 0x2129, 0x212A, 0x212B):
@@ -671,6 +700,50 @@ def port_test(name, ports, rounds, per_frame, manual=(16, 16), latched=0, iobits
     return t
 
 
+def joy_mid(name, ports, rounds, per_frame, what):
+    """JOY1-4 read while the automatic read is under way (it takes three
+       lines from the vertical blank's first; port_test reads them after it):
+       each frame one register, read over and over past the read's end, as a
+       read here takes about 5 of its edges and all eight would take longer
+       than it does. Part way through, what:
+       reads, nothing more; stop, $4200's enable off, then on again; manual,
+       a clock on each port by a read of $4016 and $4017; strobe, the latch
+       up, a read of each port, the latch down; iobit, $4201's IOBit low,
+       then high again"""
+    t = Test(name, frames=rounds + 3, shots=(), prologue=False)
+    rng = t.rng
+    t.inputs[1] = ["plug 0 %s" % ports[0], "plug 1 %s" % ports[1]]
+    for n in range(2, rounds + 3):
+        t.inputs[n] = per_frame(n, rng)
+    t.w(0x4201, 0xFF)
+    t.w(0x4200, 0x01)
+    t.wait_frames(1)
+    for r in range(rounds):
+        t.wait_frames(1)
+        t.wait_line(225)
+        for k in range(16):
+            t.read(0x4218 + r % 8)
+            if k == 1:
+                if what == "stop":
+                    t.w(0x4200, 0x00)
+                elif what == "manual":
+                    t.read(0x4016)
+                    t.read(0x4017)
+                elif what == "strobe":
+                    t.w(0x4016, 1)
+                    t.read(0x4016)
+                    t.read(0x4017)
+                    t.w(0x4016, 0)
+                elif what == "iobit":
+                    t.w(0x4201, 0x7F)
+            elif k == 3:
+                if what == "stop":
+                    t.w(0x4200, 0x01)
+                elif what == "iobit":
+                    t.w(0x4201, 0xFF)
+    return t
+
+
 def rand_pad(rng):
     """a joypad's buttons (its own bits), opposite directions included"""
     return rng.getrandbits(12) << 4
@@ -715,6 +788,15 @@ def port_tests():
                          counters=True))
 
     out.append(port_test("port_none", ("none", "none"), 3, lambda n, rng: [], manual=(17, 17), latched=1))
+
+    for name, ports, inputs in (("pads", ("joypad", "joypad"), pads),
+                                ("tap", ("joypad", "multitap"), tap),
+                                ("mice", ("mouse", "mouse"), mice),
+                                ("scope", ("joypad", "superscope"), scope),
+                                ("justifiers", ("joypad", "justifiers"), justifiers)):
+        for what in ("reads", "stop", "manual", "strobe"):
+            out.append(joy_mid("joy_mid_%s_%s" % (name, what), ports, 8, inputs, what))
+    out.append(joy_mid("joy_mid_tap_iobit", ("joypad", "multitap"), 8, tap, "iobit"))
     return out
 
 
@@ -821,6 +903,15 @@ def all_tests():
     out.append(sprites("sprites_gap", 0x1A, seed=7))
     out.append(sprites("sprites_rotate", 0x00, prio_rotate=37))
     out.append(sprites("sprites_few", 0x20, count=12))
+    out.append(stat77("stat77_range", 40))
+    out.append(stat77("stat77_32", 32))
+    out.append(stat77("stat77_33", 33))
+    out.append(stat77("stat77_time", 30, big=True))
+    out.append(stat77("stat77_time17", 17, big=True))
+    out.append(stat77("stat77_time18", 18, big=True))
+    out.append(stat77("stat77_tm_off", 40, tm=0x03))
+    out.append(stat77("stat77_blank", 40, blank=(99, 102)))
+    out.append(stat77("stat77_low", 40, row=230))
     for i in range(4):
         out.append(windows("windows%d" % i))
     for i, (sel, sub) in enumerate([(0x02, 0x3F), (0x02, 0x7F), (0x02, 0xBF), (0x02, 0xFF), (0x00, 0x3F),

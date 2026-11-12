@@ -100,6 +100,8 @@ typedef struct nk_console {
 
     void     (*at_exit)(void);          /* optional: its own checks' reports */
     int      (*count_group)(uint32_t addr);      /* optional poll group 0..NK_KINDS_MAX-1; default 0 */
+    /* optional mouse hook: 1 consumes it before device mapping */
+    int      (*pointer)(float x, float y, int buttons);
 } nk_console;
 
 /* power on, open what the arguments ask for and run until the window
@@ -116,6 +118,10 @@ void nk_shot_scale(double *x, double *y);
 #define NK_OVERLAYS 16
 int  nk_overlay_image(const uint32_t *argb, int w, int h);   /* -1 when full */
 void nk_overlay_place(int id, float cx, float cy, float scale, float angle_rad, float alpha, int visible);
+void nk_overlay_update(int id, const uint32_t *argb);
+/* Stop the machine between frames; input and frame hooks continue. */
+void nk_pause(int on, float blur, uint32_t tint);
+int nk_paused(void);
 void nk_window_size(float *w, float *h);   /* points; a headless run's RR_SIZE */
 int  nk_headless(void);
 long nk_frame_no(void);

@@ -178,3 +178,8 @@ run = "python3 consoles/snes/tests/golden.py record build/golden"
 
 [tasks."golden:compare"]
 run = "python3 consoles/snes/tests/golden.py compare build/golden"
+
+[tasks."test:snes-upstream"]
+description = "Check compatible upstream SNES APIs, timing, graphics and fatal paths"
+depends = ["build:null"]
+run = "cmake --build build/null --target snes-upstream-check"

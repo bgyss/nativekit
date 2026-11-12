@@ -19,6 +19,7 @@
 #define PPU_OAM_EXT     (544 + 128 + 128)
 #define PPU_VRAM_PAGES  4       /* VRAM in 64 KB pages, up to 256 KB (nshvc_ext_vram) */
 #define PPU_MAX_HEIGHT  239
+#define PPU_WMAP_OFFSET (1 << 24)   /* nshvc_ext_window_map's offset, either way */
 
 /* The screen state a line is drawn from, as it stood at the line's
    horizontal blank. */
@@ -34,6 +35,11 @@ typedef struct {
     uint8_t page[5];          /* the VRAM page BG1-4 and the sprites read (nshvc_ext_layer_page) */
     uint8_t clip;             /* BG1-4 and the sprites (bits 0-4) kept to the console's picture
                                  (nshvc_ext_layer_clip) */
+    uint8_t wedges;           /* the windows open at the picture's edges (nshvc_ext_window_edges) */
+    uint8_t wmap;             /* the windows' edges mapped onto the screen (nshvc_ext_window_map) */
+    uint8_t wcols;            /* windows 1 and 2 (bits 0, 1) at screen columns (nshvc_ext_window_columns) */
+    uint16_t wcol[4];         /* those columns: window 1's left and right, window 2's */
+    int32_t wmap_scale, wmap_offset;  /* the map: screen columns a console column (16.16), the offset */
 } PpuScreen;
 
 /* A frame, everything its picture is drawn from: each line's screen state
@@ -47,8 +53,15 @@ typedef struct {
    its own state and palette. */
 #define PPU_SEGS 8
 typedef struct {
-    PpuScreen line[PPU_MAX_HEIGHT + 1];         /* lines 1 to height */
+    /* the frame's screen states and palettes, each kept once: line l's
+       are line[st[l]] and palette[pl[l]] (lines 1 to height; a stretch
+       of lines with nothing changed between them shares one of each) */
+    PpuScreen line[PPU_MAX_HEIGHT + 1];
     uint16_t palette[PPU_MAX_HEIGHT + 1][256];
+    uint8_t st[PPU_MAX_HEIGHT + 1], pl[PPU_MAX_HEIGHT + 1];
+    int states, palettes;
+    uint8_t pal_same[PPU_MAX_HEIGHT + 1];       /* the line's palette the line before's (its last,
+                                                   and its only: neither line in segments) */
     uint8_t version[PPU_MAX_HEIGHT + 1];        /* the copy each line shows */
     uint8_t mosaic_row[PPU_MAX_HEIGHT + 1];     /* the line a vertical mosaic repeats */
     int height;                                 /* 224, or 239 with overscan */
@@ -63,6 +76,9 @@ typedef struct {
                                                    lines are the field's rows of a picture twice as
                                                    tall, woven with the frame before's */
     int versions;
+    uint64_t vram_gen[PPU_VERSIONS];            /* each copy's VRAM writes before it (and its
+                                                   size's changes): two copies with the same,
+                                                   the same words */
     uint16_t vram[PPU_VERSIONS][PPU_VRAM_PAGES * 0x8000];
     uint8_t oam[PPU_VERSIONS][PPU_OAM_EXT];     /* the table, then the sprites' X and Y pages */
     uint8_t segs[PPU_MAX_HEIGHT + 1];           /* segments past the first (0: none) */
@@ -77,8 +93,14 @@ typedef struct {
     int cv_on, cv_layer, cv_k;
     /* a screen canvas (nshvc_ext_canvas_screen) instead: texels by the
        screen's pixels, cv_w x cv_h of them from its top left, the whole
-       layer's priority and palette */
-    int cv_screen, cv_w, cv_h, cv_prio, cv_pal;
+       layer's priority and palette; cv_rgb: its texels 32 bits each
+       (nshvc_ext_canvas_screen32: 0 transparent, 0x000000ii an index, a
+       top byte not 0 the colour 0xrrggbb), cv_len bytes of them */
+    int cv_screen, cv_w, cv_h, cv_prio, cv_pal, cv_rgb;
+    /* a screen canvas over the whole screen (k 0): its texels across and
+       down, cv_w and cv_h (each texel by where a point falls on the
+       screen: rr_cv_fit); 0 for one of k texels a console pixel */
+    int cv_fx, cv_fy;
     unsigned cv_addr, cv_count;
     size_t cv_len;
     const uint8_t *cv;
@@ -125,6 +147,8 @@ const uint32_t *ppu_picture(int *width, int *height);
    there is no memory for it. */
 struct RrMode7;
 int ppu_mode7(const PpuFrame *f, const uint32_t *pic, struct RrMode7 *m);
+/* (ppu.c m7_plain) */
+void ppu_set_mode7_plain(int on);
 /* frame f presented at ow x oh pixels into out (0xFFRRGGBB): rr_mode7.h
    rr_ref_mode7 of ppu_mode7's record, as the window shows it. Every
    output pixel is pic scaled with sharp bilinear exactly as rr_ref_image
@@ -139,6 +163,10 @@ void ppu_present(const PpuFrame *f, const uint32_t *pic, uint32_t *out, int ow, 
 /* whether a line of f shows a Mode 7 layer or the frame's canvas (else
    ppu_present is pic scaled, nothing more) */
 int ppu_frame_mode7(const PpuFrame *f);
+/* what the frame presents at the window's resolution: 1 a Mode 7 line, 2 a
+   line showing a canvas, 4 a pseudo-hires line showing the canvas at the
+   console's resolution (or-ed) */
+int ppu_frame_presents(const PpuFrame *f);
 
 /* ---- the console's side ---- */
 void ppu_reset(void);
@@ -152,6 +180,7 @@ int ppu_open1(uint8_t reg);
 void ppu_latch_counters(uint16_t h, uint16_t v);
 void ppu_frame_start(void);              /* line 0 */
 void ppu_render_line(unsigned line);     /* lines 1 to the frame's height */
+void ppu_render_lines(unsigned first, unsigned end);   /* first to end - 1, nothing changed between them */
 void ppu_vblank_start(void);             /* the frame is done */
 int ppu_forced_blank(void);
 int ppu_overscan(void);                  /* SETINI bit 2 as it stands */
@@ -171,11 +200,19 @@ void ppu_ext_vram(int kb);
 void ppu_ext_vram_page(int page);
 void ppu_ext_layer_page(int layer, int page);
 void ppu_ext_layer_clip(int layer, int on);
+void ppu_ext_window_edges(int on);
+void ppu_ext_window_map(int on, int32_t scale_q16, int offset);
+void ppu_ext_window_columns(int window, int left, int right);
 void ppu_ext_sprite_wrap(int on);
 void ppu_ext_layer_outside(int layer, const uint16_t *map, int size);
 void ppu_ext_vram_copy(int to_page, int from_page);
 void ppu_ext_canvas_chars(int layer, unsigned word_addr, int count, const uint8_t *texels, int k);
+int ppu_canvas_k(void);
+/* STAT77's flags brought up to the beam: line v, h clocks into it, the
+   frame's vdisp (225, or 240 with overscan); before a read of $213E */
+void ppu_stat_catch_up(unsigned v, unsigned h, unsigned vdisp);
 void ppu_ext_canvas_screen(int layer, const uint8_t *texels, int w, int h, int k, int priority, int palette);
+void ppu_ext_canvas_screen32(int layer, const uint32_t *texels, int w, int h, int k, int priority, int palette);
 /* the texels a console pixel spans along each axis at the window's size
    now (nshvc_ext_canvas_scale): the front end sets it as it presents */
 void ppu_set_canvas_scale(int k);
@@ -184,6 +221,7 @@ void ppu_ext_vram_direct(int page);
 /* the page the data port's writes go to directly (nshvc_ext_vram_direct),
    or -1 */
 int ppu_vram_direct(void);
+void ppu_vram_port_run(const uint8_t *b, const uint8_t *v, unsigned n);
 /* a write to $21C0-$21C5: ignored with no VRAM past 64 KB, else masked to its pages */
 void ppu_ext_page_reg(uint8_t reg, uint8_t v);
 

@@ -242,8 +242,27 @@ static void frame_done(void)
 }
 
 void nshvc_set_frame_hook(void (*fn)(void)) { user_frame_hook = fn; }
-void nshvc_set_write_hook(void (*fn)(uint32_t addr, uint8_t value)) { snes_write_hook = fn; }
-void nshvc_set_read_hook(void (*fn)(uint32_t addr, uint8_t value)) { snes_read_hook = fn; }
+/* (a hook sees every access: the inline ones too, as calls) */
+void nshvc_set_write_hook(void (*fn)(uint32_t addr, uint8_t value))
+{
+    snes_bus_enter();
+    snes_write_hook = fn;
+    snes_bus_leave();
+}
+
+void nshvc_set_register_write_hook(void (*fn)(uint32_t addr, uint8_t value))
+{
+    snes_bus_enter();
+    snes_register_write_hook = fn;
+    snes_bus_leave();
+}
+
+void nshvc_set_read_hook(void (*fn)(uint32_t addr, uint8_t value))
+{
+    snes_bus_enter();
+    snes_read_hook = fn;
+    snes_bus_leave();
+}
 
 void nshvc_power(const nshvc_cart *cart)
 {
@@ -264,7 +283,7 @@ void nshvc_power(const nshvc_cart *cart)
     snes_spc_run_hook = spc_run;
     snes_frame_hook = frame_done;
     snes_power();
-    cpu_co = coro_new(cpu_main, NULL, 16u << 20);
+    cpu_co = coro_new(cpu_main, NULL, CORO_CPU_STACK);
 }
 
 void nshvc_run_frame(void)
@@ -273,4 +292,7 @@ void nshvc_run_frame(void)
         snes_fatal("nshvc_run_frame before nshvc_power");
     host_co = coro_current();
     coro_switch(host_co, cpu_co);
+    if (!coro_stack_ok(cpu_co))
+        snes_fatal("the S-CPU's code used all of its stack's %u bytes", (unsigned)CORO_CPU_STACK);
+    apu_flush();
 }
