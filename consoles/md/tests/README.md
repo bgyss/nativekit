@@ -46,6 +46,11 @@ immediate is a variant, a rewritten opcode is another program.
 `decomp/bank_stall_check.py` captures an authored cartridge whose Z80 reads
 its bank window while the 68000 repeats short VDP DMA stalls; it was observed
 failing ("core reported an NMDT trace error") on the core without patch 0003.
+`decomp/rebase_stall_check.py` runs an authored cartridge that only polls the
+VDP status port through `oracle/run.py --test-rebase-frame`, which asks the
+core to rebase its clocks at the end of a frame; it was observed failing
+("frame count mismatch": three frames from one call) on the core without
+patch 0004.
 
 Run `python3 consoles/md/tools/decomp/benchmark.py --frames 30` for the
 bounded combined-CPU resource measurement. It writes capture files and a JSON

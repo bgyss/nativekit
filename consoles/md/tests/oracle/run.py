@@ -105,9 +105,13 @@ def main():
                         help="skip frame, audio, and binary trace files while collecting CPU stats")
     parser.add_argument("--feature-only", action="store_true",
                         help="filter CPU events to survey features and skip frame/audio files")
+    parser.add_argument("--test-rebase-frame", type=int,
+                        help="ask the candidate core to rebase its clocks at the end of this frame")
     args = parser.parse_args()
     if args.frames < 1 or not args.core.is_file() or not args.rom.is_file():
         parser.error("core and ROM must exist, and frames must be positive")
+    if args.test_rebase_frame is not None and not 1 <= args.test_rebase_frame <= args.frames:
+        parser.error("--test-rebase-frame must name a frame of the run")
     if args.system_dir and not args.system_dir.is_dir():
         parser.error("--system-dir must name an existing directory")
     if args.feature_only and not args.trace:
@@ -365,6 +369,8 @@ def main():
         if cpu_stats:
             cpu_stats.begin_frame(frame_number)
         current_input[0] = script.get(frame_number, {})
+        if args.test_rebase_frame == frame_number:
+            core.nmd_decomp_request_test_rebase()
         core.retro_run()
         if cpu_stats:
             cpu_stats.end_frame()

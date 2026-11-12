@@ -224,15 +224,20 @@ Findings, none of them fixed here:
   ROM bytes against 20,704: 4.3% of the image. 3,944 statically reached bytes
   have still never executed, and 3 of 14 computed transfers have no observed
   target.
-- **The reference core stops returning at frame 4,783 of some runs.** Two
-  preview runs through `oracle/run.py` with different inputs (start then no
-  input; the 3,000-frame script continued) each had `retro_run` call 4,783
-  never return while the core went on delivering video frames: one wrote
-  214,000 frames, the other 225,000, before being stopped. The idle run
-  passed 5,000 frames and the `over` inputs passed 4,770. The cause is not
-  diagnosed, and whether upstream or patches 0001-0003 introduce it is not
-  known. Every capture here stays below that frame; a scenario that crossed
-  it would run until its time or byte cap.
+- **The reference core stopped returning at frame 4,783, since patched.** Two
+  preview runs through `oracle/run.py` with different inputs each had
+  `retro_run` call 4,783 never return while the core went on delivering
+  video frames. The core rebases every component clock once in about 4,783
+  frames, when a frame ends; the generated 68000 execute loop keeps its
+  target cycle in a local the rebase did not move. Here the frame ended
+  inside a read of the VDP status port (the title polls it), so the loop was
+  left with an unreachable target. The idle run's frame ended between
+  instructions and passed. Patch
+  `tools/toolchains/patches/blastem/0004-m68k-execute-target-follows-rebase.patch`
+  moves the target with the clock; `rebase_stall_check.py` is its authored
+  control, and one of the two preview runs now completes 5,200 frames. The
+  five captures above were taken before it, all below that frame; no capture
+  has been taken past it yet.
 - **The capture cap is split in half, and the preflight does not say so.**
   `run.py` gives the NMDH and NMDT streams half of `--max-bytes` each. A first
   3,000-frame attempt with a 128 GiB cap passed its preflight (83.7 GB
@@ -268,10 +273,12 @@ Findings, none of them fixed here:
 
 ## Not done
 
-- Diagnosing the frame-4,783 stall in the reference core. Until then the
+- Any capture past frame 4,783, now that patch 0004 allows one: the
   score-table name entry (it begins near frame 4,700 when the continue
   countdown runs out), the third stage and its refuelling sequence (frame
   5,400 at the earliest), every later stage and the ending are untraced.
+  Such a capture is about 24 MB a frame, and the intake's memory and time
+  grow with it (above).
 - The second stage is traced for about 450 frames only. A scenario should
   not press START after the game starts, since each press pauses or resumes
   it.

@@ -36,6 +36,19 @@ the patch only ever delays it. Whether hardware agrees with either is
 unverified. No output of the 59 synthetic reference cases changed.
 `consoles/md/tests/decomp/bank_stall_check.py` fails on the unpatched core.
 
+The fourth, `0004-m68k-execute-target-follows-rebase.patch`, repairs a stall.
+About once every 4,783 NTSC frames the core subtracts a constant from every
+component clock when a frame ends. The generated `m68k_execute` keeps its
+target cycle in a local; when the frame ended inside an instruction (a VDP
+port access synchronises the VDP) the rebased clock could no longer reach
+that target, so `retro_run` kept presenting frames and never returned. The
+patch records the amount in the 68000 context and the loop moves its target
+by it. It changes no emulated timing: no output of the 59 synthetic reference
+cases changed, and a forced rebase leaves picture and sound equal to a run
+without one. `consoles/md/tests/decomp/rebase_stall_check.py` fails ("frame
+count mismatch") on the core without it. Whether the pinned upstream's other
+front ends are affected was not checked.
+
 `mise run test:md-oracle-smoke` exercises the exploratory runner with generated
 cartridges. After `mise run tools:md`, `--trace` requires the candidate trace
 ABI and writes `bus.trace`. The current patch advertises M68K and Z80 CPU

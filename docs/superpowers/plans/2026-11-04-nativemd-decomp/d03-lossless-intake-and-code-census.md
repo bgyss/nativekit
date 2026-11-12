@@ -1,6 +1,6 @@
 # D03: Recover code identities and a lossless assembly skeleton
 
-**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence is five captures of up to 4,700 frames, limited by a reference-core stall at frame 4,783, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence is five captures of up to 4,700 frames, none past frame 4,783 where the reference core stalled until patch 0004, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -79,8 +79,10 @@ untraced; a 3,000-frame capture (2026-11-11) written against the picture adds
 the options screen and about 1,900 frames of first-stage play and decodes
 20,704 ROM bytes, 396 more; an idle capture (the demonstration and score
 table) and a game-over capture (a continue and the start of the second stage)
-bring that to 22,538, 4.3% of the image; in some runs the reference core never
-returns from frame 4,783, undiagnosed, so the name entry, the third and later
+bring that to 22,538, 4.3% of the image; the reference core never returned from
+frame 4,783 when that frame ended inside an instruction (a clock rebase the
+68000 loop's target did not follow; fixed by patch 0004 with an authored
+control, 2026-11-12), and no capture has been taken past it, so the name entry, the third and later
 stages and the ending are untraced; the captures complete only with reference-core patch
 0003, whose Z80 bank-wait timing is unverified against hardware; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item

@@ -26,6 +26,8 @@ CHECKS = (
      "consoles/md/tests/decomp/core_check.py", "--case", "checkpoint"),
     ("actual Z80 bank-window reads during a 68000 VDP stall",
      "consoles/md/tests/decomp/bank_stall_check.py"),
+    ("actual clock rebase inside a 68000 VDP status read",
+     "consoles/md/tests/decomp/rebase_stall_check.py"),
     ("68000 decoder against the assembler, flow facts and planted errors",
      "consoles/md/tests/decomp/m68k_decoder_check.py"),
     ("Z80 decoder against the assembler, flow facts and planted errors",
