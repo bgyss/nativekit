@@ -29,6 +29,7 @@ trace saw. Nothing here guesses.
 import hashlib
 import json
 import re
+import zlib
 
 import m68k_dis
 import z80_dis
@@ -226,6 +227,14 @@ def _shape(text):
     return _LITERAL.sub("#", text)
 
 
+def _pack(snapshot):
+    return zlib.compress(snapshot, 1)
+
+
+def _unpack(packed):
+    return zlib.decompress(packed)
+
+
 class _Family:
     """Generations of one RAM program: equal except in the numeric operands
     of instructions that otherwise decode alike (see the module text)."""
@@ -234,7 +243,8 @@ class _Family:
         snapshot, executed, edges = generation
         self.cpu = cpu
         self.origin = origin
-        self.members = [snapshot]
+        self.first = snapshot
+        self.members = [_pack(snapshot)]    # every generation's RAM, compressed
         self.low = min(executed)
         self.high = max(offset + length for offset, length in executed.items())
         self.starts = set(executed)
@@ -286,12 +296,12 @@ class _Family:
         if (low, high) == (self.low, self.high) and self.starts.issuperset(executed):
             space, owner, recheck = self.space, self.owner, ()
         else:   # more of the program ran: every member must hold over the larger walk
-            space, owner = self._walk(self.members[0], low, high, self.starts | set(executed))
+            space, owner = self._walk(self.first, low, high, self.starts | set(executed))
             recheck = self.members[1:]
         if self._alike(space, owner, snapshot[low:high]) is None or any(
-                self._alike(space, owner, member[low:high]) is None for member in recheck):
+                self._alike(space, owner, _unpack(member)[low:high]) is None for member in recheck):
             return False
-        self.members.append(snapshot)
+        self.members.append(_pack(snapshot))
         self.low, self.high, self.space, self.owner = low, high, space, owner
         self.starts.update(executed)
         self.edges.update(edges)
@@ -301,7 +311,7 @@ class _Family:
         """The family's space: walked from every start a variant ran."""
         contents = {}
         for member in self.members:
-            contents.setdefault(bytes(member[self.low:self.high]), 0)
+            contents.setdefault(bytes(_unpack(member)[self.low:self.high]), 0)
         chosen, found = next(iter(contents)), None
         for data in contents:
             at = rom.find(data)
@@ -340,7 +350,7 @@ class _Ram:
         self.code = bytearray(size)   # 1 where the open generation executed
         self.executed = {}            # offset -> length, the open generation
         self.edges = set()            # (from, to) flow edges seen in it
-        self.closed = []              # (snapshot, executed, edges)
+        self.families = []            # program families, in the order generations closed
 
     def write(self, address, value):
         offset = address % self.size
@@ -362,7 +372,10 @@ class _Ram:
 
     def close(self):
         if self.executed:
-            self.closed.append((bytes(self.bytes), self.executed, self.edges))
+            # admitted now, in closing order, so a generation's maps are not all held to the end
+            generation = (bytes(self.bytes), self.executed, self.edges)
+            if not any(family.admit(generation) for family in self.families):
+                self.families.append(_Family(self.cpu, self.origin, generation))
             self.executed = {}
             self.edges = set()
             self.code = bytearray(self.size)
@@ -487,12 +500,8 @@ def build(rom, evidence_sets=()):
         rom_space.mark(address, width, READ)
 
     spaces = [rom_space]
-    for cpu, ram in rams.items():
-        families = []
-        for generation in ram.closed:
-            if not any(family.admit(generation) for family in families):
-                families.append(_Family(cpu, ram.origin, generation))
-        spaces.extend(family.finish(rom) for family in families)
+    for ram in rams.values():
+        spaces.extend(family.finish(rom) for family in ram.families)
     return spaces
 
 

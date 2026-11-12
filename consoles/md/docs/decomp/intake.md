@@ -247,10 +247,18 @@ Findings, none of them fixed here:
   `estimated_stream_bytes` for each stream and a capture refuses to start
   when either exceeds its half; `runner_check.py` holds a planted estimate
   whose total fits and whose NMDH stream does not.
-- **Intake memory and time grow with the variant count.** The 3,000-frame
-  intake peaked at 6.2 GB against 1.2 GB at 900 frames, with 262,271 variants
-  of the one patched Z80 program against 34,776; the three-capture intake
-  peaked at 16.5 GB with 630,077 and took 3.6 hours.
+- **Intake memory grew with the generation count, since reduced.** The
+  3,000-frame intake peaked at 6.2 GB against 1.2 GB at 900 frames, with
+  262,271 variants of the one patched Z80 program against 34,776; the
+  three-capture intake peaked at 16.5 GB with 630,077 and took 3.6 hours. The
+  code map kept every closed RAM generation, a full copy of RAM with its
+  per-instruction maps, until all captures were read. Since 2026-11-12 it
+  admits each generation into its family as it closes, in the same order, and
+  keeps member copies compressed. Over the first 30 million events of the
+  3,000-frame capture (10,456 generations, 10,399 variants) the old and new
+  code produce the same code map, with peaks of 318 MB and 74 MB. Time is
+  unchanged: each capture is still parsed twice, once to validate it and once
+  to read it.
 - **The first 900-frame run failed in the reference core, since patched.** It
   ended `incomplete_core_error` near frame 258. BlastEm's Z80 bank-window
   handlers set the Z80 clock to the 68000's clock whenever the 68000 was
