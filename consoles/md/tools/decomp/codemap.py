@@ -458,10 +458,10 @@ class Ingest:
 
 
 def load_evidence(capture_directory, rom_sha256):
-    """The NMDH capture's instruction, flow and bus events, after its
-    manifest proves it was made from this ROM and completed."""
+    """The capture's evidence, after its manifest proves it was made from
+    this ROM and completed: its NMDH events, or for a light capture the NMDE
+    digest they reduce to."""
     import pathlib
-    import trace as nmdh_trace
     directory = pathlib.Path(capture_directory)
     try:
         manifest = json.loads((directory / "manifest.json").read_text())
@@ -472,7 +472,37 @@ def load_evidence(capture_directory, rom_sha256):
         raise CodeMapError("capture was made from a different ROM")
     if manifest.get("status") != "complete":
         raise CodeMapError("capture is not complete: %r" % manifest.get("status"))
+    if manifest.get("evidence") == "light":
+        return _DigestEvidence(directory / "capture.nmde", rom_sha256)
+    if "window" in manifest:
+        # a window's RAM does not start from power-on
+        raise CodeMapError("a window is not evidence for a code map")
     return _Evidence(directory / "capture.nmdh")
+
+
+class _DigestEvidence:
+    """A light capture's digest: what Ingest made of its events when they
+    were emitted. The file is fully validated before any of it is used."""
+
+    def __init__(self, path, rom_sha256):
+        self.path = path
+        self.rom_sha256 = rom_sha256
+
+    def replay(self, ingest):
+        import evidence
+        import trace as nmdh_trace
+        if evidence.RAM_SIZES != {"m68k": WORK_RAM_SIZE, "z80": Z80_RAM_SIZE}:
+            raise CodeMapError("digest RAM sizes differ from the code map's")
+        try:
+            digest = evidence.read_digest(self.path)
+            if digest.metadata["identities"]["rom_sha256"] != self.rom_sha256:
+                raise CodeMapError("digest was made from a different ROM")
+            ingest.begin()
+            ingest.merge(digest.traced_rom, digest.rom_edges, digest.reads)
+            for generation in digest.generations():
+                ingest.on_generation(*generation)
+        except (OSError, evidence.DigestError, nmdh_trace.NMDHError) as exc:
+            raise CodeMapError("digest unreadable: %s" % exc)
 
 
 class _Evidence:

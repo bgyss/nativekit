@@ -22,6 +22,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import census_fixture  # noqa: E402
 import codemap  # noqa: E402
 import evidence  # noqa: E402
+import identity_check  # noqa: E402
+import intake  # noqa: E402
 import trace as nmdh_trace  # noqa: E402
 
 METADATA = {
@@ -187,6 +189,90 @@ def digest_byte_cap(temp):
     raise AssertionError("a digest over its byte cap was written")
 
 
+def code_map(rom_path, out, captures):
+    """Run the intake; return codemap.json's bytes after an identical rebuild."""
+    _, _, rebuilt = intake.run_intake(rom_path, out, captures, "evidence-control")
+    require(rebuilt["identical"], "the skeleton did not rebuild the image")
+    return (out / "codemap.json").read_bytes()
+
+
+def stream_and_digest_agree(temp, name, rom_path, capture):
+    """An intake over a capture's digest gives the code map of one over its events."""
+    light = temp / (name + "-digest")
+    require(intake.main(["digest", "--rom", str(rom_path), "--capture", str(capture),
+                         "--out", str(light)]) == 0, "intake.py digest failed")
+    manifest = json.loads((light / "manifest.json").read_text())
+    source = json.loads((capture / "manifest.json").read_text())
+    require(manifest["evidence"] == "light" and manifest["outputs"] == ["capture.nmde"] and
+            manifest["nmde_bytes"] == (light / "capture.nmde").stat().st_size and
+            manifest["events"] == source["events"] and
+            len(manifest["digest_of"]["nmdh_footer_sha256"]) == 64 and
+            not (light / "capture.nmdh").exists(),
+            "the digest directory's manifest does not describe it: %r" % manifest)
+    full = code_map(rom_path, temp / (name + "-from-stream"), [capture])
+    reduced = code_map(rom_path, temp / (name + "-from-digest"), [light])
+    require(full == reduced, name + ": the digest's code map differs from the stream's")
+    return light, full
+
+
+def planted_digest_errors(temp, rom_path, capture, light, full, other_light):
+    rom = rom_path.read_bytes()
+    digest = evidence.read_digest(light / "capture.nmde")
+
+    def rewrite(directory, traced_rom):
+        directory.mkdir()
+        (directory / "manifest.json").write_bytes((light / "manifest.json").read_bytes())
+        writer = evidence.DigestWriter(directory / "capture.nmde", digest.metadata, 1 << 24)
+        for generation in digest.generations():
+            writer.generation(*generation)
+        writer.finish(traced_rom, digest.rom_edges, digest.reads)
+        return directory
+
+    same = rewrite(temp / "rewritten", digest.traced_rom)
+    require(code_map(rom_path, temp / "from-rewritten", [same]) == full,
+            "a digest rewritten unchanged gives another code map")
+    short = rewrite(temp / "short", digest.traced_rom - {max(digest.traced_rom)})
+    require(code_map(rom_path, temp / "from-short", [short]) != full,
+            "a digest missing one traced address gives the same code map")
+
+    other_rom = temp / "other.bin"
+    other_rom.write_bytes(rom[:-1] + bytes([rom[-1] ^ 1]))
+    for label, action, fragment in (
+            ("digest with another ROM", lambda: intake.run_intake(other_rom, temp / "x1", [light]),
+             "capture was made from a different ROM"),
+            ("digest of another ROM under this manifest",
+             lambda: (
+                 (same / "capture.nmde").write_bytes((other_light / "capture.nmde").read_bytes()),
+                 intake.run_intake(rom_path, temp / "x2", [same])),
+             "digest was made from a different ROM")):
+        try:
+            action()
+        except codemap.CodeMapError as exc:
+            require(fragment in str(exc), "%s refused for another reason: %s" % (label, exc))
+        else:
+            raise AssertionError("planted " + label + " passed the intake")
+    (same / "capture.nmde").write_bytes((light / "capture.nmde").read_bytes()[:-1])
+    try:
+        intake.run_intake(rom_path, temp / "x3", [same])
+    except codemap.CodeMapError as exc:
+        require("NMDE" in str(exc), "a truncated digest was refused for another reason: %s" % exc)
+    else:
+        raise AssertionError("a truncated digest passed the intake")
+
+
+def repeats(temp, rom_path, capture, light, full):
+    """A run given as its stream and its digest counts as the run given twice."""
+    twice = code_map(rom_path, temp / "stream-twice", [capture, capture])
+    mixed = code_map(rom_path, temp / "stream-and-digest", [capture, light])
+    require(twice == mixed, "a stream with its own digest differs from the stream twice")
+    require(twice != full, "a repeated run does not count its RAM programs' occurrences twice")
+    once, again = json.loads(full), json.loads(twice)
+    for space in again["spaces"]:
+        if space["kind"] == "ram":
+            space["occurrences"] //= 2
+    require(once == again, "a repeated run changes more than occurrences")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="nmd-evidence-") as temp:
         temp = pathlib.Path(temp)
@@ -197,9 +283,16 @@ def main():
         size = digest_round_trip(temp)
         refused = digest_mutations(temp)
         digest_byte_cap(temp)
+        light, full = stream_and_digest_agree(temp, "census", rom_path, capture)
+        id_rom, id_scenario, *_ = identity_check.build(temp / "identity")
+        id_capture = census_fixture.capture(id_rom, id_scenario, temp / "identity")
+        id_light, _ = stream_and_digest_agree(temp, "identity", id_rom, id_capture)
+        planted_digest_errors(temp, rom_path, capture, light, full, id_light)
+        repeats(temp, rom_path, capture, light, full)
     print("evidence_check: ok (ingest: %d RAM generations, as the code map counts them; "
-          "digest round trip in %d bytes, %d damaged digests refused, byte cap held)"
-          % (generations, size, refused))
+          "digest round trip in %d bytes, %d damaged digests refused, byte cap held; "
+          "two controls' code maps equal from stream and digest; 4 planted digest errors "
+          "caught; a repeated run counted twice)" % (generations, size, refused))
 
 
 if __name__ == "__main__":

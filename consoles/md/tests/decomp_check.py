@@ -36,6 +36,8 @@ CHECKS = (
      "consoles/md/tests/decomp/census_check.py"),
     ("operand-patched RAM programs as one identity with variants",
      "consoles/md/tests/decomp/identity_check.py"),
+    ("evidence digest framing, round trip and code map equality",
+     "consoles/md/tests/decomp/evidence_check.py"),
 )
 
 

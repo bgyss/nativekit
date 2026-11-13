@@ -5,6 +5,7 @@ routine catalog and census.
   intake.py intake  --rom ROM --out DIR [--capture DIR]... [--id NAME] [--raw]
   intake.py rebuild --rom ROM --dir DIR
   intake.py census  --dir DIR
+  intake.py digest  --rom ROM --capture DIR --out DIR
 
 `intake` writes DIR/codemap.json, DIR/manifest.json, DIR/asm/*.s,
 DIR/catalog.json and DIR/census.json, then runs the rebuild gate; it exits
@@ -12,6 +13,11 @@ non-zero unless the rebuilt image equals ROM byte for byte. The ROM's path
 and bytes are never written to DIR: files name it by SHA-256 and the neutral
 --id only. DIR/asm of a decoded skeleton holds recovered code text, so DIR
 belongs under ignored build/decomp/<game-id>/, not in nativekit.
+
+`digest` reads a full capture's events once more and writes what the code map
+keeps of them as OUT/capture.nmde with a manifest, so the capture's streams
+need not be kept: an intake over OUT gives the code map of one over the
+capture.
 """
 import argparse
 import json
@@ -22,6 +28,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 import asmverify  # noqa: E402
 import codemap  # noqa: E402
+import evidence  # noqa: E402
+import trace as nmdh_trace  # noqa: E402
 import skeleton  # noqa: E402
 
 
@@ -113,6 +121,32 @@ def run_intake(rom_path, out, captures=(), neutral_id=None, raw_only=False,
     return counts, routines, rebuilt
 
 
+def run_digest(rom_path, capture, out, max_bytes=1 << 32):
+    """Reduce a full capture to its evidence digest; returns the new manifest."""
+    rom = pathlib.Path(rom_path).read_bytes()
+    capture, out = pathlib.Path(capture), pathlib.Path(out)
+    events = codemap.load_evidence(capture, codemap.sha256(rom))
+    if not isinstance(events, codemap._Evidence):
+        raise codemap.CodeMapError("capture is already a digest")
+    manifest = json.loads((capture / "manifest.json").read_text())
+    with (capture / "capture.nmdh").open("rb") as stream:
+        stream.seek(-nmdh_trace.FOOTER.size, 2)
+        footer_sha256 = nmdh_trace.FOOTER.unpack(stream.read())[4].hex()
+    writer = evidence.DigestWriter(out / "capture.nmde", manifest["metadata"], max_bytes)
+    try:
+        ingest = codemap.Ingest(len(rom), writer.generation)
+        events.replay(ingest)
+        path = writer.finish(ingest.traced_rom, ingest.rom_edges, ingest.reads)
+    except BaseException:
+        writer.abort("core_error")
+        raise
+    manifest.update({"format": "NMDE v1 capture", "evidence": "light",
+                     "outputs": [path.name], "nmde_bytes": path.stat().st_size,
+                     "digest_of": {"nmdh_footer_sha256": footer_sha256}})
+    (out / "manifest.json").write_bytes(nmdh_trace.canonical_json(manifest))
+    return manifest
+
+
 def summary(counts):
     lines = ["%s: %s, image %d bytes sha256 %s, rebuild %s" % (
         counts["game"] or "unnamed", counts["mode"], counts["rom"]["size"],
@@ -149,6 +183,10 @@ def main(argv=None):
     rebuild.add_argument("--dir", required=True)
     show = commands.add_parser("census")
     show.add_argument("--dir", required=True)
+    digest = commands.add_parser("digest")
+    digest.add_argument("--rom", required=True)
+    digest.add_argument("--capture", required=True)
+    digest.add_argument("--out", required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "intake":
@@ -158,6 +196,10 @@ def main(argv=None):
             report = skeleton.rebuild(args.dir, args.rom)
             print("rebuild: identical, %d bytes, sha256 %s, %d programs (%s)" % (
                 report["length"], report["sha256"], report["programs_rebuilt"], report["mode"]))
+        elif args.command == "digest":
+            manifest = run_digest(args.rom, args.capture, args.out)
+            print("digest: %d events, %d stream bytes, %d digest bytes" % (
+                manifest["events"], manifest["nmdh_bytes"], manifest["nmde_bytes"]))
         else:
             print(summary(json.loads((pathlib.Path(args.dir) / "census.json").read_text())))
     except (OSError, ValueError, skeleton.RebuildError, asmverify.AssemblerError) as exc:
