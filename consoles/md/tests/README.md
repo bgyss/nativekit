@@ -43,6 +43,12 @@ rebuilt byte-identically and attacked with planted errors. Counts, schemas and
 limits are in [`decomp/intake.md`](../docs/decomp/intake.md).
 `decomp/identity_check.py` holds the RAM program family rule: a rewritten
 immediate is a variant, a rewritten opcode is another program.
+`decomp/evidence_check.py` holds the code map's event reduction and the NMDE
+v1 evidence digest (round trip, fifteen damaged digests refused, byte cap,
+the same code map from a digest as from the streams).
+`decomp/light_check.py` holds `run.py --evidence light`: the same code map,
+event count, picture, sound and record digest as the full capture, and frame
+windows equal to the full capture's records for those frames.
 `decomp/bank_stall_check.py` captures an authored cartridge whose Z80 reads
 its bank window while the 68000 repeats short VDP DMA stalls; it was observed
 failing ("core reported an NMDT trace error") on the core without patch 0003.

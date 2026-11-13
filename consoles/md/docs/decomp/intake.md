@@ -3,7 +3,8 @@
 The shared tooling that turns a Mega Drive image and reference captures into
 an auditable byte map and an assembly skeleton that rebuilds the image
 exactly. Its gates are held by authored synthetic cartridges; the first title
-has been run through it with five captures of up to 4,700 frames, with the [results and findings below](#first-title).
+has been run through it with six captures of up to 5,800 frames, four of them
+again as [light captures](#light-captures-and-the-evidence-digest), with the [results and findings below](#first-title).
 
 ## Commands
 
@@ -14,10 +15,13 @@ python3 consoles/md/tools/decomp/intake.py intake \
     --rom ROM --out build/decomp/<game-id> [--capture CAPTURE_DIR]... [--id <game-id>] [--raw]
 python3 consoles/md/tools/decomp/intake.py rebuild --rom ROM --dir build/decomp/<game-id>
 python3 consoles/md/tools/decomp/intake.py census  --dir build/decomp/<game-id>
+python3 consoles/md/tools/decomp/intake.py digest  --rom ROM --capture CAPTURE_DIR --out DIGEST_DIR
 ```
 
 `CAPTURE_DIR` is the `--out` of a completed `consoles/md/tools/decomp/run.py
 --mode capture` whose scenario requires `bus_intervals` and `flow_edge`.
+A capture taken with `--evidence light`, or a `DIGEST_DIR` that `digest` made
+from a full capture, is a `CAPTURE_DIR` too.
 `intake` exits non-zero unless the rebuilt image equals `ROM` in length,
 SHA-256 and every byte. The ROM's path and bytes are never written to the
 output: files name it by SHA-256 and `--id`. A decoded skeleton's `asm/` holds
@@ -111,9 +115,64 @@ evidence; `raw_code_bytes`, `included_program_bytes`, `baserom_bytes` and
 entry is **T1** only when a trace ran it, the skeleton labels it and the image
 rebuilt identically; every other entry has no tier.
 
+## Light captures and the evidence digest
+
+A full capture stores every event (about 330 bytes each, 24 MB a frame for
+the first title) and the intake reads them twice. The code map uses only what
+`codemap.Ingest` keeps of them: three sets over the ROM (68000 instruction
+addresses, flow edges, reads) and the RAM program generations of each CPU in
+the order they closed. An evidence digest, `capture.nmde` (NMDE v1,
+`evidence.py`), is exactly that, framed like NMDH v1 with the same metadata
+and a footer holding the record count and a SHA-256 of header and records:
+
+| Record | Content |
+|---|---|
+| generation, one for each, in closing order | `cpu`; `delta`, the runs of the RAM image that differ from the previous generation of that CPU (from zeros for the first) as `[offset, hex]`; `executed` as `[offset, length]`; `edges` as `[from, to]` |
+| sets, the last record, once | `traced_rom`, `rom_edges`, `reads` |
+
+Each record is a zlib stream of canonical JSON with every list sorted. The
+reader checks the framing and footer, then every record, before any of it is
+used, and the intake refuses a digest whose metadata names another ROM.
+
+```sh
+python3 consoles/md/tools/decomp/run.py --mode capture ... --evidence light \
+    [--records-digest] [--window FIRST:LAST]
+```
+
+`--evidence light` runs the reduction in the capture worker and writes only
+the digest; `--max-bytes` bounds it whole. It needs a `frame_limit` stop and
+cannot run a checkpoint test, and the estimate must have been made in the same
+mode. The manifest still records the event count and the video and audio
+hashes.
+
+- **Equality rule.** The same ROM, scenario and core give the same code map
+  from a light capture as from a full one. `--records-digest` also hashes
+  every event as a full capture would have written it and records
+  `nmdh_records_sha256`: the SHA-256 of the NMDH records without header and
+  footer, so it does not depend on the core's or the runner's identity. Equal
+  record digests mean the two runs produced the same events. It costs most of
+  the time a full capture takes; without it a light capture skips building
+  the events.
+- **A window is not evidence.** `--window FIRST:LAST` also writes
+  `window.nmdh`, the complete events of those frames with their original
+  sequence numbers, for looking at a stretch of execution (D04). It is given
+  half of `--max-bytes`. `intake` refuses it as a capture ("a window is not
+  evidence for a code map"): a code map from part of a run would be wrong.
+
 ## Evidence
 
-`mise run test:md-decomp` (exit 0, 180 s) now also runs
+`evidence_check.py` holds the reduction and the digest on the two authored
+cartridges: `Ingest` fed event by event gives `build`'s code map; a digest
+read back gives the same sets and generations; fifteen damaged digests are
+refused; the byte cap is enforced; a code map built from a digest equals the
+one built from the streams; a planted error in each is caught.
+`light_check.py` holds the runner: a light capture's code map, event count,
+picture, sound and record digest equal the full capture's, with and without
+`--records-digest`; a light capture stopped early leaves no digest; windows
+1:1, 2:2, 3:3 and 2:3 hold exactly the full capture's records for those
+frames; a window is refused as evidence.
+
+`mise run test:md-decomp` (exit 0, 247 s) also runs
 `m68k_decoder_check.py`, `z80_decoder_check.py`, `census_check.py` and
 `identity_check.py` (an authored cartridge whose 68000 rewrites a Z80
 immediate, then an opcode: the first is merged as a variant, the second kept
@@ -307,18 +366,48 @@ Findings, none of them fixed here:
   whole image; the class separates nothing for this title.
 - One 40-byte Z80 generation has 4 traced bytes, 36 unknown and no ROM source.
 
+### Light captures against the full-capture baseline
+
+2026-11-13. The four captures of the last column were taken again with
+`--evidence light --records-digest`, in parallel, on the same core, and one
+intake run over the four digests. The full captures' streams had been deleted;
+what was kept of them was each manifest, each record digest and the code map.
+
+| Capture | Events | Full streams | Digest | Full capture | Light, with record digest |
+|---|---:|---:|---:|---:|---:|
+| play, 3,000 frames | 209,186,292 | 73.5 GB | 118.0 MB | 2,988 s | 2,808 s |
+| idle, 3,100 frames | 211,388,145 | 74.0 GB | 47.3 MB | 2,916 s | 2,764 s |
+| game over, 4,700 frames | 321,891,272 | 112.4 GB | 182.3 MB | 4,441 s | 4,212 s |
+| long, 5,800 frames | 402,705,039 | 142.0 GB | 253.2 MB | 5,658 s | 5,352 s |
+| all four | 1,145,170,748 | 401.9 GB | 600.9 MB | | |
+
+- Every capture has the full capture's event count, video hash, audio hash
+  and record digest: the same events, one for one.
+- The code map from the four digests is byte-identical to the one from the
+  four full captures (SHA-256 `c4bbc66ca01523e0bc78790eeb168c62fb2b68b8d97a87ecc5aaae24614481d0`),
+  and the rebuild is identical.
+- The intake took 325 s where the full captures took 20,314 s, at the same
+  peak memory (1.7 GB against 1.6 GB).
+- The 5,800-frame capture run alone without `--records-digest` took 659 s
+  and wrote a digest byte-identical to the one above. The light captures in
+  the table ran four at a time and the full ones one at a time, so their
+  times are not a like-for-like comparison; the record digest costs about
+  what writing the events did.
+
 ## Not done
 
 - The score-table name entry (it begins near frame 4,700 when the continue
   countdown runs out), every stage after the third and the ending are
   untraced. A scenario should not press START after the game starts, since
   each press pauses or resumes it.
-- A capture is about 24 MB a frame and an intake reads it twice at about
-  1.75 GB a minute, so these four cost 402 GB and 5.6 hours for 18,964
-  traced bytes. A capture that writes full events only for code it has not
-  seen, and replay of a window from the scenario instead of kept streams, are
-  planned in
-  [the lighter-capture plan](../../../../docs/superpowers/plans/2026-11-12-nativemd-light-capture.md).
+- More code is not reached by more play of the same kinds. Finding the
+  targets of the 14 computed transfers statically (their jump tables) is the
+  next source, and was left out of
+  [the light-capture plan](../../../../docs/superpowers/plans/2026-11-12-nativemd-light-capture.md).
+- Frame windows are held by the authored controls only; no window of the
+  first title has been taken. D04 is their first user.
+- A light capture has not been taken on a title whose RAM programs change in
+  more than a few bytes a generation; the digest's size depends on that.
 - Checking patch 0003's bank-wait timing against hardware.
 - Generations that differ in data bytes inside their extent are still split;
   no title or control has needed that yet.

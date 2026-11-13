@@ -86,8 +86,12 @@ control, 2026-11-12); a 5,800-frame capture on the patched core crosses it
 with the picture of its preview, reaches the third stage and brings the four-capture
 intake to 22,648 decoded bytes, 110 more for 142 GB of events and still 4.3% of
 the image, so the name entry, the stages after the third and the ending are
-untraced and more play of the same kinds is not where new code is (a lighter
-capture is [planned](../2026-11-12-nativemd-light-capture.md)); the captures complete only with reference-core patch
+untraced and more play of the same kinds is not where new code is; the same
+four captures taken again as [light captures](../2026-11-12-nativemd-light-capture.md)
+(2026-11-13) give the same events, one for one, and a byte-identical code map
+from 601 MB of digests in place of 402 GB of streams, with the intake at 325 s
+in place of 20,314 s and the longest capture at 659 s without the record
+digest; the captures complete only with reference-core patch
 0003, whose Z80 bank-wait timing is unverified against hardware; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item
 5); the skeleton lives in the ignored workspace because no game repository is
