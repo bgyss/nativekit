@@ -20,6 +20,10 @@ NMDT_PATH = ROOT / "consoles/md/tests/oracle/trace.py"
 ABI_HEADER = ROOT / "consoles/md/tests/oracle/decomp_abi.h"
 ABI_SOURCE = ROOT / "consoles/md/tests/oracle/decomp_abi.c"
 PATCH_DIR = ROOT / "tools/toolchains/patches/blastem"
+TOOLS = ROOT / "consoles/md/tools/decomp"
+# a light capture reduces events as the intake would, so that code is part of the runner
+REDUCTION_PATHS = tuple(TOOLS / name for name in
+                        ("codemap.py", "evidence.py", "m68k_dis.py", "z80_dis.py"))
 PINS_PATH = ROOT / "tools/toolchains/pins.env"
 
 NMDH_CAPABILITIES = {
@@ -217,7 +221,7 @@ def _make_identity(core_path, rom_path, scenario, capabilities):
     patches = list(PATCH_DIR.glob("*.patch"))
     patches.extend((ABI_HEADER, ABI_SOURCE))
     patch_hash = _hash_named_files(patches, blastem_pin.encode("ascii"))
-    runner_hash = _hash_named_files((Path(__file__), TRACE_PATH, NMDT_PATH))
+    runner_hash = _hash_named_files((Path(__file__), TRACE_PATH, NMDT_PATH, *REDUCTION_PATHS))
     abi_hash = _hash_named_files((ABI_HEADER, ABI_SOURCE))
     identities = {
         "rom_sha256": _sha256_file(rom_path),
@@ -595,10 +599,24 @@ def _worker(args):
     nmdh_path = output / (stem + ".nmdh")
     nmdt_partial = output / (stem + ".nmdt.partial")
     nmdt_path = output / (stem + ".nmdt")
-    nmdh_writer = nmdh_trace.NMDHWriter(nmdh_path, metadata, args.max_bytes // 2)
-    nmdt_file = nmdt_partial.open("xb")
-    nmdt_stream = LimitedStream(nmdt_file, args.max_bytes // 2)
-    nmdt_writer = nmdt_trace.Writer(nmdt_stream)
+    light = args.evidence == "light"
+    nmdh_writer = nmdh_trace.NMDHWriter(nmdh_path, metadata, args.max_bytes // 2, store=not light)
+    nmdt_records = [0]
+    if light:
+        # the events are reduced as they arrive (codemap.Ingest) and only the digest is kept
+        sys.modules["trace"] = nmdh_trace      # evidence.py must share this module's classes
+        sys.path.insert(0, str(TOOLS))
+        import codemap
+        import evidence
+        nmde_path = output / (stem + ".nmde")
+        digest_writer = evidence.DigestWriter(nmde_path, metadata, args.max_bytes)
+        ingest = codemap.Ingest(rom_path.stat().st_size, digest_writer.generation)
+        ingest.begin()
+        nmdt_file = nmdt_writer = None
+    else:
+        nmdt_file = nmdt_partial.open("xb")
+        nmdt_stream = LimitedStream(nmdt_file, args.max_bytes // 2)
+        nmdt_writer = nmdt_trace.Writer(nmdt_stream)
     core = c.CDLL(str(core_path.resolve()))
     trace_errors = []
     event_counts = {}
@@ -718,6 +736,23 @@ def _worker(args):
         try:
             event = event_pointer.contents
             name = "m68k" if event.cpu == TRACE_M68K else "z80"
+            if light and not args.records_digest and not replay_state["active"]:
+                # the fast path: only the fields the code map uses are read
+                kind = event.kind
+                event_counts[str(kind)] = event_counts.get(str(kind), 0) + 1
+                if kind == EVENT_INSTRUCTION:
+                    instruction_counts[name] += 1
+                    ingest.instruction(name, event.pc)
+                elif kind == EVENT_FLOW:
+                    data = event.payload.flow
+                    ingest.flow(name, data.previous_pc, data.current_pc)
+                elif kind == EVENT_BUS:
+                    data = event.payload.bus
+                    ingest.bus(name, data.address, data.width, data.value,
+                               data.operation, data.provenance)
+                elif kind in (EVENT_STOP, EVENT_REPLACE):
+                    raise RunnerError("core emitted a handoff without a runner stop request")
+                return ACTION_CONTINUE
             event_record = _event_dict(event)
             if replay_state["active"]:
                 replay_state["nmdh_hash"].update(nmdh_trace.canonical_json(event_record))
@@ -730,6 +765,8 @@ def _worker(args):
             if event.kind == EVENT_INSTRUCTION:
                 instruction_counts[name] += 1
             nmdh_writer.write_event(event_record)
+            if light:
+                ingest.feed(event_record)
             if (event.kind == EVENT_INTERRUPT and
                     name == scenario["stop"]["cpu"] and
                     scenario["stop"]["criterion"] == "interrupt"):
@@ -770,6 +807,8 @@ def _worker(args):
                 replay_state["nmdt_hash"].update(nmdh_trace.canonical_json(record))
                 replay_state["nmdt_hash"].update(b"\n")
                 replay_state["nmdt_records"] += 1
+            elif light:
+                nmdt_records[0] += 1
             else:
                 nmdt_writer.emit(nmdt_trace.Event(*record))
         except Exception as exc:
@@ -1000,26 +1039,37 @@ def _worker(args):
         if core.nmd_trace_error():
             raise RunnerError("core reported an NMDT trace error")
 
-        nmdt_writer.close()
-        nmdt_file.flush()
-        os.fsync(nmdt_file.fileno())
-        nmdt_file.close()
-        os.replace(nmdt_partial, nmdt_path)
-        nmdh_writer.finish("complete")
+        if light:
+            ingest.end()
+            if trace_errors:
+                raise RunnerError("capture callback error: " + "; ".join(trace_errors))
+            digest_writer.finish(ingest.traced_rom, ingest.rom_edges, ingest.reads)
+            nmdh_writer.finish("complete")
+            sizes = {"nmdh_bytes": 0, "nmdt_bytes": 0, "nmde_bytes": nmde_path.stat().st_size}
+            outputs = [nmde_path.name]
+        else:
+            nmdt_writer.close()
+            nmdt_file.flush()
+            os.fsync(nmdt_file.fileno())
+            nmdt_file.close()
+            os.replace(nmdt_partial, nmdt_path)
+            nmdh_writer.finish("complete")
+            nmdt_records[0] = nmdt_writer.count
+            sizes = {"nmdh_bytes": nmdh_path.stat().st_size, "nmdt_bytes": nmdt_path.stat().st_size}
+            outputs = [nmdh_path.name, nmdt_path.name]
         elapsed = time.monotonic() - start_time
-        stream_sizes = nmdh_path.stat().st_size + nmdt_path.stat().st_size
         result = {
             "status": "complete",
+            "evidence": args.evidence,
             "frames_run": frame_count,
-            "events": nmdh_writer.count,
+            "events": sum(event_counts.values()),
             "event_counts": event_counts,
             "instruction_counts": instruction_counts,
-            "nmdt_records": nmdt_writer.count,
+            "nmdt_records": nmdt_records[0],
             "elapsed_seconds": elapsed,
             "peak_worker_rss_bytes": _peak_worker_rss_bytes(),
-            "stream_bytes": stream_sizes,
-            "nmdh_bytes": nmdh_path.stat().st_size,
-            "nmdt_bytes": nmdt_path.stat().st_size,
+            "stream_bytes": sum(sizes.values()),
+            **sizes,
             "video_frames": video_frames[0],
             "audio_frames": audio_frames[0],
             "video_sha256": video_hash.hexdigest(),
@@ -1031,9 +1081,12 @@ def _worker(args):
             "handoff_event": stop_state["handoff_event"],
             "checkpoint_replay": checkpoint_replay,
         }
+        if not light or args.records_digest:
+            # which events the run saw, whatever core build or runner revision made it
+            result["nmdh_records_sha256"] = nmdh_writer.records_sha256
         (output / "worker-result.json").write_bytes(nmdh_trace.canonical_json(result))
-        output_manifest = {"format": "NMDH v1 capture", "metadata": metadata, **result,
-                           "outputs": [nmdh_path.name, nmdt_path.name]}
+        output_manifest = {"format": "NMDE v1 capture" if light else "NMDH v1 capture",
+                           "metadata": metadata, **result, "outputs": outputs}
         (output / "manifest.json").write_bytes(nmdh_trace.canonical_json(output_manifest))
         return 0
     except Exception as exc:
@@ -1043,10 +1096,13 @@ def _worker(args):
         status = "incomplete_storage_limit" if limited else "incomplete_core_error"
         if not nmdh_writer._closed:
             nmdh_writer.abort("storage_limit" if limited else "core_error")
-        try:
-            nmdt_file.close()
-        except OSError:
-            pass
+        if light:
+            digest_writer.abort("storage_limit" if limited else "core_error")
+        else:
+            try:
+                nmdt_file.close()
+            except OSError:
+                pass
         worker_status = {"status": status, "reason": str(exc),
                          "identities": metadata["identities"]}
         (output / "worker-status.json").write_bytes(nmdh_trace.canonical_json(worker_status))
@@ -1078,8 +1134,15 @@ def _run_parent(args):
     if output.exists():
         raise RunnerError("output directory already exists")
     scenario = _validate_scenario(json.loads(scenario_path.read_text()), args.frames)
+    light = args.evidence == "light"
+    if light and "checkpoint_test" in scenario:
+        raise RunnerError("light evidence cannot run a checkpoint test")
+    if light and scenario["stop"]["criterion"] != "frame_limit":
+        # a digest stands for a whole trace from power-on to a frame boundary
+        raise RunnerError("light evidence needs a frame_limit stop")
     capabilities = _preflight_core(core_path, scenario)
     metadata = _make_identity(core_path, rom_path, scenario, capabilities)
+    streams = {"nmde"} if light else {"nmdh", "nmdt"}
 
     if args.mode == "capture":
         if not args.estimate_file or not Path(args.estimate_file).is_file():
@@ -1092,6 +1155,8 @@ def _run_parent(args):
             raise RunnerError("preflight estimate frame count mismatch")
         if estimate.get("status") != "complete":
             raise RunnerError("preflight estimate is incomplete")
+        if estimate.get("evidence", "full") != args.evidence:
+            raise RunnerError("preflight estimate evidence mode mismatch")
         estimated_seconds = estimate.get("estimated_seconds")
         estimated_bytes = estimate.get("estimated_bytes")
         if (type(estimated_seconds) not in (int, float) or
@@ -1104,11 +1169,11 @@ def _run_parent(args):
         # records per-stream sizes must fit both halves, not only the total
         stream_estimates = estimate.get("estimated_stream_bytes")
         if stream_estimates is not None:
-            if (not isinstance(stream_estimates, dict) or set(stream_estimates) != {"nmdh", "nmdt"} or
+            if (not isinstance(stream_estimates, dict) or set(stream_estimates) != streams or
                     any(type(value) is not int or value < 0 for value in stream_estimates.values())):
                 raise RunnerError("invalid preflight stream estimate")
             for stream, value in sorted(stream_estimates.items()):
-                if value > args.max_bytes // 2:
+                if not light and value > args.max_bytes // 2:
                     raise RunnerError("preflight estimate exceeds the capture resource limits: "
                                       "%s stream needs %d bytes, its cap is half of --max-bytes (%d)"
                                       % (stream.upper(), value, args.max_bytes // 2))
@@ -1124,7 +1189,10 @@ def _run_parent(args):
                "--scenario", str(scenario_path.resolve()), "--frames", str(worker_frames),
                "--scenario-frames", str(args.frames),
                "--out", str(output.resolve()), "--max-bytes", str(args.max_bytes),
+               "--evidence", args.evidence,
                "--identity-json", json.dumps(metadata, sort_keys=True, separators=(",", ":"))]
+    if args.records_digest:
+        command.append("--records-digest")
     child = supervise_child(command, args.max_seconds)
     if child.timed_out:
         _status_file(output, "incomplete_timeout", "child process exceeded max_seconds", metadata)
@@ -1151,9 +1219,10 @@ def _run_parent(args):
         estimated_seconds = elapsed * args.frames / sample_frames
         estimated_stream_bytes = {
             stream: (result[stream + "_bytes"] * args.frames + sample_frames - 1) // sample_frames
-            for stream in ("nmdh", "nmdt")}
+            for stream in sorted(streams)}
         estimate = {
             "status": "complete",
+            "evidence": args.evidence,
             "metadata": metadata,
             "frames": args.frames,
             "sample_frames": sample_frames,
@@ -1184,6 +1253,10 @@ def main(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--max-seconds", type=float, default=420)
     parser.add_argument("--max-bytes", type=int, default=268435456)
+    parser.add_argument("--evidence", choices=("full", "light"), default="full",
+                        help="light: keep the evidence digest (capture.nmde), not the event streams")
+    parser.add_argument("--records-digest", action="store_true",
+                        help="light: also hash every event record as a full capture would frame it")
     args = parser.parse_args(argv)
     try:
         if args.worker_mode:

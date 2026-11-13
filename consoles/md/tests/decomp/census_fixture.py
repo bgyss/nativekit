@@ -165,13 +165,14 @@ def build(directory):
     return rom_path, scenario_path, facts
 
 
-def capture(rom_path, scenario_path, directory, frames=3):
-    """Run the reference core over the ROM; return the capture directory."""
+def capture(rom_path, scenario_path, directory, frames=3, extra=()):
+    """Run the reference core over the ROM; return the capture directory.
+    `extra` is passed to both runner calls (the evidence mode, for one)."""
     directory = pathlib.Path(directory)
     if not CORE.is_file():
         raise RuntimeError("census fixture: the pinned reference core is not built")
     common = [sys.executable, str(RUNNER), "--core", str(CORE), "--rom", str(rom_path),
-              "--scenario", str(scenario_path), "--frames", str(frames)]
+              "--scenario", str(scenario_path), "--frames", str(frames), *extra]
     estimate = subprocess.run(common + ["--mode", "estimate", "--out", str(directory / "estimate")],
                               capture_output=True, text=True, timeout=450)
     if estimate.returncode:

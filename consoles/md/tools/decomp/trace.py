@@ -140,11 +140,23 @@ def _status_code(status):
 
 
 class NMDHWriter:
-    """Write bounded, canonical NMDH records without buffering a capture."""
+    """Write bounded, canonical NMDH records without buffering a capture.
 
-    def __init__(self, path, metadata, max_bytes):
+    With `store=False` nothing is written or bounded: events are validated,
+    counted and hashed only, for a run that keeps no event stream but must
+    still say which events it saw (`records_sha256`)."""
+
+    def __init__(self, path, metadata, max_bytes, store=True):
         self.path = Path(path)
         self.partial_path = Path(str(self.path) + ".partial")
+        self._store = store
+        self._records = hashlib.sha256()
+        if not store:
+            _validate_metadata(metadata)
+            self._metadata = metadata
+            self._count = 0
+            self._closed = False
+            return
         if type(max_bytes) is not int or max_bytes < FOOTER.size:
             raise CaptureLimitError("max_bytes is too small")
         if self.path.exists() or self.partial_path.exists():
@@ -171,6 +183,12 @@ class NMDHWriter:
     def count(self):
         return self._count
 
+    @property
+    def records_sha256(self):
+        """SHA-256 of every record so far as framed (length prefix and canonical
+        JSON), without the header and footer, which hold the run's identities."""
+        return self._records.hexdigest()
+
     def write_event(self, event):
         if self._closed:
             raise NMDHError("NMDH writer is closed")
@@ -180,11 +198,16 @@ class NMDHWriter:
             self.abort("storage_limit")
             raise CaptureLimitError("NMDH event exceeds the record limit")
         record = RECORD_LENGTH.pack(len(payload)) + payload
+        if not self._store:
+            self._records.update(record)
+            self._count += 1
+            return
         if self._bytes_written + len(record) + FOOTER.size > self._max_bytes:
             self.abort("storage_limit")
             raise CaptureLimitError("NMDH capture exceeded max_bytes")
         self._stream.write(record)
         self._digest.update(record)
+        self._records.update(record)
         self._bytes_written += len(record)
         self._count += 1
 
@@ -200,6 +223,9 @@ class NMDHWriter:
 
     def finish(self, status=0):
         code = _status_code(status)
+        if not self._store:
+            self._closed = True
+            return None
         if code != STATUS_CODES["complete"]:
             self.abort(code)
             return self.partial_path
@@ -214,6 +240,9 @@ class NMDHWriter:
         return self.path
 
     def abort(self, reason):
+        if not self._store:
+            self._closed = True
+            return None
         if not self._closed:
             if self._bytes_written + FOOTER.size <= self._max_bytes:
                 self._write_footer(reason)

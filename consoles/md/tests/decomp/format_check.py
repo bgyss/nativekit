@@ -132,4 +132,20 @@ with tempfile.TemporaryDirectory() as temporary:
     aborted.write_event(event)
     aborted.abort("timeout")
     expect_error(lambda: list(trace.read_nmdh(aborted.partial_path)), "timeout capture")
+
+    # a writer that stores nothing still hashes the records a stored one writes
+    stored = trace.NMDHWriter(directory / "stored.nmdh", metadata, max_bytes=1024 * 1024)
+    unstored = trace.NMDHWriter(directory / "unstored.nmdh", metadata, max_bytes=64, store=False)
+    for sequence in (1, 2, 3):
+        for target in (stored, unstored):
+            target.write_event({**event, "sequence": sequence})
+    stored_path = stored.finish(0)
+    assert unstored.finish(0) is None and unstored.count == 3
+    assert not list(directory.glob("unstored.nmdh*"))
+    body = stored_path.read_bytes()
+    header_size = trace.HEADER.size + len(trace.canonical_json(metadata))
+    import hashlib
+    assert stored.records_sha256 == unstored.records_sha256 == hashlib.sha256(
+        body[header_size:-trace.FOOTER.size]).hexdigest()
+    expect_error(lambda: unstored.write_event({**event, "sequence": 9}), "write after finish")
 print("decomp format checks: ok")

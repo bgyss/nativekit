@@ -199,6 +199,56 @@ with tempfile.TemporaryDirectory() as temporary:
     ], capture_output=True, text=True, timeout=10)
     assert result.returncode != 0 and "libretro" in result.stderr.lower(), result.stderr
 
+    # light evidence: refused before anything runs when the scenario cannot give a whole trace
+    def light(name, scenario_file, estimate, *extra, started=False):
+        out = base / name
+        done = subprocess.run([
+            sys.executable, str(runner_path), "--mode", "capture", "--core", str(capable_no_libretro),
+            "--rom", str(rom), "--scenario", str(scenario_file), "--frames", "3",
+            "--estimate-file", str(estimate), "--out", str(out), *extra,
+        ], capture_output=True, text=True, timeout=10)
+        assert done.returncode != 0 and out.exists() == started, done.stderr
+        return done.stderr
+
+    pc_scenario = base / "pc-stop-scenario.json"
+    pc_scenario.write_text(json.dumps({
+        **matching_scenario,
+        "required_capabilities": matching_scenario["required_capabilities"] + [
+            "controlled_stop", "master_clock"],
+        "stop": {"cpu": "m68k", "criterion": "pc", "value": 0x200, "action": "stop"}}))
+    assert "light evidence needs a frame_limit stop" in light(
+        "light-pc-stop", pc_scenario, estimate_file, "--evidence", "light")
+    light_checkpoint = base / "checkpoint-scenario.json"
+    light_checkpoint.write_text(json.dumps({
+        **matching_scenario,
+        "stop": {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"},
+        "required_capabilities": matching_scenario["required_capabilities"] + ["sync_checkpoint"],
+        "checkpoint_test": {"boundary": "post_frame", "frame": 1, "continuation_frames": 1}}))
+    assert "light evidence cannot run a checkpoint test" in light(
+        "light-checkpoint", light_checkpoint, estimate_file, "--evidence", "light")
+    # an estimate made in one evidence mode does not license a capture in the other
+    frame_scenario = base / "frame-limit-scenario.json"
+    frame_scenario.write_text(json.dumps({
+        **matching_scenario, "stop": {"cpu": "m68k", "criterion": "frame_limit", "action": "stop"}}))
+    frame_metadata = runner._make_identity(
+        capable_no_libretro, rom, json.loads(frame_scenario.read_text()), 3)
+    full_estimate = base / "full-estimate.json"
+    full_estimate.write_text(json.dumps({
+        "status": "complete", "metadata": frame_metadata, "frames": 3,
+        "estimated_seconds": 0.0, "estimated_bytes": 0}))
+    light_estimate = base / "light-estimate.json"
+    light_estimate.write_text(json.dumps({
+        "status": "complete", "metadata": frame_metadata, "frames": 3, "evidence": "light",
+        "estimated_seconds": 0.0, "estimated_bytes": 0, "estimated_stream_bytes": {"nmde": 0}}))
+    assert "preflight estimate evidence mode mismatch" in light(
+        "light-with-full-estimate", frame_scenario, full_estimate, "--evidence", "light")
+    assert "preflight estimate evidence mode mismatch" in light(
+        "full-with-light-estimate", frame_scenario, light_estimate)
+    # with the modes matching, the light capture passes the preflight and reaches the core
+    assert "libretro" in light(
+        "light-with-light-estimate", frame_scenario, light_estimate, "--evidence", "light",
+        started=True).lower()
+
     instruction_event = {"kind": 1, "cpu": 1, "pc": 0x200, "next_pc": 0x206}
     pc_stop = {"cpu": "m68k", "criterion": "pc", "action": "stop", "value": 0x206}
     sentinel_stop = {"cpu": "m68k", "criterion": "return_sentinel",
@@ -278,6 +328,7 @@ with tempfile.TemporaryDirectory() as temporary:
     parent_args = argparse.Namespace(
         mode="estimate", core=capable_no_libretro, rom=rom, scenario=scenario,
         frames=3, estimate_file=None, out=timeout_out, max_seconds=1, max_bytes=1024 * 1024,
+        evidence="full", records_digest=False,
     )
     original_supervisor = runner.supervise_child
 
@@ -308,6 +359,7 @@ with tempfile.TemporaryDirectory() as temporary:
         mode="capture", core=capable_no_libretro, rom=rom, scenario=scenario,
         frames=3, estimate_file=estimate_file, out=storage_out, max_seconds=1,
         max_bytes=1024,
+        evidence="full", records_digest=False,
     )
 
     def storage_limited_worker(command, timeout_seconds):
