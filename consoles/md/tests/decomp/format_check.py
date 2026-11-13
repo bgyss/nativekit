@@ -148,4 +148,43 @@ with tempfile.TemporaryDirectory() as temporary:
     assert stored.records_sha256 == unstored.records_sha256 == hashlib.sha256(
         body[header_size:-trace.FOOTER.size]).hexdigest()
     expect_error(lambda: unstored.write_event({**event, "sequence": 9}), "write after finish")
+
+    # a window: a stream that starts at the sequence number its metadata declares
+    window = {"first_frame": 2, "last_frame": 2, "first_sequence": 7}
+    window_metadata = {**metadata, "window": window}
+    window_path = directory / "window.nmdh"
+    writer = trace.NMDHWriter(window_path, window_metadata, max_bytes=1024 * 1024)
+    expect_error(lambda: writer.write_event({**event, "sequence": 1}), "window starting at 1")
+    writer = trace.NMDHWriter(directory / "window2.nmdh", window_metadata, max_bytes=1024 * 1024)
+    for sequence in (7, 8):
+        writer.write_event({**event, "sequence": sequence})
+    expect_error(lambda: writer.write_event({**event, "sequence": 10}), "gap inside a window")
+    writer = trace.NMDHWriter(directory / "window3.nmdh", window_metadata, max_bytes=1024 * 1024)
+    for sequence in (7, 8):
+        writer.write_event({**event, "sequence": sequence})
+    good_window = writer.finish(0)
+    assert [record["sequence"] for record in trace.read_nmdh(good_window)] == [7, 8]
+    # the same records under metadata that declares another start are refused on reading
+    body = good_window.read_bytes()
+    old_header = trace.HEADER.size + len(trace.canonical_json(window_metadata))
+    import hashlib as _hashlib
+    for label, declared in (("window declared to start elsewhere", {**window, "first_sequence": 6}),
+                            ("stream that hides its window", None)):
+        other = {**metadata, "window": declared} if declared else metadata
+        other_bytes = trace.canonical_json(other)
+        content = trace.HEADER.pack(trace.MAGIC, trace.VERSION, 0, len(other_bytes)) + other_bytes
+        content += body[old_header:-trace.FOOTER.size]
+        content += trace.FOOTER.pack(trace.FOOTER_MAGIC, 2, 0, b"\0" * 3,
+                                     _hashlib.sha256(content).digest())
+        moved = directory / "moved.nmdh"
+        moved.write_bytes(content)
+        expect_error(lambda: list(trace.read_nmdh(moved)), label)
+    for label, bad in (("window starting at sequence 0", {**window, "first_sequence": 0}),
+                       ("window ending before it starts", {**window, "last_frame": 1}),
+                       ("window with an unknown field", {**window, "note": 1}),
+                       ("window missing a field", {"first_frame": 2, "last_frame": 2}),
+                       ("window that is not an object", [2, 2, 7])):
+        expect_error(lambda: trace.NMDHWriter(directory / "bad-window.nmdh",
+                                              {**metadata, "window": bad}, max_bytes=1 << 20), label)
+        assert not list(directory.glob("bad-window.nmdh*")), label
 print("decomp format checks: ok")

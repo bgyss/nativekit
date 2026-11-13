@@ -8,6 +8,11 @@ core, the light capture must report the same events, picture, sound and
 record digest as the full one, leave no stream behind, and give the intake
 the same code map. A light capture that stops early must leave nothing the
 intake accepts.
+
+`--window FIRST:LAST` keeps the full events of those frames beside the
+digest, with the core's own sequence numbers. The window must hold exactly
+the full capture's records for those frames, and must not pass as evidence
+for a code map: its RAM does not start from power-on.
 """
 import json
 import pathlib
@@ -22,6 +27,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import census_fixture  # noqa: E402
 import codemap  # noqa: E402
 import intake  # noqa: E402
+import trace as nmdh_trace  # noqa: E402
 
 SAME = ("events", "event_counts", "instruction_counts", "nmdt_records", "frames_run",
         "video_frames", "audio_frames", "video_sha256", "audio_sha256")
@@ -112,6 +118,61 @@ def light_stops_early(temp, rom_path, scenario_path):
     raise AssertionError("the intake accepted a light capture that stopped early")
 
 
+def window_matches_full(temp, rom_path, scenario_path, wanted):
+    """A window's records are the full capture's records for its frames."""
+    full = list(nmdh_trace.read_nmdh(temp / "full" / "capture" / "capture.nmdh"))
+    windows = {}
+    for first, last in ((1, 1), (2, 2), (3, 3), (2, 3)):
+        name = "window-%d-%d" % (first, last)
+        capture = census_fixture.capture(
+            rom_path, scenario_path, temp / name,
+            extra=("--evidence", "light", "--window", "%d:%d" % (first, last)))
+        manifest = manifest_of(capture)
+        window = manifest["window"]
+        require(window["first_frame"] == first and window["last_frame"] == last and
+                manifest["outputs"] == ["capture.nmde", "window.nmdh"] and
+                window["nmdh_bytes"] == (capture / "window.nmdh").stat().st_size and
+                manifest["stream_bytes"] == manifest["nmde_bytes"] + window["nmdh_bytes"],
+                "the manifest does not describe its window: %r" % window)
+        records = list(nmdh_trace.read_nmdh(capture / "window.nmdh"))
+        start = window["first_sequence"]
+        require(len(records) == window["events"] and records and
+                records == full[start - 1:start - 1 + len(records)],
+                "window %d:%d does not hold the full capture's records from sequence %d"
+                % (first, last, start))
+        windows[(first, last)] = (start, len(records), capture)
+    require(windows[(1, 1)][0] == 1, "the first frame's window does not start at sequence 1")
+    for a, b in (((1, 1), (2, 2)), ((2, 2), (3, 3))):     # a frame's window ends where the next starts
+        require(windows[a][0] + windows[a][1] == windows[b][0],
+                "frames %d and %d: windows overlap or leave a gap" % (a[0], b[0]))
+    require(windows[(3, 3)][0] + windows[(3, 3)][1] == len(full) + 1,
+            "the last frame's window does not end with the capture")
+    require(windows[(2, 3)][:2] == (windows[(2, 2)][0], windows[(2, 2)][1] + windows[(3, 3)][1]),
+            "a two-frame window is not its two frames")
+    capture = windows[(2, 2)][2]
+    require(code_map(rom_path, temp / "from-windowed", capture) == wanted,
+            "a light capture with a window gives another code map")
+    return capture, windows[(2, 2)][1]
+
+
+def window_is_not_evidence(temp, rom_path, capture):
+    """A window alone, even under a complete manifest, is refused by the intake."""
+    alone = temp / "window-alone"
+    alone.mkdir()
+    (alone / "window.nmdh").write_bytes((capture / "window.nmdh").read_bytes())
+    manifest = manifest_of(capture)
+    del manifest["evidence"]
+    (alone / "manifest.json").write_text(json.dumps(manifest))
+    (alone / "capture.nmdh").write_bytes((capture / "window.nmdh").read_bytes())
+    try:
+        intake.run_intake(rom_path, temp / "from-window", [alone])
+    except codemap.CodeMapError as exc:
+        require("a window is not evidence for a code map" in str(exc),
+                "a window was refused for another reason: %s" % exc)
+        return
+    raise AssertionError("the intake took a window as evidence")
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="nmd-light-") as temp:
         temp = pathlib.Path(temp)
@@ -119,10 +180,13 @@ def main():
         wanted, stream_bytes, digest_bytes = light_equals_full(temp, rom_path, scenario_path)
         light_without_digest(temp, rom_path, scenario_path, wanted)
         light_stops_early(temp, rom_path, scenario_path)
+        windowed, window_events = window_matches_full(temp, rom_path, scenario_path, wanted)
+        window_is_not_evidence(temp, rom_path, windowed)
     print("light_check: ok (light capture: same events, picture, sound and record digest as "
           "the full one, %d digest bytes for %d stream bytes, same code map with and without "
-          "the record digest; a capture over its byte cap leaves nothing the intake takes)"
-          % (digest_bytes, stream_bytes))
+          "the record digest; a capture over its byte cap leaves nothing the intake takes; "
+          "4 frame windows equal to the full capture's records (%d in frame 2), a window "
+          "refused as evidence)" % (digest_bytes, stream_bytes, window_events))
 
 
 if __name__ == "__main__":

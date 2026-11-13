@@ -244,6 +244,13 @@ with tempfile.TemporaryDirectory() as temporary:
         "light-with-full-estimate", frame_scenario, full_estimate, "--evidence", "light")
     assert "preflight estimate evidence mode mismatch" in light(
         "full-with-light-estimate", frame_scenario, light_estimate)
+    # a window is a range of frames inside a light capture
+    assert "--window needs --evidence light" in light(
+        "window-without-light", frame_scenario, full_estimate, "--window", "2:2")
+    for label, window in (("window-from-zero", "0:2"), ("window-backwards", "3:2"),
+                          ("window-past-the-end", "2:9"), ("window-malformed", "2-3")):
+        assert "--window must be FIRST:LAST within the run's frames" in light(
+            label, frame_scenario, light_estimate, "--evidence", "light", "--window", window), label
     # with the modes matching, the light capture passes the preflight and reaches the core
     assert "libretro" in light(
         "light-with-light-estimate", frame_scenario, light_estimate, "--evidence", "light",
@@ -328,7 +335,7 @@ with tempfile.TemporaryDirectory() as temporary:
     parent_args = argparse.Namespace(
         mode="estimate", core=capable_no_libretro, rom=rom, scenario=scenario,
         frames=3, estimate_file=None, out=timeout_out, max_seconds=1, max_bytes=1024 * 1024,
-        evidence="full", records_digest=False,
+        evidence="full", records_digest=False, window=None,
     )
     original_supervisor = runner.supervise_child
 
@@ -359,7 +366,7 @@ with tempfile.TemporaryDirectory() as temporary:
         mode="capture", core=capable_no_libretro, rom=rom, scenario=scenario,
         frames=3, estimate_file=estimate_file, out=storage_out, max_seconds=1,
         max_bytes=1024,
-        evidence="full", records_digest=False,
+        evidence="full", records_digest=False, window=None,
     )
 
     def storage_limited_worker(command, timeout_seconds):

@@ -559,6 +559,15 @@ STOP_CRITERION_IDS = {
 STOP_CRITERION_NAMES = {value: name for name, value in STOP_CRITERION_IDS.items()}
 
 
+def _parse_window(text, frames):
+    """FIRST:LAST, 1-based inclusive frames of the run."""
+    first, separator, last = text.partition(":")
+    if (not separator or not first.isdecimal() or not last.isdecimal() or
+            not 1 <= int(first) <= int(last) <= frames):
+        raise RunnerError("--window must be FIRST:LAST within the run's frames")
+    return int(first), int(last)
+
+
 class LimitedStream:
     """File wrapper that bounds NMDT writes while allowing its header seek."""
 
@@ -612,6 +621,12 @@ def _worker(args):
         digest_writer = evidence.DigestWriter(nmde_path, metadata, args.max_bytes)
         ingest = codemap.Ingest(rom_path.stat().st_size, digest_writer.generation)
         ingest.begin()
+        # --window: the full events of frames first..last, kept beside the digest
+        window_path = output / "window.nmdh"
+        window = {"frames": _parse_window(args.window, scenario_frames) if args.window else None,
+                  "open": False, "writer": None, "first_sequence": None}
+        if estimate_mode:
+            window["frames"] = None
         nmdt_file = nmdt_writer = None
     else:
         nmdt_file = nmdt_partial.open("xb")
@@ -736,7 +751,7 @@ def _worker(args):
         try:
             event = event_pointer.contents
             name = "m68k" if event.cpu == TRACE_M68K else "z80"
-            if light and not args.records_digest and not replay_state["active"]:
+            if light and not args.records_digest and not window["open"]:
                 # the fast path: only the fields the code map uses are read
                 kind = event.kind
                 event_counts[str(kind)] = event_counts.get(str(kind), 0) + 1
@@ -764,9 +779,20 @@ def _worker(args):
             event_counts[str(event.kind)] = event_counts.get(str(event.kind), 0) + 1
             if event.kind == EVENT_INSTRUCTION:
                 instruction_counts[name] += 1
-            nmdh_writer.write_event(event_record)
+            if not light or args.records_digest:
+                nmdh_writer.write_event(event_record)
             if light:
                 ingest.feed(event_record)
+                if window["open"]:
+                    if window["writer"] is None:   # its first sequence number is known only now
+                        first, last = window["frames"]
+                        window["first_sequence"] = event_record["sequence"]
+                        window["writer"] = nmdh_trace.NMDHWriter(
+                            window_path,
+                            {**metadata, "window": {"first_frame": first, "last_frame": last,
+                                                    "first_sequence": event_record["sequence"]}},
+                            args.max_bytes // 2)
+                    window["writer"].write_event(event_record)
             if (event.kind == EVENT_INTERRUPT and
                     name == scenario["stop"]["cpu"] and
                     scenario["stop"]["criterion"] == "interrupt"):
@@ -946,7 +972,11 @@ def _worker(args):
             current_input[0] = inputs.get(frame_number, {})
             if scenario.get("test_rebase_frame") == frame_number:
                 core.nmd_decomp_request_test_rebase()
+            if light and window["frames"]:
+                window["open"] = window["frames"][0] <= frame_number <= window["frames"][1]
             core.retro_run()
+            if light:
+                window["open"] = False
             frame_count += 1
             if trace_errors:
                 raise RunnerError("capture callback error: " + "; ".join(trace_errors))
@@ -1047,6 +1077,16 @@ def _worker(args):
             nmdh_writer.finish("complete")
             sizes = {"nmdh_bytes": 0, "nmdt_bytes": 0, "nmde_bytes": nmde_path.stat().st_size}
             outputs = [nmde_path.name]
+            window_result = None
+            if window["frames"]:
+                if window["writer"] is None:
+                    raise RunnerError("the window's frames emitted no events")
+                window["writer"].finish("complete")
+                window_result = {
+                    "first_frame": window["frames"][0], "last_frame": window["frames"][1],
+                    "first_sequence": window["first_sequence"],
+                    "events": window["writer"].count, "nmdh_bytes": window_path.stat().st_size}
+                outputs.append(window_path.name)
         else:
             nmdt_writer.close()
             nmdt_file.flush()
@@ -1068,7 +1108,8 @@ def _worker(args):
             "nmdt_records": nmdt_records[0],
             "elapsed_seconds": elapsed,
             "peak_worker_rss_bytes": _peak_worker_rss_bytes(),
-            "stream_bytes": sum(sizes.values()),
+            "stream_bytes": sum(sizes.values()) + (
+                window_result["nmdh_bytes"] if light and window_result else 0),
             **sizes,
             "video_frames": video_frames[0],
             "audio_frames": audio_frames[0],
@@ -1081,6 +1122,8 @@ def _worker(args):
             "handoff_event": stop_state["handoff_event"],
             "checkpoint_replay": checkpoint_replay,
         }
+        if light and window_result:
+            result["window"] = window_result
         if not light or args.records_digest:
             # which events the run saw, whatever core build or runner revision made it
             result["nmdh_records_sha256"] = nmdh_writer.records_sha256
@@ -1098,6 +1141,8 @@ def _worker(args):
             nmdh_writer.abort("storage_limit" if limited else "core_error")
         if light:
             digest_writer.abort("storage_limit" if limited else "core_error")
+            if window["writer"] is not None and not window["writer"]._closed:
+                window["writer"].abort("storage_limit" if limited else "core_error")
         else:
             try:
                 nmdt_file.close()
@@ -1135,6 +1180,10 @@ def _run_parent(args):
         raise RunnerError("output directory already exists")
     scenario = _validate_scenario(json.loads(scenario_path.read_text()), args.frames)
     light = args.evidence == "light"
+    if args.window:
+        if not light:
+            raise RunnerError("--window needs --evidence light")
+        _parse_window(args.window, args.frames)
     if light and "checkpoint_test" in scenario:
         raise RunnerError("light evidence cannot run a checkpoint test")
     if light and scenario["stop"]["criterion"] != "frame_limit":
@@ -1193,6 +1242,8 @@ def _run_parent(args):
                "--identity-json", json.dumps(metadata, sort_keys=True, separators=(",", ":"))]
     if args.records_digest:
         command.append("--records-digest")
+    if args.window:
+        command += ["--window", args.window]
     child = supervise_child(command, args.max_seconds)
     if child.timed_out:
         _status_file(output, "incomplete_timeout", "child process exceeded max_seconds", metadata)
@@ -1255,6 +1306,8 @@ def main(argv=None):
     parser.add_argument("--max-bytes", type=int, default=268435456)
     parser.add_argument("--evidence", choices=("full", "light"), default="full",
                         help="light: keep the evidence digest (capture.nmde), not the event streams")
+    parser.add_argument("--window", metavar="FIRST:LAST",
+                        help="light: also keep the full events of these frames (window.nmdh)")
     parser.add_argument("--records-digest", action="store_true",
                         help="light: also hash every event record as a full capture would frame it")
     args = parser.parse_args(argv)

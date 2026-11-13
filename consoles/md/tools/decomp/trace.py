@@ -79,6 +79,14 @@ def _validate_metadata(metadata):
     options = metadata.get("options")
     if not isinstance(options, dict):
         raise NMDHError("missing NMDH machine options")
+    if "window" in metadata:
+        # a stream that holds frames first..last of a run, starting at that sequence number
+        window = metadata["window"]
+        if (not isinstance(window, dict) or
+                set(window) != {"first_frame", "last_frame", "first_sequence"} or
+                any(type(value) is not int or value < 1 for value in window.values()) or
+                window["first_frame"] > window["last_frame"]):
+            raise NMDHError("invalid NMDH window metadata")
     for key, value in _walk(metadata):
         lowered = key.casefold()
         if "path" in lowered or "filename" in lowered:
@@ -97,6 +105,11 @@ def _walk(value, key=""):
             yield from _walk(item, key)
     else:
         yield key, value
+
+
+def _first_sequence(metadata):
+    """The sequence number a stream's first record must carry."""
+    return metadata["window"]["first_sequence"] if "window" in metadata else 1
 
 
 def _validate_event(event, capabilities, previous_sequence):
@@ -154,6 +167,7 @@ class NMDHWriter:
         if not store:
             _validate_metadata(metadata)
             self._metadata = metadata
+            self._first = _first_sequence(metadata)
             self._count = 0
             self._closed = False
             return
@@ -176,6 +190,7 @@ class NMDHWriter:
         self._bytes_written = len(header)
         self._max_bytes = max_bytes
         self._metadata = metadata
+        self._first = _first_sequence(metadata)
         self._count = 0
         self._closed = False
 
@@ -192,7 +207,7 @@ class NMDHWriter:
     def write_event(self, event):
         if self._closed:
             raise NMDHError("NMDH writer is closed")
-        _validate_event(event, self._metadata["capabilities"], self._count)
+        _validate_event(event, self._metadata["capabilities"], self._first - 1 + self._count)
         payload = canonical_json(event)
         if not payload or len(payload) > MAX_RECORD:
             self.abort("storage_limit")
@@ -280,7 +295,7 @@ def _scan(path):
         _validate_metadata(metadata)
         capabilities = metadata["capabilities"]
         digest.update(fixed + metadata_bytes)
-        previous_sequence = 0
+        previous_sequence = _first_sequence(metadata) - 1
         while True:
             marker = stream.read(4)
             if len(marker) != 4:
