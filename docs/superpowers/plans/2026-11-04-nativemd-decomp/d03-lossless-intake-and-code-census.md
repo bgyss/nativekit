@@ -1,6 +1,6 @@
 # D03: Recover code identities and a lossless assembly skeleton
 
-**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence is five captures of up to 4,700 frames, none past frame 4,783 where the reference core stalled until patch 0004, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Acceptance gates met 2026-11-10 ([results](#results)): shared tooling, synthetic controls and the first title's byte-identical rebuild. The first title's traced evidence is six captures of up to 5,800 frames, the last taken past frame 4,783 where the reference core stalled until patch 0004, and its findings are open. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
@@ -68,7 +68,7 @@ rules, decoder control counts and limits).
 
 Commands run: `mise run test:md-decomp`, exit 0 (all D01 gates plus the three
 new ones); for the first title, `run.py --mode estimate|capture` (250, 900, 3,000,
-3,100 and 4,700 frames, complete) and `intake.py intake|rebuild`, exit 0, exact lines in the
+3,100, 4,700 and 5,800 frames, complete) and `intake.py intake|rebuild`, exit 0, exact lines in the
 workspace's `WORKSPACE.md`.
 
 Open, in [intake.md](../../../../consoles/md/docs/decomp/intake.md#first-title):
@@ -82,8 +82,12 @@ table) and a game-over capture (a continue and the start of the second stage)
 bring that to 22,538, 4.3% of the image; the reference core never returned from
 frame 4,783 when that frame ended inside an instruction (a clock rebase the
 68000 loop's target did not follow; fixed by patch 0004 with an authored
-control, 2026-11-12), and no capture has been taken past it, so the name entry, the third and later
-stages and the ending are untraced; the captures complete only with reference-core patch
+control, 2026-11-12); a 5,800-frame capture on the patched core crosses it
+with the picture of its preview, reaches the third stage and brings the four-capture
+intake to 22,648 decoded bytes, 110 more for 142 GB of events and still 4.3% of
+the image, so the name entry, the stages after the third and the ending are
+untraced and more play of the same kinds is not where new code is (a lighter
+capture is [planned](../2026-11-12-nativemd-light-capture.md)); the captures complete only with reference-core patch
 0003, whose Z80 bank-wait timing is unverified against hardware; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item
 5); the skeleton lives in the ignored workspace because no game repository is

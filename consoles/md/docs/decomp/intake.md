@@ -133,12 +133,13 @@ instruction raw.
 ## First title
 
 `md-f68818ae1a61`, SHA-256 `f68818ae1a616562e4c7dc77932bbc9f6bc4e42229f5b5d5796d4b2c2cc3f334`,
-524,288 bytes, run on 2026-11-10 and 2026-11-11 with the ROM path given at runtime. All output
+524,288 bytes, run from 2026-11-10 to 2026-11-12 with the ROM path given at runtime. All output
 is under ignored `build/decomp/md-f68818ae1a61/`, whose `WORKSPACE.md` holds
 the exact commands; nothing from the image is tracked.
 
-Evidence: five complete captures on the pinned reference core (region U, model
-`md1va3`, two three-button pads), each taken through its own intake:
+Evidence: six complete captures on the pinned reference core (region U, model
+`md1va3`, two three-button pads). The first three each went through their own
+intake; the last three were read only by the combined intakes below:
 
 - 250 frames, START on frames 180-187 and 240-247; scenario SHA-256
   `c70855a3…fa79e`; 16,202,726 events, 5.4 GB; caps raised from the 256 MB
@@ -160,22 +161,32 @@ Evidence: five complete captures on the pinned reference core (region U, model
   3,960, then a four-frame A press every 12 frames; scenario SHA-256
   `89ec09c0…56fc64`; 321,891,272 events (45,045,927 and 27,640,595
   instructions), 112.4 GB, 4,441 s.
+- 5,800 frames (`long`), on the core with patch 0004 (below): the game
+  started from the menu at frame 300, then the 3,000-frame scenario's play
+  inputs with no later START press; scenario SHA-256 `58892cfc…32f8a5`;
+  402,705,039 events (59,048,738 and 34,905,552 instructions), 142.0 GB,
+  5,658 s; caps 320 GB and 12,000 s. Patch 0004 changes the core's SHA-256
+  (`ce03e7dc…b69287` against `bf954286…358998` for the five captures above).
+  The intake requires a capture's ROM hash to match, not its core hash, so
+  the last column mixes the two cores.
 
-The last column of the table is one intake over the 3,000-frame, idle and
-`over` captures together (260 GB): 13,068 s with a 16.5 GB peak.
+The last two columns of the table are each one intake over several captures:
+the 3,000-frame, idle and `over` captures (260 GB; 13,068 s with a 16.5 GB
+peak, before the memory change below), and the same three with `long`
+(402 GB; 20,314 s with a 1.6 GB peak, after it).
 
-| Result | 250 frames | 900 frames | 3,000 frames | 3,000 + idle + over |
-|---|---|---|---| --|
-| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture | identical, same three measures | identical, same three measures | identical, same three measures |
-| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static | 12,060 traced, 100 vector, 8,148 static | 14,616 traced, 100 vector, 5,988 static | 18,494 traced, 100 vector, 3,944 static |
-| ROM code kept raw (noncanonical encoding) | 20 bytes | 20 bytes | 20 bytes | 20 bytes |
-| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) | 340 | 340 | 340 |
-| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` | 503,620, same split | 503,224, same split | 501,390, same split |
-| ROM entries | 168: 71 traced (T1), 4 vector, 93 static | 222: 189 traced (T1), 4 vector, 29 static | 240: 218 traced (T1), 4 vector, 18 static | 273: 256 traced (T1), 4 vector, 13 static |
-| Computed transfers in ROM | 14, of which 9 have no observed target | 14, of which 5 have none | 14, of which 4 have none | 14, of which 3 have none |
-| Conflicts, undecodable entries | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
-| Orphan candidates | 18 | 19 | 17 | 14 |
-| Z80 RAM programs | 3, all at `$0000` (one with 504 variants over 4 rewritten bytes); no 68000 RAM code ran | 3, all at `$0000` (one with 34,776 variants in 45,193 generations over 12 rewritten bytes); none on the 68000 | 3, all at `$0000` (one with 262,271 variants in 287,973 generations over the same 12 rewritten bytes); none on the 68000 | the same 3 (the patched one with 630,077 variants in 782,650 generations over the same 12 bytes); none on the 68000 |
+| Result | 250 frames | 900 frames | 3,000 frames | 3,000 + idle + over | 3,000 + idle + over + long |
+|---|---|---|---| --|---|
+| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture | identical, same three measures | identical, same three measures | identical, same three measures | identical, same three measures |
+| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static | 12,060 traced, 100 vector, 8,148 static | 14,616 traced, 100 vector, 5,988 static | 18,494 traced, 100 vector, 3,944 static | 18,964 traced, 100 vector, 3,584 static |
+| ROM code kept raw (noncanonical encoding) | 20 bytes | 20 bytes | 20 bytes | 20 bytes | 20 bytes |
+| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) | 340 | 340 | 340 | 340 |
+| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` | 503,620, same split | 503,224, same split | 501,390, same split | 501,280, same split |
+| ROM entries | 168: 71 traced (T1), 4 vector, 93 static | 222: 189 traced (T1), 4 vector, 29 static | 240: 218 traced (T1), 4 vector, 18 static | 273: 256 traced (T1), 4 vector, 13 static | 276: 260 traced (T1), 4 vector, 12 static |
+| Computed transfers in ROM | 14, of which 9 have no observed target | 14, of which 5 have none | 14, of which 4 have none | 14, of which 3 have none | 14, of which 2 have none |
+| Conflicts, undecodable entries | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| Orphan candidates | 18 | 19 | 17 | 14 | 13 |
+| Z80 RAM programs | 3, all at `$0000` (one with 504 variants over 4 rewritten bytes); no 68000 RAM code ran | 3, all at `$0000` (one with 34,776 variants in 45,193 generations over 12 rewritten bytes); none on the 68000 | 3, all at `$0000` (one with 262,271 variants in 287,973 generations over the same 12 rewritten bytes); none on the 68000 | the same 3 (the patched one with 630,077 variants in 782,650 generations over the same 12 bytes); none on the 68000 | the same 3 (the patched one with 1,180,165 variants in 1,408,183 generations over the same 12 bytes); none on the 68000 |
 
 Findings, none of them fixed here:
 
@@ -224,6 +235,18 @@ Findings, none of them fixed here:
   ROM bytes against 20,704: 4.3% of the image. 3,944 statically reached bytes
   have still never executed, and 3 of 14 computed transfers have no observed
   target.
+- **142 GB more capture, with a third stage in it, found 110 more bytes.**
+  The `long` scenario was written against the picture, and its capture's
+  `video_sha256` (`f77a570b…d617bc`) equals the hash of the 5,800 frames
+  `oracle/run.py` wrote for the same inputs on the patched core. The preview
+  shows first-stage play, the second stage, a game over at its end and a
+  continue taken, the refuelling sequence, and the third stage from about
+  frame 4,300 to the end. With the other three captures it decodes 22,648 ROM
+  bytes against 22,538. Traced bytes rose by 470, but 360 of those the static
+  walk had already reached; 3,584 statically reached bytes have still never
+  executed, and 2 of 14 computed transfers have no observed target. Decoded
+  code is still 4.3% of the image. More play of the kinds already captured is
+  not where new code is: 402 GB of events hold 18,964 distinct traced bytes.
 - **The reference core stopped returning at frame 4,783, since patched.** Two
   preview runs through `oracle/run.py` with different inputs each had
   `retro_run` call 4,783 never return while the core went on delivering
@@ -236,8 +259,9 @@ Findings, none of them fixed here:
   `tools/toolchains/patches/blastem/0004-m68k-execute-target-follows-rebase.patch`
   moves the target with the clock; `rebase_stall_check.py` is its authored
   control, and one of the two preview runs now completes 5,200 frames. The
-  five captures above were taken before it, all below that frame; no capture
-  has been taken past it yet.
+  first five captures were taken before it, all below that frame; the `long`
+  capture was taken with it and runs 5,800 frames, with the picture of its
+  preview.
 - **The capture cap is split in half; the preflight now checks each half.**
   `run.py` gives the NMDH and NMDT streams half of `--max-bytes` each. A first
   3,000-frame attempt with a 128 GiB cap passed its preflight (83.7 GB
@@ -258,7 +282,8 @@ Findings, none of them fixed here:
   3,000-frame capture (10,456 generations, 10,399 variants) the old and new
   code produce the same code map, with peaks of 318 MB and 74 MB. Time is
   unchanged: each capture is still parsed twice, once to validate it and once
-  to read it.
+  to read it. The four-capture intake (402 GB, 1,180,165 variants) peaked at
+  1.6 GB and took 5.6 hours.
 - **The first 900-frame run failed in the reference core, since patched.** It
   ended `incomplete_core_error` near frame 258. BlastEm's Z80 bank-window
   handlers set the Z80 clock to the 68000's clock whenever the 68000 was
@@ -284,15 +309,16 @@ Findings, none of them fixed here:
 
 ## Not done
 
-- Any capture past frame 4,783, now that patch 0004 allows one: the
-  score-table name entry (it begins near frame 4,700 when the continue
-  countdown runs out), the third stage and its refuelling sequence (frame
-  5,400 at the earliest), every later stage and the ending are untraced.
-  Such a capture is about 24 MB a frame, and the intake's memory and time
-  grow with it (above).
-- The second stage is traced for about 450 frames only. A scenario should
-  not press START after the game starts, since each press pauses or resumes
-  it.
+- The score-table name entry (it begins near frame 4,700 when the continue
+  countdown runs out), every stage after the third and the ending are
+  untraced. A scenario should not press START after the game starts, since
+  each press pauses or resumes it.
+- A capture is about 24 MB a frame and an intake reads it twice at about
+  1.75 GB a minute, so these four cost 402 GB and 5.6 hours for 18,964
+  traced bytes. A capture that writes full events only for code it has not
+  seen, and replay of a window from the scenario instead of kept streams, are
+  planned in
+  [the lighter-capture plan](../../../../docs/superpowers/plans/2026-11-12-nativemd-light-capture.md).
 - Checking patch 0003's bank-wait timing against hardware.
 - Generations that differ in data bytes inside their extent are still split;
   no title or control has needed that yet.
