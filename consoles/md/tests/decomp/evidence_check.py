@@ -63,6 +63,21 @@ def ingest_matches_build(rom, capture):
     return len(generations)
 
 
+def edges_stay_in_their_trace():
+    """A RAM flow edge left over when a trace ends is not credited to the
+    next trace's first program: a digest of each trace could not hold it."""
+    seen = []
+    ingest = codemap.Ingest(0x400, lambda *generation: seen.append(generation))
+    ingest.begin()
+    ingest.flow("z80", 0x10, 0x100)
+    ingest.end()
+    ingest.begin()
+    ingest.instruction("z80", 0)
+    ingest.end()
+    require(len(seen) == 1 and seen[0][3] == set(),
+            "a flow edge of one trace is credited to a program of the next")
+
+
 def expect_refusal(label, action, fragment):
     try:
         action()
@@ -167,11 +182,34 @@ def digest_mutations(temp):
         ("local path in metadata",
          dict(records=[generation, SETS], metadata=dict(METADATA, options={"rom_path": "x"})),
          "local paths are forbidden"),
+        ("CPU that is not a string", dict(records=[dict(generation, cpu=["z80"]), SETS]),
+         "invalid NMDE generation"),
+        ("record nested past the parser's depth",
+         dict(records=[zlib.compress(b"[" * 200000 + b"]" * 200000, 6), SETS]),
+         "invalid NMDE record"),
     ]
     for label, arguments, fragment in framed:
         path = raw_digest(temp / "mutant.nmde", **arguments)
         expect_refusal(label, lambda: evidence.read_digest(path), fragment)
-    return len(cases) + len(framed)
+    # a small record that inflates past the limit is refused before it is inflated whole
+    limit = evidence.MAX_RECORD_JSON
+    evidence.MAX_RECORD_JSON = 1 << 16
+    try:
+        path = raw_digest(temp / "mutant.nmde",
+                          [zlib.compress(b" " * ((1 << 16) + 1), 6), SETS])
+        expect_refusal("record that inflates past its limit",
+                       lambda: evidence.read_digest(path), "NMDE record inflates past its limit")
+        writer = evidence.DigestWriter(temp / "wide.nmde", METADATA, 1 << 24)
+        try:
+            writer.finish(range(1 << 14), [], [])
+        except evidence.DigestError as exc:
+            require("inflates past its limit" in str(exc), "wide record refused otherwise: %s" % exc)
+        else:
+            raise AssertionError("the writer wrote a record its reader refuses")
+        require(not (temp / "wide.nmde").exists(), "a refused digest appeared at its path")
+    finally:
+        evidence.MAX_RECORD_JSON = limit
+    return len(cases) + len(framed) + 1
 
 
 def digest_byte_cap(temp):
@@ -280,6 +318,7 @@ def main():
         capture = census_fixture.capture(rom_path, scenario_path, temp / "census")
         rom = rom_path.read_bytes()
         generations = ingest_matches_build(rom, capture)
+        edges_stay_in_their_trace()
         size = digest_round_trip(temp)
         refused = digest_mutations(temp)
         digest_byte_cap(temp)

@@ -130,7 +130,8 @@ and a footer holding the record count and a SHA-256 of header and records:
 | generation, one for each, in closing order | `cpu`; `delta`, the runs of the RAM image that differ from the previous generation of that CPU (from zeros for the first) as `[offset, hex]`; `executed` as `[offset, length]`; `edges` as `[from, to]` |
 | sets, the last record, once | `traced_rom`, `rom_edges`, `reads` |
 
-Each record is a zlib stream of canonical JSON with every list sorted. The
+Each record is a zlib stream of canonical JSON with every list sorted, at
+most 16 MiB compressed and 1 GiB inflated. The
 reader checks the framing and footer, then every record, before any of it is
 used, and the intake refuses a digest whose metadata names another ROM.
 
@@ -162,9 +163,11 @@ hashes.
 ## Evidence
 
 `evidence_check.py` holds the reduction and the digest on the two authored
-cartridges: `Ingest` fed event by event gives `build`'s code map; a digest
-read back gives the same sets and generations; fifteen damaged digests are
-refused; the byte cap is enforced; a code map built from a digest equals the
+cartridges: `Ingest` fed event by event closes the RAM generations the code
+map counts and keeps the sets it uses; a flow edge left over when a trace
+ends is not credited to the next trace; a digest read back gives the same
+sets and generations; eighteen damaged digests are refused, one of them a
+record that inflates past its limit; the byte cap is enforced; a code map built from a digest equals the
 one built from the streams; a planted error in each is caught.
 `light_check.py` holds the runner: a light capture's code map, event count,
 picture, sound and record digest equal the full capture's, with and without

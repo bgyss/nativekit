@@ -400,6 +400,7 @@ class Ingest:
         for ram in self.rams.values():
             ram.close()
             ram.bytes = bytearray(ram.size)
+            ram.edges = set()     # an edge no program of its own trace took belongs to none
 
     def end(self):
         for ram in self.rams.values():

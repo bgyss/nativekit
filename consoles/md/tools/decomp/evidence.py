@@ -28,6 +28,7 @@ MAGIC = b"NMDE"
 VERSION = 1
 FOOTER_MAGIC = b"NEEN"
 MAX_RECORD = 16 << 20        # compressed bytes; the sets record of a large image is the longest
+MAX_RECORD_JSON = 1 << 30   # bytes a record may inflate to; the reader never inflates more
 RAM_SIZES = {"m68k": 0x10000, "z80": 0x2000}
 _RUN = re.compile(rb"[^\x00]+")
 _HEX = re.compile(r"(?:[0-9a-f]{2})+\Z")
@@ -93,7 +94,11 @@ class DigestWriter:
     def _record(self, value):
         if self._closed:
             raise DigestError("NMDE writer is closed")
-        payload = zlib.compress(nmdh_trace.canonical_json(value), 6)
+        text = nmdh_trace.canonical_json(value)
+        if len(text) > MAX_RECORD_JSON:
+            self.abort("storage_limit")
+            raise DigestError("NMDE record inflates past its limit")
+        payload = zlib.compress(text, 6)
         record = nmdh_trace.RECORD_LENGTH.pack(len(payload)) + payload
         if len(payload) > MAX_RECORD or \
                 self._bytes_written + len(record) + nmdh_trace.FOOTER.size > self._max_bytes:
@@ -160,9 +165,14 @@ def _records(path):
                 return
             payload = _exact(stream, nmdh_trace.RECORD_LENGTH.unpack(marker)[0], "record")
             try:
-                text = zlib.decompress(payload)
+                inflate = zlib.decompressobj()
+                text = inflate.decompress(payload, MAX_RECORD_JSON + 1)
+                if len(text) > MAX_RECORD_JSON:
+                    raise DigestError("NMDE record inflates past its limit")
+                if not inflate.eof or inflate.unused_data:
+                    raise zlib.error("incomplete or overlong stream")
                 value = json.loads(text.decode("utf-8"))
-            except (zlib.error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            except (zlib.error, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
                 raise DigestError("invalid NMDE record") from exc
             if nmdh_trace.canonical_json(value) != text:
                 raise DigestError("NMDE record is not canonical JSON")
@@ -214,7 +224,8 @@ def _frame(path):
 
 def _check_generation(value):
     cpu = value.get("cpu")
-    if set(value) != {"cpu", "delta", "executed", "edges"} or cpu not in RAM_SIZES:
+    if set(value) != {"cpu", "delta", "executed", "edges"} or not isinstance(cpu, str) or \
+            cpu not in RAM_SIZES:
         raise DigestError("invalid NMDE generation")
     size = RAM_SIZES[cpu]
     delta, executed = value["delta"], value["executed"]
