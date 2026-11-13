@@ -1,0 +1,95 @@
+diff --git a/Core/Debugger/ScriptManager.h b/Core/Debugger/ScriptManager.h
+--- a/Core/Debugger/ScriptManager.h
++++ b/Core/Debugger/ScriptManager.h
+@@ -49,1 +49,1 @@
+-					script->CallMemoryCallback(relAddr, value, CallbackType::Read, cpuType);
++					script->CallMemoryCallback(relAddr, value, CallbackType::Read, cpuType, type);
+@@ -57,1 +57,1 @@
+-					script->CallMemoryCallback(relAddr, value, CallbackType::Write, cpuType);
++					script->CallMemoryCallback(relAddr, value, CallbackType::Write, cpuType, type);
+@@ -65,1 +65,1 @@
+-						script->CallMemoryCallback(relAddr, value, CallbackType::Exec, cpuType);
++						script->CallMemoryCallback(relAddr, value, CallbackType::Exec, cpuType, type);
+
+diff --git a/Core/Debugger/ScriptHost.h b/Core/Debugger/ScriptHost.h
+--- a/Core/Debugger/ScriptHost.h
++++ b/Core/Debugger/ScriptHost.h
+@@ -29,1 +29,1 @@
+-	__forceinline void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType callbackType, CpuType cpuType)
++	__forceinline void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType callbackType, CpuType cpuType, MemoryOperationType operationType)
+@@ -31,1 +31,1 @@
+-		_context->CallMemoryCallback(relAddr, value, callbackType, cpuType);
++		_context->CallMemoryCallback(relAddr, value, callbackType, cpuType, operationType);
+
+diff --git a/Core/Debugger/ScriptingContext.h b/Core/Debugger/ScriptingContext.h
+--- a/Core/Debugger/ScriptingContext.h
++++ b/Core/Debugger/ScriptingContext.h
+@@ -7,1 +7,2 @@
+ #include "Shared/EventType.h"
++#include "Shared/MemoryOperationType.h"
+@@ -63,1 +64,1 @@
+-	template<typename T> void InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType);
++	template<typename T> void InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+@@ -81,1 +82,1 @@
+-	template<typename T> void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType);
++	template<typename T> void CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+
+diff --git a/Core/Debugger/ScriptingContext.cpp b/Core/Debugger/ScriptingContext.cpp
+--- a/Core/Debugger/ScriptingContext.cpp
++++ b/Core/Debugger/ScriptingContext.cpp
+@@ -195,1 +195,1 @@
+-void ScriptingContext::CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType)
++void ScriptingContext::CallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType)
+@@ -198,1 +198,1 @@
+-	InternalCallMemoryCallback(relAddr, value, type, cpuType);
++	InternalCallMemoryCallback(relAddr, value, type, cpuType, operationType);
+@@ -290,1 +290,1 @@
+-void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType)
++void ScriptingContext::InternalCallMemoryCallback(AddressInfo relAddr, T& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType)
+@@ -324,1 +324,2 @@
+-		if(lua_pcall(_lua, 2, LUA_MULTRET, 0) != 0) {
++		lua_pushinteger(_lua, (int)operationType);
++		if(lua_pcall(_lua, 3, LUA_MULTRET, 0) != 0) {
+@@ -358,3 +359,3 @@
+-template void ScriptingContext::CallMemoryCallback<uint8_t>(AddressInfo relAddr, uint8_t& value, CallbackType type, CpuType cpuType);
+-template void ScriptingContext::CallMemoryCallback<uint16_t>(AddressInfo relAddr, uint16_t& value, CallbackType type, CpuType cpuType);
+-template void ScriptingContext::CallMemoryCallback<uint32_t>(AddressInfo relAddr, uint32_t& value, CallbackType type, CpuType cpuType);
++template void ScriptingContext::CallMemoryCallback<uint8_t>(AddressInfo relAddr, uint8_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
++template void ScriptingContext::CallMemoryCallback<uint16_t>(AddressInfo relAddr, uint16_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
++template void ScriptingContext::CallMemoryCallback<uint32_t>(AddressInfo relAddr, uint32_t& value, CallbackType type, CpuType cpuType, MemoryOperationType operationType);
+
+diff --git a/Core/Debugger/LuaApi.cpp b/Core/Debugger/LuaApi.cpp
+--- a/Core/Debugger/LuaApi.cpp
++++ b/Core/Debugger/LuaApi.cpp
+@@ -180,2 +180,3 @@
+ 	GenerateEnumDefinition<CallbackType>(lua, "callbackType");
++	GenerateEnumDefinition<MemoryOperationType>(lua, "memoryOperationType");
+ 	GenerateEnumDefinition<CheatType>(lua, "cheatType");
+
+diff --git a/UI/Debugger/Documentation/LuaDocumentation.json b/UI/Debugger/Documentation/LuaDocumentation.json
+--- a/UI/Debugger/Documentation/LuaDocumentation.json
++++ b/UI/Debugger/Documentation/LuaDocumentation.json
+@@ -25,1 +25,1 @@
+-	"description": "Registers a callback function to be called whenever the specified event occurs.\nThe callback function receives 2 parameters (\"address\" and \"value\") that correspond to the address being written to or read from, and the value that is being read/written.\n\nFor reads, the callback is called after the read is performed.\nFor writes, the callback is called before the write is performed.\n\nIf the callback returns an integer value, it will replace the value - you can alter the results of read/write operation by using this.",
++	"description": "Registers a callback function to be called whenever the specified event occurs.\nThe callback function receives (address, value, operationType). operationType is an emu.memoryOperationType enum and preserves data, exec, dummy, DMA, and PPU rendering read operation types. Existing callbacks may ignore the third parameter.\n\nFor reads, the callback is called after the read is performed.\nFor writes, the callback is called before the write is performed.\n\nIf the callback returns an integer value, it will replace the value - you can alter the results of read/write operation by using this.",
+@@ -461,3 +461,20 @@
+ },
++{
++	"name": "memoryOperationType",
++	"category": "Enums",
++	"description": "Original CPU bus operation type passed as the third memory callback argument.",
++	"enumValues": [
++		{ "name": "read", "description": "Data read" },
++		{ "name": "write", "description": "Data write" },
++		{ "name": "execOpCode", "description": "Opcode fetch" },
++		{ "name": "execOperand", "description": "Instruction operand fetch" },
++		{ "name": "dmaRead", "description": "DMA read" },
++		{ "name": "dmaWrite", "description": "DMA write" },
++		{ "name": "dummyRead", "description": "Dummy read" },
++		{ "name": "dummyWrite", "description": "Dummy write" },
++		{ "name": "ppuRenderingRead", "description": "PPU rendering read" },
++		{ "name": "idle", "description": "Idle cycle" }
++	]
++},
+ {
+ 	"name": "cheatType",

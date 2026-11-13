@@ -1,0 +1,67 @@
+add_executable(console_check unit/console_check.c)
+target_link_libraries(console_check PRIVATE nmd)
+set_target_properties(console_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(io_check unit/io_check.c)
+target_include_directories(io_check PRIVATE ../src/front ../src/io ../src/console ${NK_INCLUDE})
+target_link_libraries(io_check PRIVATE nmd)
+set_target_properties(io_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(bus_check unit/bus_check.c)
+target_include_directories(bus_check PRIVATE ../src/console ../src/front ${NK_INCLUDE})
+target_link_libraries(bus_check PRIVATE nmd)
+set_target_properties(bus_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(md_testcart rom/testcart.c)
+target_include_directories(md_testcart PRIVATE ../src/console ../src/vdp ../src/sound ${NK_INCLUDE})
+target_link_libraries(md_testcart PRIVATE nmd)
+set_target_properties(md_testcart PROPERTIES OUTPUT_NAME md_testcart
+  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(interrupt_check unit/interrupt_check.c)
+target_include_directories(interrupt_check PRIVATE ../src/console)
+target_link_libraries(interrupt_check PRIVATE nmd)
+set_target_properties(interrupt_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(execution_check unit/execution_check.c)
+target_include_directories(execution_check PRIVATE ../src/console)
+target_link_libraries(execution_check PRIVATE nmd)
+set_target_properties(execution_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(vdp_check unit/vdp_check.c)
+target_include_directories(vdp_check PRIVATE ../src/console)
+target_link_libraries(vdp_check PRIVATE nmd)
+set_target_properties(vdp_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(dma_check unit/dma_check.c)
+target_include_directories(dma_check PRIVATE ../src/console)
+target_link_libraries(dma_check PRIVATE nmd)
+set_target_properties(dma_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(render_check unit/render_check.c)
+target_include_directories(render_check PRIVATE
+  ../src/console ../src/front ../src/vdp ${NK_INCLUDE})
+target_link_libraries(render_check PRIVATE nmd)
+set_target_properties(render_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(z80_check unit/z80_check.c)
+target_include_directories(z80_check PRIVATE ../src/console ../src/sound)
+target_link_libraries(z80_check PRIVATE nmd)
+set_target_properties(z80_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(sound_check unit/sound_check.c)
+target_include_directories(sound_check PRIVATE ../src/sound ../src/console)
+target_compile_definitions(sound_check PRIVATE NMD_TESTING)
+target_link_libraries(sound_check PRIVATE nmd)
+set_target_properties(sound_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+add_executable(profile_decomp_fixture unit/profile_decomp_fixture.c)
+target_link_libraries(profile_decomp_fixture PRIVATE nmd)
+set_target_properties(profile_decomp_fixture PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_custom_target(md_profile_check
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/profile_check.py
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  DEPENDS profile_decomp_fixture
+  VERBATIM)

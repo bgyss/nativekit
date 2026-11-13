@@ -30,6 +30,15 @@ typedef struct {
     uint32_t bit;
 } nk_button;
 
+/* A host key, its positional bit, and the label shown to the player. */
+typedef struct { int vk; uint32_t bit; const char *name; } nk_key;
+
+#define NK_PLAYERS 8
+#define NK_KINDS_MAX 16
+
+/* End the application at the current frame's end. */
+void nk_quit(void);
+
 typedef struct nk_console {
     const char *name;                   /* the console's name: the window title's fallback, messages */
     const char *env;                    /* its settings' prefix (env.h) */
@@ -63,6 +72,9 @@ typedef struct nk_console {
     int      (*audio_queued)(void);
 
     /* the controllers */
+    int players;
+    const nk_key *keys;
+    int key_count;
     const nk_button *buttons;
     int      button_count;
     const char *const *steps;           /* the script steps the console takes itself */
@@ -71,8 +83,8 @@ typedef struct nk_console {
     int      (*key)(int vk, int down);                     /* optional: 1 when the game took the key */
     void     (*touch)(int id, int phase, float x, float y);/* optional: the game's touch hook */
     /* the players' controllers from the frame's input: headless, the
-       script's buttons (b: players 0 and 1); else the kit's devices (input.h) */
-    void     (*input)(int headless, const uint32_t b[2]);
+       script's buttons (b: players entries); else the kit's devices (input.h) */
+    void     (*input)(int headless, const uint32_t *b);
     void     (*frame)(void);            /* optional: the game's frame hook */
 
     /* memories */
@@ -80,12 +92,16 @@ typedef struct nk_console {
     int      region_count;
     int      (*battery)(nk_battery *b); /* optional: 0 no save */
     /* needed only for --counts: the hooks on every access, an access's
-       kind (0 to kind_count - 1) and the number of kinds (16 at most) */
+       kind (0 to kind_count - 1) and the number of kinds (NK_KINDS_MAX at most) */
     void     (*counts_hooks)(void (*rd)(uint32_t addr, uint8_t v), void (*wr)(uint32_t addr, uint8_t v));
     int      (*access_kind)(uint32_t addr);
     int      kind_count;
+    const char *const *kind_names;      /* optional names in access-kind order */
 
     void     (*at_exit)(void);          /* optional: its own checks' reports */
+    int      (*count_group)(uint32_t addr);      /* optional poll group 0..NK_KINDS_MAX-1; default 0 */
+    /* optional mouse hook: 1 consumes it before device mapping */
+    int      (*pointer)(float x, float y, int buttons);
 } nk_console;
 
 /* power on, open what the arguments ask for and run until the window
@@ -102,6 +118,10 @@ void nk_shot_scale(double *x, double *y);
 #define NK_OVERLAYS 16
 int  nk_overlay_image(const uint32_t *argb, int w, int h);   /* -1 when full */
 void nk_overlay_place(int id, float cx, float cy, float scale, float angle_rad, float alpha, int visible);
+void nk_overlay_update(int id, const uint32_t *argb);
+/* Stop the machine between frames; input and frame hooks continue. */
+void nk_pause(int on, float blur, uint32_t tint);
+int nk_paused(void);
 void nk_window_size(float *w, float *h);   /* points; a headless run's RR_SIZE */
 int  nk_headless(void);
 long nk_frame_no(void);

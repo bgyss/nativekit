@@ -11,7 +11,7 @@
 
 #include "snes_rr.h"
 #include "rr_mode7.h"
-#include "rr_metal_ext.h"
+#include "nk/rr_metal_ext.h"
 
 #include "rr_compose_src.h"
 
@@ -58,14 +58,43 @@ static const char k_m7_src[] =
 "#include <metal_stdlib>\n"
 "using namespace metal;\n"
 /* a frame with Mode 7 presented (rr_mode7.h, the same arithmetic) */
-"struct M7U { int pw, ph, d0, d1, step_u, step_v, du[28], dv[28], cpp, left, cvk, cvlen, cvw, cvh; };\n"
+"struct M7U { int pw, ph, d0, d1, step_u, step_v, du[28], dv[28], cpp, left, cvk, cvlen, cvw, cvh, cvrgb, cvfx, cvfy; };\n"
 "static uint m7_direct(uint c) { return (c & 7u) << 2 | ((c & 0x38u) >> 1) << 5 | ((c & 0xC0u) >> 3) << 10; }\n"
+/* a full colour's (0x1000000 | 0xRRGGBB) or a 15-bit colour's channel k in
+   eighths of a console step, and colour c out of colour maths with o and
+   brightness where either is a full colour (rr_mode7.h rr_rgb_eighths,
+   rr_rgb_finish) */
+"static uint rgb_eighths(uint c, uint k) {\n"
+"  if ((c & 0x1000000u) == 0) return ((c >> (5 * k)) & 31) << 3;\n"
+"  uint v = (c >> (16 - 8 * k)) & 0xFF;\n"
+"  return v - (v >> 5); }\n"
+"static uint rgb_finish(uint c, uint o, bool math, bool sub, bool halve, uint bright) {\n"
+"  uint res = 0xFF000000u;\n"
+"  for (uint k = 0; k < 3; k++) {\n"
+"    uint sh = 16 - 8 * k;\n"
+"    if (!math && bright == 15 && (c & 0x1000000u)) { res |= c & (0xFFu << sh); continue; }\n"
+"    uint z = rgb_eighths(c, k);\n"
+"    if (math) {\n"
+"      uint y = rgb_eighths(o, k);\n"
+"      z = sub ? (z > y ? z - y : 0u) : z + y;\n"
+"      if (halve) z = (z >> 4) << 3;\n"
+"      z = min(z, 248u);\n"
+"    }\n"
+"    if (bright != 15) z = ((((z >> 3) * bright + 7u) * 4370u) >> 16) << 3;\n"
+"    res |= (z + (z >> 5)) << sh;\n"
+"  }\n"
+"  return res; }\n"
 "static uint m7_finish(uint mc, uint ml, uint sc, uint sl, uint fl, uint adsub, uint wsel, uint fixed, uint bright) {\n"
 "  bool clip = (fl & 0x80u) != 0, prevent = (fl & 0x100u) != 0;\n"
 "  uint bit = ml == 5 ? 5 : ml == 6 ? 8 : ml, c = clip ? 0 : mc, r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;\n"
-"  if (bit < 8 && (adsub >> bit & 1) && !prevent) {\n"
-"    uint o; bool halve = (adsub & 0x40) != 0 && !clip;\n"
+"  bool math = bit < 8 && (adsub >> bit & 1) && !prevent, halve = false;\n"
+"  uint o = 0;\n"
+"  if (math) {\n"
+"    halve = (adsub & 0x40) != 0 && !clip;\n"
 "    if (wsel & 2) { if (sl == 5) { o = fixed; halve = false; } else o = sc; } else o = fixed;\n"
+"  }\n"
+"  if ((c | o) & 0x1000000u) return rgb_finish(c, o, math, (adsub & 0x80) != 0, halve, bright);\n"
+"  if (math) {\n"
 "    if (adsub & 0x80) {\n"
 "      int rr = int(r) - int(o & 31), gg = int(g) - int((o >> 5) & 31), bb = int(b) - int((o >> 10) & 31);\n"
 "      r = rr < 0 ? 0 : uint(rr); g = gg < 0 ? 0 : uint(gg); b = bb < 0 ? 0 : uint(bb);\n"
@@ -86,7 +115,8 @@ static const char k_m7_src[] =
 "  return plane.read(uint2(px & 1023, py & 1023), layer).r; }\n"
 "static uint m7_mix(uint a, uint b, float t) {\n"
 "  uint o = 0xFF000000u;\n"
-"  for (uint s = 0; s < 24; s += 8) { float ca = float((a >> s) & 0xFF), cb = float((b >> s) & 0xFF); o |= uint(int(ca + (cb - ca) * t + 0.5)) << s; }\n"
+"  float w = floor(t * 256.0 + 0.5);\n"
+"  for (uint s = 0; s < 24; s += 8) { float ca = float((a >> s) & 0xFF), cb = float((b >> s) & 0xFF); o |= uint(int(ca + floor(((cb - ca) * w + 128.0) / 256.0))) << s; }\n"
 "  return o; }\n"
 "static int m7_fdiv(int a, int b) {\n"
 "  int q = int(floor(float(a) / float(b)));\n"
@@ -125,6 +155,11 @@ static const char k_m7_src[] =
 "  uint fl = p.z & 0xFFFFu, w3 = p.w, bpp = uint(g[7]) & 0xFF, mode = (uint(g[7]) >> 8) & 7;\n"
 "  uint pal = (w3 >> 22) & 7, z = (w3 >> 25) & 15, n = (w3 >> 29) & 3;\n"
 "  uint mc = p.x & 0xFFFF, sc = p.x >> 16, mz = p.y & 0xFF, sz = (p.y >> 8) & 0xFF, ml = (p.y >> 16) & 0xFF, sl = p.y >> 24;\n"
+"  if (pix >= 0x1000000u) {\n"
+"    uint col = 0x1000000u | (pix & 0xFFFFFFu);\n"
+"    if ((fl & 0x08u) && z > mz) { mc = col; mz = z; ml = n; }\n"
+"    if ((fl & 0x10u) && z > sz) { sc = col; sz = z; sl = n; }\n"
+"    return m7_finish(mc, ml, sc, sl, fl, (uint(g[4]) >> 16) & 0xFF, uint(g[4]) >> 24, uint(g[5]) & 0xFFFF, (uint(g[5]) >> 16) & 0xFF); }\n"
 "  pix &= (1u << bpp) - 1u;\n"
 "  if (pix) {\n"
 "    uint col = bpp == 8 ? (((uint(g[4]) >> 8) & 1) ? cv_direct(pix, pal) : uint(pl[pix])) :\n"
@@ -133,6 +168,10 @@ static const char k_m7_src[] =
 "    if ((fl & 0x10u) && z > sz) { sc = col; sz = z; sl = n; }\n"
 "  }\n"
 "  return m7_finish(mc, ml, sc, sl, fl, (uint(g[4]) >> 16) & 0xFF, uint(g[4]) >> 24, uint(g[5]) & 0xFFFF, (uint(g[5]) >> 16) & 0xFF); }\n"
+/* a screen canvas over the whole screen (rr_mode7.h rr_cv_fit) */
+"static uint cv_fit(uint c, uint f, uint fx, uint n) {\n"
+"  uint a = c * fx, q = a / n, e = a - q * n;\n"
+"  return q + (1024u * e + f * fx) / (1024u * n); }\n"
 /* canvas pixel (i, r) over the output pixel centred at u, v: the canvas's
    texel under the centre (rr_cv_q) */
 "static uint cv_q(constant M7U &U, uint4 p, const device int *g, const device ushort *pl, const device uchar *cv, int i, int r, int u, int v) {\n"
@@ -143,7 +182,9 @@ static const char k_m7_src[] =
 "  if ((w3 >> 21) & 1) sy = k - 1 - sy;\n"
 "  if ((w3 >> 31) != 0u) {\n"
 "    uint ex = uint(i / U.cpp) * k + sx, ey = uint(r) * k + sy;\n"
-"    return cv_compose(p, g, pl, ex < uint(U.cvw) && ey < uint(U.cvh) ? uint(cv[ey * uint(U.cvw) + ex]) : 0u); }\n"
+"    if (U.cvfx != 0) { ex = cv_fit(uint(i / U.cpp), uint(fu), uint(U.cvfx), uint(U.pw / U.cpp)); ey = cv_fit(uint(r), uint(fv), uint(U.cvfy), uint(U.ph)); }\n"
+"    uint at = ey * uint(U.cvw) + ex;\n"
+"    return cv_compose(p, g, pl, ex < uint(U.cvw) && ey < uint(U.cvh) ? (U.cvrgb ? ((const device uint *)cv)[at] : uint(cv[at])) : 0u); }\n"
 "  uint at = (w3 & 0x3FFF) * 64u * k * k + (((w3 >> 17) & 7) * k + sy) * 8u * k + ((w3 >> 14) & 7) * k + sx;\n"
 "  return cv_compose(p, g, pl, at < uint(U.cvlen) ? uint(cv[at]) : 0u); }\n"
 /* picture pixel (i, r) over the output pixel centred at u, v: its Mode 7
@@ -301,7 +342,6 @@ static const char k_m7_src[] =
 "    top = j ? m7_mix(top, cur, fy) : cur;\n"
 "  }\n"
 "  return float4(float((top >> 16) & 0xFF), float((top >> 8) & 0xFF), float(top & 0xFF), 255.0) / 255.0; }\n";
-
 static id<MTLRenderPipelineState> s_m7;
 static id<MTLComputePipelineState> s_cp, s_cpr; /* the compositor: a picture; a picture and its records */
 static id<MTLBuffer> s_recbuf[3], s_picbuf[3];  /* each frame in flight's records and picture */
@@ -443,7 +483,7 @@ static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Sa
                     id<MTLBuffer> pic, id<MTLBuffer> cv, size_t cv_off)
 {
     @autoreleasepool {
-        struct { int pw, ph, d0, d1, step_u, step_v, du[28], dv[28], cpp, left, cvk, cvlen, cvw, cvh; } u;
+        struct { int pw, ph, d0, d1, step_u, step_v, du[28], dv[28], cpp, left, cvk, cvlen, cvw, cvh, cvrgb, cvfx, cvfy; } u;
         int ow = d[2] - d[0], oh = d[3] - d[1];
         size_t np = (size_t)m->pw * (size_t)m->ph;
         id<MTLBuffer> b[8];
@@ -463,6 +503,9 @@ static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Sa
         u.cvlen = (int)m->cv_len;
         u.cvw = m->cv_w;
         u.cvh = m->cv_h;
+        u.cvfx = m->cv_fx;
+        u.cvfy = m->cv_fy;
+        u.cvrgb = m->cv_rgb;
         /* the supersamples' offsets: 4 from 0, 8 from 4, 16 from 12 */
         memcpy(u.du, s->du4, sizeof s->du4);
         memcpy(u.du + 4, s->du8, sizeof s->du8);

@@ -11,35 +11,146 @@ NSHVC_ORACLE_CORE = "{{config_root}}/build/oracle-core/bsnes_libretro.dylib"
 description = "Fetch and build asar and the pinned reference core"
 run = "sh tools/toolchains/setup.sh all"
 
+[tasks."tools:md"]
+description = "Build local candidate BlastEm and vasm test tools"
+run = "sh tools/toolchains/setup.sh vasm && sh tools/toolchains/setup.sh blastem"
+
+[tasks."test:md-toolchain"]
+run = "python3 consoles/md/tests/toolchain_check.py"
+
+[tasks."test:md-console"]
+description = "Check that the nmd console entry point links to the kit"
+depends = ["build:null"]
+run = "cmake --build build/null --target console_check && build/null/tests/console_check"
+
+[tasks."test:md-io"]
+description = "Check public Mega Drive I/O configuration and host input mapping"
+depends = ["build:null"]
+run = "cmake --build build/null --target io_check && build/null/tests/io_check"
+
+[tasks."test:md-z80"]
+description = "Check Z80 reset, BUSREQ, memory map, bank window, coroutine, and profile costs"
+depends = ["build:null"]
+run = "cmake --build build/null --target z80_check && python3 consoles/md/tests/z80_check.py"
+
+[tasks."test:md-sound"]
+description = "Check YM2612 and PSG register writes, timers, DAC, tones, attenuation, and noise"
+depends = ["build:null"]
+run = "cmake --build build/null --target sound_check && build/null/tests/sound_check"
+
+[tasks."test:md-bus"]
+description = "Check the 68000 bus map, byte lanes, profile costs, waits, and fatal accesses"
+depends = ["build:null"]
+run = "python3 consoles/md/tests/bus_check.py"
+
+[tasks."test:md-interrupt"]
+description = "Check the 68000 clock scheduler, VDP interrupts, and waits"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/interrupt_check.py"
+
+[tasks."test:md-execution"]
+description = "Check the native reset entry, frame resume, interrupt returns, restart, and re-power"
+depends = ["build:null"]
+run = "cmake --build build/null --target execution_check && python3 consoles/md/tests/execution_check.py"
+
+[tasks."test:md-vdp"]
+description = "Check VDP control/data ports, memory, reads, and FIFO timing"
+depends = ["build:null"]
+run = "cmake --build build/null --target vdp_check && build/null/tests/vdp_check"
+
+[tasks."test:md-dma"]
+description = "Check DMA transfers, register setup, and bus stalls"
+depends = ["build:null"]
+run = "cmake --build build/null --target dma_check && python3 consoles/md/tests/dma_check.py"
+
+[tasks."test:md-render"]
+description = "Check Mode 5 plane rendering, scroll, window, and dimensions"
+depends = ["build:null"]
+run = "cmake --build build/null --target render_check && build/null/tests/render_check"
+
+[tasks."test:md-rom"]
+description = "Compare all or selected synthetic 68000 bus and VDP cases with the candidate core"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/rom/audio_compare_check.py && python3 consoles/md/tests/rom/run.py"
+
+[tasks."test:md-oracle-smoke"]
+description = "Exercise the exploratory libretro runner with a synthetic cartridge"
+run = "python3 consoles/md/tests/oracle_check.py"
+
+[tasks."test:md-trace"]
+description = "Check the candidate trace envelope and clock epochs"
+run = "python3 consoles/md/tests/trace_check.py && python3 consoles/md/tests/trace_abi_check.py"
+
+[tasks."test:md-decomp"]
+description = "Run NMDH ABI, format, negative-control, and actual-core checkpoint gates"
+depends = ["tools:md"]
+run = "python3 consoles/md/tests/decomp_check.py"
+
+[tasks."test:md-features"]
+description = "Check evidence-aware extraction from candidate traces"
+run = "python3 consoles/md/tests/feature_check.py"
+
+[tasks."test:md-survey"]
+description = "Check bounded survey statuses, title sanitization, and aggregation"
+run = "python3 consoles/md/tests/survey_check.py"
+
+[tasks."test:md-profile"]
+description = "Fit both nativemd processor profiles from candidate traces"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/profile_check.py"
+
+[tasks."test:md-consumer"]
+description = "Build and run a separate nativekit/nmd consumer project"
+run = "python3 consoles/md/tests/consumer/run.py"
+
+[tasks."test:md-golden-check"]
+description = "Check that the MD synthetic golden comparator detects output changes"
+run = "python3 consoles/md/tests/golden_check.py"
+
+[tasks."test:nes"]
+description = "Run the nnes contract checks, the synthetic cartridge, and the profile tool's checks"
+depends = ["build:null"]
+run = "cmake --build build/null --target nes-check"
+
+[tasks."golden:md-record"]
+description = "Record the nativemd synthetic output baseline after the reference matrix passes"
+depends = ["test:md-rom"]
+run = "python3 consoles/md/tests/golden.py record build/golden/md"
+
+[tasks."golden:md-compare"]
+description = "Compare nativemd synthetic outputs with the recorded baseline"
+depends = ["build:null", "tools:md"]
+run = "python3 consoles/md/tests/golden.py compare build/golden/md"
+
 [tasks."build:null"]
-run = "cmake -S . -B build/null -DNSHVC_TESTS=ON -DNSHVC_EXAMPLES=ON && cmake --build build/null -j8"
+run = "cmake -S . -B build/null -DNK_CONSOLES=\"snes;md;nes\" -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/null -j8"
 
 [tasks."build:macos"]
-run = "cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal -DNSHVC_TESTS=ON -DNSHVC_EXAMPLES=ON && cmake --build build/macos -j8"
+run = "cmake -S . -B build/macos -DNK_CONSOLES=\"snes;md;nes\" -DNK_HOST=macos -DNK_RENDER=metal -DNK_TESTS=ON -DNK_EXAMPLES=ON && cmake --build build/macos -j8"
 
 [tasks."build:null-metal"]
-run = "cmake -S . -B build/null-metal -DNSHVC_RENDER=metal -DNSHVC_TESTS=ON && cmake --build build/null-metal -j8"
+run = "cmake -S . -B build/null-metal -DNK_CONSOLES=\"snes;md;nes\" -DNK_RENDER=metal -DNK_TESTS=ON && cmake --build build/null-metal -j8"
 
 [tasks."build:null-gl"]
-run = "cmake -S . -B build/null-gl -DNSHVC_RENDER=gl -DNSHVC_TESTS=ON && cmake --build build/null-gl -j8"
+run = "cmake -S . -B build/null-gl -DNK_CONSOLES=\"snes;md;nes\" -DNK_RENDER=gl -DNK_TESTS=ON && cmake --build build/null-gl -j8"
 
 [tasks."build:null-vulkan"]
 description = "Needs Vulkan headers and loader on CMAKE_PREFIX_PATH (the nix shell sets it; otherwise Homebrew)"
-run = "cmake -S . -B build/null-vulkan -DNSHVC_RENDER=vulkan -DNSHVC_TESTS=ON -UVulkan_INCLUDE_DIR -UVulkan_LIBRARY -UVulkan_GLSLANG_VALIDATOR_EXECUTABLE -DCMAKE_PREFIX_PATH=\"${CMAKE_PREFIX_PATH:-/opt/homebrew}\" && cmake --build build/null-vulkan -j8"
+run = "cmake -S . -B build/null-vulkan -DNK_CONSOLES=\"snes;md;nes\" -DNK_RENDER=vulkan -DNK_TESTS=ON -UVulkan_INCLUDE_DIR -UVulkan_LIBRARY -UVulkan_GLSLANG_VALIDATOR_EXECUTABLE -DCMAKE_PREFIX_PATH=\"${CMAKE_PREFIX_PATH:-/opt/homebrew}\" && cmake --build build/null-vulkan -j8"
 
 [tasks."build:x86"]
-run = "cmake -S . -B build/x86 -DCMAKE_OSX_ARCHITECTURES=x86_64 -DNSHVC_TESTS=ON && cmake --build build/x86 -j8"
+run = "cmake -S . -B build/x86 -DNK_CONSOLES=\"snes;md;nes\" -DCMAKE_OSX_ARCHITECTURES=x86_64 -DNK_TESTS=ON && cmake --build build/x86 -j8"
 
 [tasks."build:ios"]
-run = "unset LIBRARY_PATH CC CXX MACOSX_DEPLOYMENT_TARGET; PATH=/usr/bin:$PATH cmake -S . -B build/ios -G Xcode -UCMAKE_C_COMPILER -UCMAKE_CXX_COMPILER -UCMAKE_ASM_COMPILER -UCMAKE_OBJC_COMPILER -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DNSHVC_HOST=ios -DNSHVC_EXAMPLES=ON && cmake --build build/ios -- -quiet CODE_SIGNING_ALLOWED=NO"
+run = "unset LIBRARY_PATH CC CXX MACOSX_DEPLOYMENT_TARGET; PATH=/usr/bin:$PATH cmake -S . -B build/ios -G Xcode -UCMAKE_C_COMPILER -UCMAKE_CXX_COMPILER -UCMAKE_ASM_COMPILER -UCMAKE_OBJC_COMPILER -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64 -DNK_CONSOLES=\"snes;md;nes\" -DNK_HOST=ios -DNK_EXAMPLES=ON && /usr/bin/xcodebuild -project \"$PWD/build/ios/nativekit.xcodeproj\" -scheme ALL_BUILD -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath \"$PWD/build/ios-derived\" CODE_SIGNING_ALLOWED=NO -quiet"
 
 [tasks."build:none"]
 description = "No host (the app supplies host.h's functions): the library alone"
-run = "cmake -S . -B build/none -DNSHVC_HOST=none -DNSHVC_RENDER=soft && cmake --build build/none -j8"
+run = "cmake -S . -B build/none -DNK_CONSOLES=\"snes;md;nes\" -DNK_HOST=none -DNK_RENDER=soft && cmake --build build/none -j8"
 
 [tasks."build:win"]
 description = "MinGW cross build (x86_64-w64-mingw32-gcc from the nix shell)"
-run = "cmake -S . -B build/win -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_ASM_COMPILER=$(command -v x86_64-w64-mingw32-gcc) -DCMAKE_AR=$(command -v x86_64-w64-mingw32-ar) -DCMAKE_RANLIB=$(command -v x86_64-w64-mingw32-ranlib) -DNSHVC_HOST=windows -DNSHVC_RENDER=gl -DNSHVC_EXAMPLES=ON && cmake --build build/win -j8"
+run = "cmake -S . -B build/win -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc -DCMAKE_ASM_COMPILER=$(command -v x86_64-w64-mingw32-gcc) -DCMAKE_AR=$(command -v x86_64-w64-mingw32-ar) -DCMAKE_RANLIB=$(command -v x86_64-w64-mingw32-ranlib) -DNK_CONSOLES=\"snes;md;nes\" -DNK_HOST=windows -DNK_RENDER=gl -DNK_EXAMPLES=ON && cmake --build build/win -j8"
 
 [tasks.build]
 description = "All the macOS builds (Linux is untested)"
@@ -67,3 +178,8 @@ run = "python3 consoles/snes/tests/golden.py record build/golden"
 
 [tasks."golden:compare"]
 run = "python3 consoles/snes/tests/golden.py compare build/golden"
+
+[tasks."test:snes-upstream"]
+description = "Check compatible upstream SNES APIs, timing, graphics and fatal paths"
+depends = ["build:null"]
+run = "cmake --build build/null --target snes-upstream-check"

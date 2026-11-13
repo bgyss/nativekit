@@ -39,7 +39,7 @@ extern "C" {
 
 /* the game contract's version (docs/contract.md) */
 #define NSHVC_VERSION_MAJOR 2
-#define NSHVC_VERSION_MINOR 10
+#define NSHVC_VERSION_MINOR 19
 #define NSHVC_VERSION_PATCH 0
 
 /* ---- the cartridge ------------------------------------------------------------ */
@@ -319,18 +319,26 @@ uint8_t nshvc_peek(uint32_t addr);
 void nshvc_set_frame_hook(void (*fn)(void));
 void nshvc_set_write_hook(void (*fn)(uint32_t addr, uint8_t value));
 void nshvc_set_read_hook(void (*fn)(uint32_t addr, uint8_t value));
+/* each S-CPU write to the console's own registers (the B bus, $2100-$21FF,
+   and the CPU's, $4000-$43FF, of banks $00-$3F and $80-$BF), before it
+   lands: where a check needs only those, the S-CPU's other accesses stay
+   inline (a write hook makes every access a call) (since 2.19) */
+void nshvc_set_register_write_hook(void (*fn)(uint32_t addr, uint8_t value));
 
 /* ---- extensions: past the console's limits, each off by default ---------------- */
 
 /* The screen the game asks for, from the next frame: width 256 to 8192
-   and height 224 to 8192, both even (since 2.7; to 1024 x 480 before);
+   and height 224 to 8192, both even (since 2.7; to 1024 x 480 before),
    256 x 224 (or 239 with SETINI's overscan) is the console's own. Memory
    and the time to draw a frame grow with the screen asked for. The console's picture sits at its centre
    (its column 0 at (width - 256) / 2, its line 1 at (height - 224) / 2,
    or 239 with overscan) or where nshvc_ext_screen_origin puts it, drawn
    exactly as on the console; the rest of the screen is drawn by the same
    rules, past the console's edges: the backgrounds and Mode 7 go on at
-   their scroll, windows are outside both windows, colour maths and
+   their scroll, windows are outside both windows (nshvc_ext_window_edges
+   opens their edges at the console's, nshvc_ext_window_map places them
+   on the screen, nshvc_ext_window_columns places one at the screen's
+   columns), colour maths and
    brightness as on the line; a column carries its line's state (a change
    in the line included), a row above or below the console's lines the
    nearest line's. Sprites, from the console's column 0 and line 1
@@ -386,6 +394,42 @@ void nshvc_ext_layer_page(int layer, int page);
    picture's edge is cut at it; off (the default), it goes on past them
    by the console's rules. (Since 2.7.) */
 void nshvc_ext_layer_clip(int layer, int on);
+/* The windows on a larger screen (nshvc_ext_screen), from the next line
+   drawn: on, a window's edge at the console's own edge is open, so a
+   window whose left edge (WH0, WH2) is 0 reaches every column left of the
+   console's picture, and one whose right edge (WH1, WH3) is 255 every
+   column right of it: a window spanning the console's line spans the
+   screen. Off (the default), past the console's edges a column is outside
+   both windows. Inside the console's 256 columns it changes nothing.
+   (Since 2.11.) */
+void nshvc_ext_window_edges(int on);
+/* The windows' edges mapped onto a larger screen (nshvc_ext_screen), from
+   the next line drawn: on, the edges each line has (WH0 and WH1 for
+   window 1, WH2 and WH3 for window 2, HDMA's included) are placed on the
+   screen by scale_q16 (the screen's columns a console column, 16.16
+   fixed point, above 0) and offset (the screen's column console column 0
+   maps to, -16777216 to 16777216): console column c maps to
+   c * scale_q16 / 65536, rounded down, + offset, and a window from L to R
+   (inclusive) covers the screen's columns L maps to up to the one before
+   R + 1's, those on the screen; a window whose L is past its R, none.
+   The map (65536, (W - 256) / 2) on a screen W wide (the console's
+   picture at its centre) is the console's windows; (W * 256, 0) stretches
+   them across the whole screen. Every layer, the sprites and the colour
+   window take it, their masks, logic and inversion the console's; a row
+   above or below the console's lines has the nearest line's. It
+   overrides nshvc_ext_window_edges while on; a window given columns
+   (nshvc_ext_window_columns) keeps them. Off (the default; scale_q16 and
+   offset unused), the windows are the console's. (Since 2.12.) */
+void nshvc_ext_window_map(int on, int32_t scale_q16, int offset);
+/* Window 1 or 2's edges as the screen's columns (0 to 8191, inclusive:
+   past the screen's width a column is not on it), from the next line
+   drawn: on every line the window is from column left to right, in place
+   of its WH registers (and nshvc_ext_window_map and _window_edges); a
+   left past right covers none. Every layer, the sprites and the colour
+   window that use the window take it, with their masks, logic and
+   inversion. left = -1 gives the window back to its registers (the
+   default). (Since 2.12.) */
+void nshvc_ext_window_columns(int window, int left, int right);
 /* Background layer 0-3 (BG1-4)'s map outside the console's picture on a
    larger screen (nshvc_ext_screen), from the next frame: past the
    console's 256 columns and its lines the layer reads its map entries
@@ -450,8 +494,37 @@ void nshvc_ext_canvas_chars(int layer, unsigned word_addr, int count, const uint
    window pixel takes the texel under it, as nshvc_ext_canvas_chars's.
    Modes 0-6, not on a hires line or under the layer's mosaic (there the
    layer is its tiles). One canvas at a time: this one or
-   nshvc_ext_canvas_chars's, the last asked for. NULL: off. (Since 2.8.) */
+   nshvc_ext_canvas_chars's, the last asked for. NULL: off. (Since 2.8.)
+   k 0: the w x h texels (each up to 65,535) over the whole screen, at no
+   whole scale: a point x console pixels across the W-pixel screen (y down
+   its H) takes texel floor(x w / W) (floor(y h / H) down), so a console
+   pixel's centre takes floor((2c + 1) w / 2W), and a canvas the size
+   nshvc_ext_canvas_presented gives is presented a texel a window pixel.
+   (Since 2.15.)
+   nshvc_ext_canvas_presented: the window pixels the console's screen was
+   last presented over, across and down (*w, *h; either may be NULL), the
+   size of a canvas at k 0 drawn a texel a window pixel; before the first
+   frame shown, headless NSHVC_SCALE's window, else the screen's own size.
+   (Since 2.15.) */
 void nshvc_ext_canvas_screen(int layer, const uint8_t *texels, int w, int h, int k, int priority, int palette);
+void nshvc_ext_canvas_presented(int *w, int *h);
+/* A screen canvas of full colour: nshvc_ext_canvas_screen's in every way
+   (the layer, size, k, priority, palette, one canvas at a time, the frame
+   taking it as it stands when the frame begins, copied here) but that
+   each texel is 32 bits: 0 transparent; 0x000000ii (ii not 0) CGRAM index
+   ii, resolved as nshvc_ext_canvas_screen's texel ii (by the line's
+   palette, so HDMA's CGRAM writes show, and `palette` as there); a top
+   byte not 0, 0xFFrrggbb as written, a colour of 8 bits a channel,
+   opaque. A colour then goes the way any of the layer's pixels goes:
+   priority, the windows, colour maths (with the other screen or the fixed
+   colour) and brightness; a colour that is a CGRAM colour widened (each
+   5-bit channel c as c << 3 | c >> 2) gives exactly that CGRAM colour's
+   pixel everywhere. Its channels are kept whole where neither colour
+   maths nor brightness takes the pixel; colour maths' adding and
+   subtracting keeps them to 1/8 of a console step (249 levels); halving
+   and a brightness below 15 come to the console's 5 bits (docs/contract.md
+   2.14). (Since 2.14; k 0, the texels over the whole screen, since 2.15.) */
+void nshvc_ext_canvas_screen32(int layer, const uint32_t *texels, int w, int h, int k, int priority, int palette);
 /* The same pages as registers on the B bus, for the game's code and its
    HDMA (a page per line, as any of the PPU's registers): $21C0-$21C3
    BG1-4's, $21C4 the sprites', $21C5 the data port's. With VRAM at the
@@ -486,6 +559,11 @@ typedef struct {
     void (*frame)(void);
     /* the device driving `player` changed (nshvc_player_source) */
     void (*input)(int player, const nshvc_input_source *src);
+    /* the mouse moved or a button changed: where, in the window's points,
+       and the buttons held (bit 0 left, 1 right, 2 middle); 1 if the game
+       took it (the console's mouse and light guns then do not see it).
+       Not on a touch screen (the touch hook). (Since 2.13.) */
+    int (*pointer)(float x, float y, int buttons);
 } nshvc_hooks;
 void nshvc_set_hooks(const nshvc_hooks *hooks);
 /* the host's folder for the player's saves and settings */
@@ -496,6 +574,18 @@ void nshvc_safe_area(float *left, float *top, float *right, float *bottom);
 /* the window's size in points (headless: the renderer's target, a point a
    pixel) */
 void nshvc_window_size(float *w, float *h);
+/* Text entry: on, a touch screen with no hardware keyboard shows the
+   system's on-screen keyboard (iOS), until off hides it. What is typed
+   reaches the game through the key hook (nshvc_hooks.key) as virtual
+   keys, each a press then a release: a letter as 'A'-'Z' (either case), a
+   digit as '0'-'9', space 0x20, Backspace 0x08, Return 0x0D; anything else
+   is not sent. Harmless where there is a hardware keyboard (its keys come
+   as always, and nothing is shown) and on hosts with no touch screen;
+   callable from the game's thread. (Since 2.11.) */
+void nshvc_ext_text_input(int on);
+/* 1 when the player has a hardware keyboard: always on macOS and Windows,
+   on iOS while one is attached, never headless. (Since 2.11.) */
+int nshvc_keyboard_attached(void);
 /* Buttons the game holds for a joypad's player (a touch scheme's), the
    joypad's bits: kept until changed, joined with the console's own
    controls (keyboard, game controllers, a script) at each frame. */
@@ -509,6 +599,33 @@ void nshvc_game_buttons(int player, uint16_t buttons);
 #define NSHVC_OVERLAYS 16
 int nshvc_overlay_image(const uint32_t *argb, int w, int h);
 void nshvc_overlay_place(int id, float cx, float cy, float scale, float angle_rad, float alpha, int visible);
+/* An overlay's image drawn again: argb as large as the image it was made
+   with, from the next frame shown. (Since 2.13.) */
+void nshvc_overlay_update(int id, const uint32_t *argb);
+
+/* The game's pause: on, the machine stops between two frames (no time
+   passes for it, no frame is made, nshvc_frames holds) and its sound goes
+   silent; the window goes on showing the last frame presented, blurred by
+   `blur` points (0: sharp) and tint (0xAARRGGBB, its alpha how much) laid
+   over it, under the game's overlays, which with input and the hooks go
+   on at each display frame. Off, the machine goes on from where it
+   stopped as though it had not. Callable from the hooks. nshvc_ext_paused:
+   1 while on. (Since 2.13.) */
+void nshvc_ext_pause(int on, float blur, uint32_t tint);
+int nshvc_ext_paused(void);
+
+/* Player 0's keyboard (since 2.13): the key (a Win32 virtual key code)
+   that makes one of the joypad's controls (NSHVC_B...), 0 none;
+   nshvc_ext_key_bind gives the control that key alone (vk 0: none), the
+   key no longer making any other control, so a game can lay out the keys
+   as its player chooses. The console's defaults (Z, X, A, S, Q, W, the
+   arrows, Return, Shift and Tab) until then, at each power on: a game
+   keeps its player's choice itself (nshvc_save_dir). nshvc_ext_key_name:
+   a key's name ("Z", "Space", "Left Shift"; "" one with none).
+   nshvc_player_label names the bound keys. */
+int nshvc_ext_key_for(unsigned control);
+void nshvc_ext_key_bind(unsigned control, int vk);
+const char *nshvc_ext_key_name(int vk);
 
 /* ---- the picture on the window ------------------------------------------------ */
 /* The game draws in the console's own pixels (its screen at most what

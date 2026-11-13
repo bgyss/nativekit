@@ -35,7 +35,7 @@
 #include <string.h>
 
 #include "nshvc/nshvc.h"
-#include "host.h"
+#include "nk/host.h"
 #include "nk/input.h"
 #include "snes_input.h"
 
@@ -45,6 +45,23 @@ _Static_assert(sizeof(nshvc_input_source) == sizeof(nk_input_source), "the same 
 _Static_assert(offsetof(nshvc_input_source, name) == offsetof(nk_input_source, name), "the same source");
 _Static_assert((int)NSHVC_INPUT_SCRIPT == (int)NK_INPUT_SCRIPT && (int)NSHVC_PAD_NINTENDO == (int)NK_PAD_NINTENDO,
                "the same kinds");
+
+static int pad_bit_of(uint16_t button);
+
+int nshvc_ext_key_for(unsigned control)
+{
+    int bit = control <= 0xFFFFu ? pad_bit_of((uint16_t)control) : -1;
+    return bit < 0 ? 0 : nk_input_key_for(1u << bit);
+}
+
+void nshvc_ext_key_bind(unsigned control, int vk)
+{
+    int bit = control <= 0xFFFFu ? pad_bit_of((uint16_t)control) : -1;
+    if (bit >= 0)
+        nk_input_key_bind(1u << bit, vk);
+}
+
+const char *nshvc_ext_key_name(int vk) { return nk_key_name(vk); }
 
 /* ---- the keyboard ---- */
 /* T and P, the Super Scope's turbo and pause, mark the keyboard as player

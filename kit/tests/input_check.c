@@ -23,6 +23,10 @@ void nk_fatal(const char *fmt, ...)
 int host_pad_read(int index, host_pad *p) { (void)index; memset(p, 0, sizeof *p); return 0; }
 
 static int fails, reports, last_player, last_kind;
+static const nk_key keys[] = {
+    { 0x26, 1u << 12, "Up" }, { 'Z', 1u << 0, "Z" }, { 0x10, 1u << 6, "Right Shift" },
+    { 0x09, 1u << 6, "Tab" }, { 'C', 1u << 20, "C" },
+};
 #define CHECK(c) do { if (!(c)) { fprintf(stderr, "input_check: %s\n", #c); fails++; } } while (0)
 static void hook(int player, const nk_input_source *s) { reports++; last_player = player; last_kind = s->kind; }
 
@@ -32,6 +36,10 @@ int main(void)
     int on[NK_PLAYERS] = { 0 };
     float tx[2], ty[2];
     memset(now, 0, sizeof now);
+    nk_input_keymap(keys, (int)(sizeof keys / sizeof keys[0]));
+    nk_input_key('Q', 1);
+    nk_input_report(hook);
+    CHECK(nk_input_keyboard_bits() == 0 && reports == 0);
     nk_input_key('Z', 1);
     nk_input_key(0x26, 1);
     CHECK(nk_input_keyboard_bits() == (1u << 0 | 1u << 12));
@@ -41,6 +49,10 @@ int main(void)
     CHECK(reports == 1 && last_player == 0 && last_kind == NK_INPUT_KEYBOARD);
     nk_input_focus_lost();
     CHECK(nk_input_keyboard_bits() == 0 && !nk_input_key_held('Z'));
+    nk_input_key('C', 1);
+    CHECK(nk_input_keyboard_bits() == (1u << 20));
+    CHECK(!strcmp(nk_input_key_name(1u << 20), "C"));
+    nk_input_key('C', 0);
 
     now[1].x = 0.75f;
     now[1].buttons = 1u << 1;

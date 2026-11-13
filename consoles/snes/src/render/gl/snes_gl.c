@@ -11,7 +11,7 @@
 
 #include "snes_rr.h"
 #include "rr_mode7.h"
-#include "rr_gl_ext.h"
+#include "nk/rr_gl_ext.h"
 
 /* a frame with Mode 7 presented (rr_mode7.h, the same arithmetic): the
    shader the Vulkan backend's is made from (vulkan/shaders/m7_body.glsl) */
@@ -62,36 +62,49 @@ static GLuint s_cpr, s_rectex, s_picutex;        /* the records' program and tar
 static int s_recw, s_rech;
 static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Samples *s, int gpu);
 
+/* the console's programs (gl_ctx_run: the compose shaders can take a driver
+   many seconds) */
+static void programs(void *ok_)
+{
+    int *ok = (int *)ok_;
+    size_t n;
+    char *fs;
+
+    s_m7 = rr_gl_program(rr_gl_quad_vs, k_m7);
+    if (!s_m7)
+        return;
+    n = sizeof k_cp_pre + sizeof k_compose_body + sizeof k_cp_post;
+    if (!(fs = (char *)malloc(n)))
+        return;
+    snprintf(fs, n, "%s%s%s", k_cp_pre, k_compose_body, k_cp_post);
+    s_cp = rr_gl_program(rr_gl_quad_vs, fs);
+    free(fs);
+    if (!s_cp)
+        return;
+    glUniform1i(glGetUniformLocation(s_cp, "fdb"), 12);
+    n = sizeof k_cp_pre + sizeof k_compose_body + sizeof k_cpr_post;
+    if (!(fs = (char *)malloc(n)))
+        return;
+    snprintf(fs, n, "%s%s%s", k_cp_pre, k_compose_body, k_cpr_post);
+    s_cpr = rr_gl_program(rr_gl_quad_vs, fs);
+    free(fs);
+    if (!s_cpr)
+        return;
+    glUniform1i(glGetUniformLocation(s_cpr, "fdb"), 12);
+    *ok = 1;
+}
+
 /* the backend's open hook (rr_set_open_hook), in rr_open after the
    backend's own programs: the Mode 7 program, the compositor's two and
    their buffers and textures; 0 (the backend not open) when they do not
    compile */
 int snes_gl_open(void)
 {
-    s_m7 = rr_gl_program(rr_gl_quad_vs, k_m7);
-    if (!s_m7)
+    int ok = 0;
+    gl_ctx_run(programs, &ok);
+    if (!ok)
         return 0;
     {
-        size_t n = sizeof k_cp_pre + sizeof k_compose_body + sizeof k_cp_post;
-        char *fs = (char *)malloc(n);
-        if (!fs)
-            return 0;
-        snprintf(fs, n, "%s%s%s", k_cp_pre, k_compose_body, k_cp_post);
-        s_cp = rr_gl_program(rr_gl_quad_vs, fs);
-        free(fs);
-        if (!s_cp)
-            return 0;
-        glUniform1i(glGetUniformLocation(s_cp, "fdb"), 12);
-        n = sizeof k_cp_pre + sizeof k_compose_body + sizeof k_cpr_post;
-        fs = (char *)malloc(n);
-        if (!fs)
-            return 0;
-        snprintf(fs, n, "%s%s%s", k_cp_pre, k_compose_body, k_cpr_post);
-        s_cpr = rr_gl_program(rr_gl_quad_vs, fs);
-        free(fs);
-        if (!s_cpr)
-            return 0;
-        glUniform1i(glGetUniformLocation(s_cpr, "fdb"), 12);
         glGenTextures(1, &s_rectex);
         glGenTextures(1, &s_picutex);
         glGenFramebuffers(1, &s_cpfbo);
@@ -294,13 +307,14 @@ static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Sa
         s_plane_gen = m->plane_gen;
         s_planes = m->vrams;
     }
-    /* the canvas's texels (a byte where there is none), on unit 9 */
+    /* the canvas's texels (a byte where there is none; a full-colour
+       canvas's 32 bits each), on unit 9 */
     glBindBuffer(GL_TEXTURE_BUFFER, s_m7buf[7]);
     glBufferData(GL_TEXTURE_BUFFER, (GLsizeiptr)(m->cv && m->cv_len ? m->cv_len : 1),
                  m->cv && m->cv_len ? (const void *)m->cv : &none, GL_STREAM_DRAW);
     glActiveTexture(GL_TEXTURE0 + 9);
     glBindTexture(GL_TEXTURE_BUFFER, s_m7tex[7]);
-    glTexBuffer(GL_TEXTURE_BUFFER, GL_R8UI, s_m7buf[7]);
+    glTexBuffer(GL_TEXTURE_BUFFER, m->cv && m->cv_len && m->cv_rgb ? GL_R32UI : GL_R8UI, s_m7buf[7]);
     /* the supersamples' offsets: 4 from 0, 8 from 4, 16 from 12 */
     memcpy(du, s->du4, sizeof s->du4);
     memcpy(du + 4, s->du8, sizeof s->du8);
@@ -321,6 +335,8 @@ static void m7_draw(const struct RrMode7 *m, const int d[4], const struct RrM7Sa
     glUniform1i(glGetUniformLocation(s_m7, "U_cvlen"), (int)m->cv_len);
     glUniform1i(glGetUniformLocation(s_m7, "U_cvw"), m->cv_w);
     glUniform1i(glGetUniformLocation(s_m7, "U_cvh"), m->cv_h);
+    glUniform1i(glGetUniformLocation(s_m7, "U_cvfx"), m->cv_fx);
+    glUniform1i(glGetUniformLocation(s_m7, "U_cvfy"), m->cv_fy);
     glUniform1iv(glGetUniformLocation(s_m7, "U_du_"), 28, du);
     glUniform1iv(glGetUniformLocation(s_m7, "U_dv_"), 28, dv);
     for (i = 0; i < 6; i++) {

@@ -21,6 +21,7 @@ need() {
 log=build/check.last
 r() { echo "### $*"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 0 ] || fails=$((fails+1)); }
 x() { echo "### $* (expect exit 70)"; "$@" >"$log" 2>&1; rc=$?; tail -3 "$log" | cut -c1-240; echo "[exit $rc]"; [ $rc -eq 70 ] || fails=$((fails+1)); }
+r sh tools/alias_check.sh
 r python3 consoles/snes/tests/rom/ext_check.py
 r python3 consoles/snes/tests/dsp/fuzz.py 1 2 3 4
 r python3 consoles/snes/tests/dsp/keys.py
@@ -35,6 +36,7 @@ x build/null/kit/tests/kit_save_check --past
 r python3 kit/tests/states_check.py build/null/kit/tests/kit_stub_console
 r python3 kit/tests/profile_lib_check.py
 r python3 consoles/snes/tests/tools/profile_check.py
+r python3 consoles/snes/tests/upstream_check.py build/null
 r build/null/tests/input
 r python3 consoles/snes/tests/unit/states.py
 if [ "$(uname -s)" = Darwin ]; then need build/macos/tests/pointer_macos && r build/macos/tests/pointer_macos; fi
@@ -43,9 +45,9 @@ x build/null/tests/vram_direct --copy0
 x build/null/tests/vram_direct --direct0
 r build/null/tests/waits
 r build/null/tests/waits --allowance
-x build/null/tests/waits --offpoll
+x env NSHVC_WATCHDOG=1 build/null/tests/waits --offpoll
 x build/null/tests/waits --held
-x build/null/tests/waits --heldpoll
+x env NSHVC_WATCHDOG=1 build/null/tests/waits --heldpoll
 r build/null/tests/ipl
 r build/null/tests/ipl --driver
 r build/null/tests/ipl --profile --sweep

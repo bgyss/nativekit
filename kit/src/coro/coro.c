@@ -3,6 +3,7 @@
  */
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "coro.h"
 #include "fatal.h"
@@ -57,7 +58,15 @@ void coro_switch(Coro *from, Coro *to)
     s_current = from;
 }
 
+int coro_stack_ok(const Coro *c)
+{
+    (void)c;
+    return 1;
+}
+
 #else
+
+#define CANARY 0xA5
 
 struct Coro {
     void *sp;                  /* the saved stack pointer, while switched away */
@@ -91,6 +100,7 @@ Coro *coro_new(void (*fn)(void *), void *arg, size_t stack)
     c->stack = malloc(stack);
     if (!c->stack)
         nk_fatal("no coroutine stack");
+    memset(c->stack, CANARY, 64);
     top = ((uintptr_t)c->stack + stack) & ~(uintptr_t)15;
     sp = (void **)top;
 #if defined(__aarch64__)
@@ -123,6 +133,16 @@ Coro *coro_new(void (*fn)(void *), void *arg, size_t stack)
 }
 
 Coro *coro_current(void) { return s_current ? s_current : &s_self; }
+
+int coro_stack_ok(const Coro *c)
+{
+    const unsigned char *p = (const unsigned char *)c->stack;
+    int i;
+    for (i = 0; p && i < 64; i++)
+        if (p[i] != CANARY)
+            return 0;
+    return 1;
+}
 
 void coro_switch(Coro *from, Coro *to)
 {

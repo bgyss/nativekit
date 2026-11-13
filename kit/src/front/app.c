@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stdatomic.h>
 
 #include "nk.h"
 #include "env.h"
@@ -29,6 +30,7 @@
 #include "resample.h"
 #include "rr.h"
 #include "rr_size.h"
+#include "backdrop.h"
 
 static const nk_console *c;
 const nk_console *nk_console_now(void) { return c; }
@@ -38,6 +40,8 @@ void nk_window_size(float *w, float *h)
     host_window_points(w, h);
     if (*w <= 0 || *h <= 0) {
         int tw = 0, th = 0;
+        c->window_size(&tw, &th);
+        rr_set_headless_size(tw, th);
         rr_headless_size(&tw, &th);
         *w = (float)tw;
         *h = (float)th;
@@ -88,6 +92,46 @@ void nk_overlay_place(int id, float cx, float cy, float scale, float angle_rad, 
     o->visible = visible != 0;
 }
 
+void nk_overlay_update(int id, const uint32_t *argb)
+{
+    Overlay *o;
+    if (id < 0 || id >= noverlays)
+        return;
+    o = &overlays[id];
+    memcpy(o->argb, argb, (size_t)o->w * (size_t)o->h * sizeof *argb);
+    o->shown_alpha = -1;
+}
+
+static _Atomic int paused;
+static float pause_blur;
+static uint32_t pause_tint;
+static uint32_t *backdrop;
+static int backdrop_w, backdrop_h, backdrop_due;
+
+void nk_pause(int on, float blur, uint32_t tint)
+{
+    if (on && !atomic_load(&paused))
+        backdrop_due = 1;
+    pause_blur = blur < 0 ? 0 : blur;
+    pause_tint = tint;
+    atomic_store(&paused, on != 0);
+}
+
+int nk_paused(void) { return atomic_load(&paused); }
+
+static void make_backdrop(int tw, int th, float scale)
+{
+    uint32_t *f = (uint32_t *)malloc((size_t)tw * (size_t)th * sizeof *f);
+    int cell;
+    backdrop_due = 0;
+    free(backdrop);
+    backdrop = NULL;
+    if (f && rr_read(f))
+        backdrop = backdrop_make(f, tw, th, pause_blur * scale, pause_tint,
+                                 &backdrop_w, &backdrop_h, &cell);
+    free(f);
+}
+
 /* the overlays over the target (tw x th pixels for pw x ph points) */
 static void draw_overlays(int tw, int th)
 {
@@ -129,6 +173,10 @@ static void draw_overlays(int tw, int th)
 
 /* ---- the application ---- */
 static int headless;
+static int present_headless;
+static int quitting;
+
+void nk_quit(void) { quitting = 1; }
 
 /* --counts FILE (headless): each frame's accesses by the console's kinds
    of access (nk_console.access_kind), for the cost profile's fitter:
@@ -136,35 +184,55 @@ static int headless;
    more than 64 reads with no write (a poll loop, a wait's reads) is left
    out, as the profile's measure of the original leaves it out. */
 static FILE *counts_f;
-static uint64_t counts[2][16];
-static uint8_t pending_kind[65];
-static unsigned pending_n;
+static uint64_t counts[2][NK_KINDS_MAX];
+static uint8_t pending_kind[NK_KINDS_MAX][65];
+static unsigned pending_n[NK_KINDS_MAX];
 
 /* an access's kind, one of the console's kind_count */
 static int count_kind(uint32_t addr)
 {
     int k = c->access_kind(addr);
-    if (k < 0 || k >= c->kind_count)
-        nk_fatal("an access of kind %d, not one of the console's %d", k, c->kind_count);
+    if (k < 0 || k >= c->kind_count) {
+        char names[256] = "";
+        int i;
+        for (i = 0; c->kind_names && i < c->kind_count; i++) {
+            size_t used = strlen(names);
+            snprintf(names + used, sizeof names - used, "%s%s", i ? ", " : " (the console's kinds: ",
+                     c->kind_names[i]);
+        }
+        nk_fatal("an access of kind %d, not one of the console's %d%s%s", k, c->kind_count, names,
+                 names[0] ? ")" : "");
+    }
     return k;
+}
+
+/* Independent processors must not end one another's read-poll sequence. */
+static int count_group(uint32_t addr)
+{
+    int group = c->count_group ? c->count_group(addr) : 0;
+    if (group < 0 || group >= NK_KINDS_MAX)
+        nk_fatal("an access count group %d, not one of 0 to %d", group, NK_KINDS_MAX - 1);
+    return group;
 }
 
 static void count_read(uint32_t addr, uint8_t value)
 {
+    int group = count_group(addr);
     (void)value;
-    if (pending_n < 65)
-        pending_kind[pending_n] = (uint8_t)count_kind(addr);
-    pending_n++;
+    if (pending_n[group] < 65)
+        pending_kind[group][pending_n[group]] = (uint8_t)count_kind(addr);
+    pending_n[group]++;
 }
 
 static void count_write(uint32_t addr, uint8_t value)
 {
+    int group = count_group(addr);
     unsigned k;
     (void)value;
-    if (pending_n <= 64)
-        for (k = 0; k < pending_n; k++)
-            counts[0][pending_kind[k]]++;
-    pending_n = 0;
+    if (pending_n[group] <= 64)
+        for (k = 0; k < pending_n[group]; k++)
+            counts[0][pending_kind[group][k]]++;
+    pending_n[group] = 0;
     counts[1][count_kind(addr)]++;
 }
 
@@ -195,6 +263,10 @@ static void audio_cb(float *lr, int frames, void *user)
     int got, made, q;
     double target = c->audio_hz * 0.05, d;
     (void)user;
+    if (nk_paused()) {
+        memset(lr, 0, (size_t)frames * 2 * sizeof *lr);
+        return;
+    }
     while (resample_queued(s_rs) < 12000 && (got = c->audio_take(in, 2048)) > 0)
         resample_push(s_rs, in, got);
     q = resample_queued(s_rs) + c->audio_queued();
@@ -353,8 +425,17 @@ static void show(void)
     shown_tw = tw;
     if (c->scaled)
         c->scaled(w, h);
+    if (nk_paused() && backdrop_due) {
+        float pw, ph;
+        nk_window_size(&pw, &ph);
+        make_backdrop(tw, th, pw > 0 ? (float)tw / pw : 1);
+    }
     rr_begin(0xFF000000u);
-    c->present(d);
+    if (nk_paused() && backdrop) {
+        const float q[6] = { 0, 0, (float)tw, 0, 0, (float)th };
+        rr_overlay(backdrop, backdrop_w, backdrop_h, q);
+    } else
+        c->present(d);
     draw_overlays(tw, th);
     if (fps_on > 0)
         fps_draw();
@@ -461,8 +542,15 @@ static void quit(void)
    else the window, input, save and the pace. */
 static void frame(void)
 {
-    uint32_t b[2] = { 0, 0 };
+    uint32_t b[NK_PLAYERS] = { 0 };
     frame_no++;
+    if (headless && nk_paused()) {
+        if (c->frame)
+            c->frame();
+        if (quitting || (max_frames >= 0 && frame_no >= max_frames))
+            exit(0);
+        return;
+    }
     if (headless) {
         static int rc = -1;
         int more;
@@ -472,12 +560,23 @@ static void frame(void)
             rc = nk_getenv("RRCHECK") != NULL;
         if (rc)
             rr_check();
+        if (present_headless) {
+            uint64_t before = host_ticks_ns();
+            fps_ran_ns = fps_frame_start ? before - fps_frame_start : 0;
+            show();
+            fps_present_ns = host_ticks_ns() - before;
+            if (fps_log)
+                fps_frame(before + fps_present_ns, fps_ran_ns, fps_present_ns, 0);
+            fps_frame_start = host_ticks_ns();
+        }
         if (sound_f)
             sound_drain();
-        more = nk_script_frame(&b[0], &b[1]);
+        more = nk_script_frame(b);
         c->input(1, b);
         if (c->frame)
             c->frame();
+        if (quitting)
+            exit(0);
         if ((max_frames >= 0 && frame_no >= max_frames) || (!more && nk_script_steps() && max_frames < 0))
             exit(0);
         return;
@@ -504,7 +603,8 @@ static void frame(void)
                 if (!(c->key && c->key(e.vk, e.down)))
                     nk_input_key(e.vk, e.down);
             } else if (e.type == HOST_EV_MOUSE) {
-                nk_input_mouse(e.x, e.y, e.dx, e.dy, e.buttons);
+                if (!(c->pointer && c->pointer(e.x, e.y, e.buttons)))
+                    nk_input_mouse(e.x, e.y, e.dx, e.dy, e.buttons);
             } else if (e.type == HOST_EV_TOUCH) {
                 nk_input_touch(e.id, e.phase, e.x, e.y);
                 if (c->touch)
@@ -520,6 +620,8 @@ static void frame(void)
         nk_save_write();
     if (c->frame)
         c->frame();
+    if (quitting)
+        quit();
     /* the pace: each frame due a frame's time after the last */
     {
         uint64_t frame_ns = c->frame_ns();
@@ -546,6 +648,9 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     const char *script = NULL, *out_dir = ".", *dir, *title;
     int i, ww, wh;
     c = con;
+    nk_input_keymap(c->keys, c->key_count);
+    if (c->players < 1 || c->players > NK_PLAYERS)
+        nk_fatal("the console has %d players, not 1 to %d", c->players, NK_PLAYERS);
     nk_env_prefix(c->env);
     nk_script_console(c);
     if (c->at_exit)
@@ -580,6 +685,20 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     if (script)
         nk_script_load(script, out_dir);
     c->power(cart);
+    c->window_size(&ww, &wh);
+    rr_set_headless_size(ww, wh);
+    if (headless && nk_getenv("PRESENT") && strcmp(nk_getenv("PRESENT"), "0")) {
+        const char *lf = nk_getenv("FPS_LOG");
+        if (!rr_open())
+            nk_fatal("%s_PRESENT: the renderer cannot open", c->env);
+        if (lf && !(fps_log = fopen(lf, "w")))
+            nk_fatal("%s_FPS_LOG: cannot write %s", c->env, lf);
+        if (fps_log)
+            setvbuf(fps_log, NULL, _IOLBF, 0);
+        fps_on = nk_getenv("FPS") != NULL;
+        present_headless = 1;
+        fps_frame_start = host_ticks_ns();
+    }
     if (headless && c->headless_scale) {
         /* shots as a window <env>_SCALE pixels a console pixel shows them */
         double sx, sy;
@@ -588,8 +707,8 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
             c->headless_scale(sx, sy);
     }
     if (counts_f) {
-        if (c->kind_count > 16)
-            nk_fatal("a console with more than 16 kinds of access");
+        if (c->kind_count > NK_KINDS_MAX)
+            nk_fatal("a console with more than %d kinds of access", NK_KINDS_MAX);
         if (!c->counts_hooks || !c->access_kind)
             nk_fatal("a console with no access counts to take");
         c->counts_hooks(count_read, count_write);
@@ -601,9 +720,9 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
            at the end of the frame before. The first frame has none before
            it: it is taken now (its buttons reach no controller read), with
            the shots and dumps before it. */
-        uint32_t b0, b1;
+        uint32_t b[NK_PLAYERS];
         nk_script_takes();
-        nk_script_frame(&b0, &b1);
+        nk_script_frame(b);
     }
     if (!headless) {
         host_thread_interactive();
@@ -617,7 +736,8 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
         host_audio_open(OUT_RATE, audio_cb, NULL);
     }
     for (;;) {
-        c->run_frame();
+        if (!nk_paused())
+            c->run_frame();
         frame();
     }
 }

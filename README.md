@@ -13,30 +13,41 @@ Windows, headless). A console fills one table and calls the kit's main. The kit 
 console, and the build fails if it does. Its documents are
 [`kit/docs/kit.md`](kit/docs/kit.md) (its parts and how a console uses them) and
 [`kit/docs/contract-discipline.md`](kit/docs/contract-discipline.md) (its versioning, and
-the standards every console here keeps). It is at 0.1.0.
+the standards every console here keeps). It is at 1.1.0.
 
 | console | folder | |
 |---|---|---|
-| **nativeshvc**, the Super Famicom / Super Nintendo | [`consoles/snes/`](consoles/snes/) | the first; its README follows |
+| **nativeshvc**, the Super Famicom / Super Nintendo | [`consoles/snes/`](consoles/snes/) | the original native console; see below |
+| **nativemd**, the Sega Mega Drive / Genesis | [`consoles/md/`](consoles/md/) | a native C console for the 68000 and Z80; see [its guide](consoles/md/docs/nativemd.md) |
+| **nativenes**, the NES / Famicom | [`consoles/nes/`](consoles/nes/) | a hardware foundation (`nnes`) for the 6502's C; not yet on the kit's loop, and no picture or sound yet; see [its README](consoles/nes/README.md) |
 
 nativeshvc was created by Jeffrey Wilbur ([github.com/jeff-strutb/nativeshvc](https://github.com/jeff-strutb/nativeshvc)),
 and nativekit is extracted from it: this repository
 ([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit)) is a fork of
 nativeshvc, its code moved under `consoles/snes/` and its console-independent parts into
-`kit/`, nativeshvc's behaviour, contract (2.10) and tests unchanged. The kit is a work
+`kit/`. That initial extraction preserved nativeshvc's behavior, contract (2.10)
+and tests. The kit is a work
 based on nativeshvc and keeps its copyright and licence, the GNU Affero General Public
 License, version 3 ([LICENSE](LICENSE), [NOTICE](NOTICE)). The fork is maintained by
 Brian Gyss ([github.com/bgyss/nativekit](https://github.com/bgyss/nativekit)); Jeffrey Wilbur
 is nativeshvc's author.
 
+The current compatible sync brings the local SNES contract to **2.19**, with
+later register-level scheduling and sound fixes. nativekit preserves software
+rendering and its console interfaces. Modern upstream is a different engine API;
+its conversion guide does not describe this fork. See the
+[upstream port record](consoles/snes/docs/upstream-sync.md) and
+[lazy-console implementation](consoles/snes/docs/lazy-console-design.md).
+
+
 Built from this folder, with CMake and C11:
 
 ```bash
-cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
+cmake -S . -B build/macos -DNK_HOST=macos -DNK_RENDER=metal && cmake --build build/macos
 ```
 
-makes nativeshvc's library `nshvc`, the kit folded in; a game adds this folder with
-`add_subdirectory` and links `nshvc`.
+makes the selected console libraries (`nshvc` and `nmd`), each with the kit folded in; a
+game adds this folder with `add_subdirectory` and links the console it targets.
 
 From a fresh clone:
 
@@ -55,6 +66,20 @@ install cmake (3.16 or later), python3 and the compilers yourself. `mise run bui
 macOS set (the headless, macOS, Metal, GL, Vulkan, x86_64, iOS, Windows cross and no-host
 builds); `build:ios` needs Xcode with the iOS SDK, and Linux is untested. The checks are
 in [`consoles/snes/tests/README.md`](consoles/snes/tests/README.md).
+
+### nativemd
+
+Build the headless Mega Drive console with `mise run build:null`, and run its focused checks
+with `mise run test:md-bus`, `mise run test:md-rom`, and `mise run test:md-profile`. A separate
+consumer project is checked with `mise run test:md-consumer`; its synthetic output baseline is
+compared with `mise run golden:md-compare`. See [`consoles/md/docs/nativemd.md`](consoles/md/docs/nativemd.md)
+for the supported hardware scope, cost profiles, and current evidence limits.
+
+The proposed [ROM-to-decomp milestones](docs/superpowers/plans/2026-11-04-nativemd-decomp/README.md)
+and [master goal prompt](docs/superpowers/plans/2026-11-04-nativemd-decomp/GOAL.md) describe the
+remaining game-recovery workflow: symbolic byte-exact assembly, verified readable C, native
+reset/main execution, full first-title delivery, and a second-title reuse pilot. These are plans,
+not implemented decompiler capabilities.
 
 ### For ports from nativeshvc
 
@@ -238,7 +263,7 @@ CMake, C11, no dependencies for the core. From the repository's root (nativeshvc
 built with the kit it runs on, [`kit/`](kit/)):
 
 ```bash
-cmake -S . -B build/macos -DNSHVC_HOST=macos -DNSHVC_RENDER=metal && cmake --build build/macos
+cmake -S . -B build/macos -DNK_HOST=macos -DNK_RENDER=metal && cmake --build build/macos
 ```
 
 To get the toolchain without Homebrew, `nix develop` (or direnv, with the `.envrc`) gives
@@ -248,11 +273,12 @@ fresh clone. `mise run tools` builds asar and the pinned reference core the test
 against; `mise run build` builds every macOS configuration (iOS needs Xcode with the iOS
 SDK; Linux is untested) and `mise run test` runs the checks.
 
-`NSHVC_HOST` picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
-`NSHVC_RENDER` the renderer (`soft`, `metal`, `gl` or `vulkan`). `NSHVC_TESTS` and
-`NSHVC_EXAMPLES` build the tests and the examples. For iOS, add
+`NK_HOST` (also `NSHVC_HOST`) picks the host (`null`, the default, `macos`, `windows`, `ios` or `none`) and
+`NK_RENDER` (also `NSHVC_RENDER`) the renderer (`soft`, `metal`, `gl` or `vulkan`). `NK_TESTS` and
+`NK_EXAMPLES` build the tests and the examples; `NSHVC_TESTS` and `NSHVC_EXAMPLES`
+remain aliases. `NK_CONSOLES` selects the consoles and defaults to `snes;md`. For iOS, add
 `-DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_SYSROOT=iphoneos -DCMAKE_OSX_ARCHITECTURES=arm64
--DNSHVC_HOST=ios`.
+-DNK_HOST=ios`.
 
 ### 2. Write the C against the machine model
 
@@ -359,8 +385,8 @@ nativeshvc is not written for it, and it aligns to nativeshvc as any game does.
 
 ## Status
 
-Version 2.10.0. The game contract, what a game writes against and what the console
-promises it, is in [docs/contract.md](consoles/snes/docs/contract.md), at 2.10: behaviour exact, each
+Version 2.19.0 (nativekit). The game contract, what a game writes against and what the console
+promises it, is in [docs/contract.md](consoles/snes/docs/contract.md), at 2.19: behaviour exact, each
 access costing the bus's time and the game's cost profile's weight, or no time with the
 costs off in a game's Enhanced mode (see [Enhancement support](#enhancement-support)). A game built against it plays on
 every later 2.x unchanged; only a 3.0 may change it. The cost profile's standard is

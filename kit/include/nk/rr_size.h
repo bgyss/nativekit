@@ -1,6 +1,6 @@
 /*
  * rr_size.h: what every backend shares: the headless target size
- * (RR_SIZE=WxH, else 256 x 224) and sharp bilinear, the one definition the
+ * (RR_SIZE=WxH, else the console's size) and sharp bilinear, the definition the
  * backends' shaders and the software backend all compute.
  */
 #ifndef PORT_RR_SIZE_H
@@ -11,16 +11,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+void rr_headless_default(int *w, int *h);
+
 static inline void rr_headless_size(int *w, int *h)
 {
     const char *e = getenv("RR_SIZE");
     int a, b;
-    *w = 256;
-    *h = 224;
     if (e && sscanf(e, "%dx%d", &a, &b) == 2 && a > 0 && b > 0 && a <= 16384 && b <= 16384) {
         *w = a;
         *h = b;
+        return;
     }
+    rr_headless_default(w, h);
 }
 
 /* Sharp bilinear along one axis: for the sample point p (in texels, the
@@ -44,13 +46,18 @@ static inline uint32_t rr_texel(const uint32_t *p, int w, int h, int x, int y)
     return p[(size_t)y * (size_t)w + (size_t)x];
 }
 
+/* The blend of a and b, b's weight t: in whole 256ths (W, t's nearest),
+   each channel a + floor(((b - a) W + 128) / 256), integers throughout, so
+   a GPU with no shaders (the PSP's GE: a table of b - a) makes it exactly
+   for any pair of values, and a shader in floats exactly too. */
+static inline int rr_mix_w(float t) { return (int)floorf(t * 256.0f + 0.5f); }
 static inline uint32_t rr_mix(uint32_t a, uint32_t b, float t)
 {
     uint32_t o = 0xFF000000u;
-    int s;
+    int s, W = rr_mix_w(t);
     for (s = 0; s < 24; s += 8) {
-        float ca = (float)((a >> s) & 0xFF), cb = (float)((b >> s) & 0xFF);
-        o |= (uint32_t)(int)(ca + (cb - ca) * t + 0.5f) << s;
+        int ca = (int)((a >> s) & 0xFF), cb = (int)((b >> s) & 0xFF);
+        o |= (uint32_t)(ca + (((cb - ca) * W + 128) >> 8)) << s;
     }
     return o;
 }

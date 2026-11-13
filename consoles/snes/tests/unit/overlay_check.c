@@ -10,8 +10,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "rr.h"
-#include "rr_size.h"
+#include "nk/rr.h"
+#include "nk/rr_size.h"
 
 int main(void)
 {
@@ -30,6 +30,7 @@ int main(void)
             img[y * OW + x] = a << 24 | (uint32_t)(x * 6) << 16 | (uint32_t)(y * 10) << 8 | 0x40;
         }
     (void)d;
+    rr_set_headless_size(256, 224);
     if (!rr_open()) {
         fprintf(stderr, "overlay_check: %s cannot open\n", rr_name());
         return 2;

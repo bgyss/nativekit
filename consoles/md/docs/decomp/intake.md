@@ -1,0 +1,423 @@
+# Lossless intake, code map and census (D03)
+
+The shared tooling that turns a Mega Drive image and reference captures into
+an auditable byte map and an assembly skeleton that rebuilds the image
+exactly. Its gates are held by authored synthetic cartridges; the first title
+has been run through it with six captures of up to 5,800 frames, four of them
+again as [light captures](#light-captures-and-the-evidence-digest), with the [results and findings below](#first-title).
+
+## Commands
+
+From the repository root, after `mise run tools:md`:
+
+```sh
+python3 consoles/md/tools/decomp/intake.py intake \
+    --rom ROM --out build/decomp/<game-id> [--capture CAPTURE_DIR]... [--id <game-id>] [--raw]
+python3 consoles/md/tools/decomp/intake.py rebuild --rom ROM --dir build/decomp/<game-id>
+python3 consoles/md/tools/decomp/intake.py census  --dir build/decomp/<game-id>
+python3 consoles/md/tools/decomp/intake.py digest  --rom ROM --capture CAPTURE_DIR --out DIGEST_DIR
+```
+
+`CAPTURE_DIR` is the `--out` of a completed `consoles/md/tools/decomp/run.py
+--mode capture` whose scenario requires `bus_intervals` and `flow_edge`.
+A capture taken with `--evidence light`, or a `DIGEST_DIR` that `digest` made
+from a full capture, is a `CAPTURE_DIR` too.
+`intake` exits non-zero unless the rebuilt image equals `ROM` in length,
+SHA-256 and every byte. The ROM's path and bytes are never written to the
+output: files name it by SHA-256 and `--id`. A decoded skeleton's `asm/` holds
+recovered code text, so the output belongs under ignored `build/decomp/`,
+never in nativekit.
+
+| File | Content |
+|---|---|
+| `codemap.json` | schema `nmd-codemap` 1: spaces, per-byte class runs, instructions with evidence, entries, conflicts, unresolved transfers, orphan candidates |
+| `manifest.json` | schema `nmd-skeleton` 1: mode, image SHA-256 and size, program list with expected SHA-256 |
+| `asm/rom.s`, `asm/<program>.s` | the skeleton |
+| `census.json`, `catalog.json` | schemas `nmd-census` 1 and `nmd-catalog` 1 |
+
+## Decoders and what their controls claim
+
+`m68k_dis.py` (base 68000, no line-A/F, no 68010+) and `z80_dis.py`
+(unprefixed, CB, ED, DD, FD, DDCB, FDCB) print the pinned vasm's syntax and
+report length, flow kind, direct targets and whether a transfer is computed.
+
+A decode is a proposal. `asmverify.py` assembles every proposed line at its
+own address in one vasm run (68000: `-m68000 -no-opt`) and accepts a line only
+when the listing shows the original bytes. Anything else stays raw.
+
+| Control | Result at this commit |
+|---|---|
+| 68000: all 65,536 first words, extension set A (canonical operands) | 45,800 decode; 45,800 reassemble |
+| 68000: same, set B (byte immediate with a non-zero high byte; brief extension word with a reserved bit) | 44,651 reassemble; 1,149 non-reassembling, all of those two families |
+| Z80: 1,792 opcode positions, two operand fills | 1,269 have text; 801 reassemble; 468 non-reassembling, all redundant DD/FD prefixes, duplicate ED encodings or indexed BIT with a register field; 523 have no assembler spelling |
+| Flow facts on an authored program per CPU | 13 and 14 instructions: length, kind, targets, computed |
+| Planted decoder errors (length, target, mnemonic) | all caught, per CPU |
+
+Limits: the sweeps fix the extension words, so they do not cover every
+operand value; a word the 68000 decoder calls illegal is not checked against
+hardware (it stays unknown, the safe direction; an executed address that does
+not decode is reported as `undecodable`). The pinned vasm mirror's equivalence
+to an author-published archive remains unverified (`tools/toolchains/README.md`).
+
+## The code map
+
+A **space** is bytes one CPU executes from: the ROM image (file offset *n* is
+68000 address *n* in the base cartridge map; offsets and CPU addresses are
+separate fields everywhere) or one RAM **program**. Generations of RAM code
+are rebuilt by replaying a capture's bus writes: a write that changes a byte
+of code the current generation executed closes it, and the next executed
+instruction opens another. A generation's extent is the first to the last
+executed byte.
+
+Two generations are the same program, one **family**, only when their extents
+overlap and, over the union of the extents, every byte that differs lies in an
+instruction that both decode to the same length, flow, transfer targets and
+text apart from its numeric literals. So a program whose immediate operands
+another CPU rewrites, or of which one run reached further than another, is one
+space with **variants**. A differing opcode, register, branch target or byte
+outside any instruction keeps generations apart (data bytes inside the extent
+that differ still make a false split, never a false merge). A generation is
+tried against the families in the order they first ran and joins the first
+that takes it. The space holds one variant's bytes (the one occurring exactly
+once in the ROM when there is one, recorded as `source_rom_offset`; otherwise
+the first to run), is named by CPU, load address and that variant's SHA-256,
+and lists every variant's SHA-256 (`variant_sha256`), the byte runs that vary
+(`patched`) and the number of generations (`occurrences`). Its instruction
+evidence is the union of what its variants ran. The census adds `variants` and
+`patched_operand_bytes`; the skeleton marks each rewritten instruction.
+
+Per-byte class: `opcode`, `operand`, `structure` (vector table, header), `read`
+(a traced CPU data read; a checksum loop reads unexecuted code too, so this is
+not "data"), `unknown`. Instruction evidence: `traced`, `vector` (reached from
+a vector without running), `static` (reached only by following code).
+Overlapping instructions are recorded as conflicts and kept raw. Computed
+transfers are recorded as unresolved, with the targets a trace observed.
+`orphan_candidates` are unclaimed bytes after a non-returning instruction that
+decode to another one: a list to investigate, with no classification.
+
+## Skeleton, rebuild gate and credit
+
+`asm/rom.s` places every byte: verified instruction lines, `loc_XXXXXX:`
+labels at entries, and `incbin "baserom.bin",offset,length` for everything
+else, including code that is raw (each such line says why: noncanonical
+encoding, no assembler form, overlapping interpretations). A RAM program with
+a verbatim source is assembled separately and included where it was uploaded
+from, so the image gate depends on its decoded code; a program without one is
+held to its captured SHA-256 only and its compressed source stays baserom.
+`rebuild` refuses a baserom whose hash is not the manifest's, builds in a
+temporary directory it removes, and reports length, SHA-256 and differing bytes.
+
+Credit rules in `census.json`: `decoded_code_bytes` counts only bytes
+assembled from verified text in a skeleton that rebuilt identically, split by
+evidence; `raw_code_bytes`, `included_program_bytes`, `baserom_bytes` and
+`unknown_bytes` are reported separately and earn none. `--raw` emits one
+`incbin`, is labelled `raw preservation only`, and credits nothing. A catalog
+entry is **T1** only when a trace ran it, the skeleton labels it and the image
+rebuilt identically; every other entry has no tier.
+
+## Light captures and the evidence digest
+
+A full capture stores every event (about 330 bytes each, 24 MB a frame for
+the first title) and the intake reads them twice. The code map uses only what
+`codemap.Ingest` keeps of them: three sets over the ROM (68000 instruction
+addresses, flow edges, reads) and the RAM program generations of each CPU in
+the order they closed. An evidence digest, `capture.nmde` (NMDE v1,
+`evidence.py`), is exactly that, framed like NMDH v1 with the same metadata
+and a footer holding the record count and a SHA-256 of header and records:
+
+| Record | Content |
+|---|---|
+| generation, one for each, in closing order | `cpu`; `delta`, the runs of the RAM image that differ from the previous generation of that CPU (from zeros for the first) as `[offset, hex]`; `executed` as `[offset, length]`; `edges` as `[from, to]` |
+| sets, the last record, once | `traced_rom`, `rom_edges`, `reads` |
+
+Each record is a zlib stream of canonical JSON with every list sorted, at
+most 16 MiB compressed and 1 GiB inflated. The
+reader checks the framing and footer, then every record, before any of it is
+used, and the intake refuses a digest whose metadata names another ROM.
+
+```sh
+python3 consoles/md/tools/decomp/run.py --mode capture ... --evidence light \
+    [--records-digest] [--window FIRST:LAST]
+```
+
+`--evidence light` runs the reduction in the capture worker and writes only
+the digest; `--max-bytes` bounds it whole. It needs a `frame_limit` stop and
+cannot run a checkpoint test, and the estimate must have been made in the same
+mode. The manifest still records the event count and the video and audio
+hashes.
+
+- **Equality rule.** The same ROM, scenario and core give the same code map
+  from a light capture as from a full one. `--records-digest` also hashes
+  every event as a full capture would have written it and records
+  `nmdh_records_sha256`: the SHA-256 of the NMDH records without header and
+  footer, so it does not depend on the core's or the runner's identity. Equal
+  record digests mean the two runs produced the same events. It costs most of
+  the time a full capture takes; without it a light capture skips building
+  the events.
+- **A window is not evidence.** `--window FIRST:LAST` also writes
+  `window.nmdh`, the complete events of those frames with their original
+  sequence numbers, for looking at a stretch of execution (D04). It is given
+  half of `--max-bytes`. `intake` refuses it as a capture ("a window is not
+  evidence for a code map"): a code map from part of a run would be wrong.
+
+## Evidence
+
+`evidence_check.py` holds the reduction and the digest on the two authored
+cartridges: `Ingest` fed event by event closes the RAM generations the code
+map counts and keeps the sets it uses; a flow edge left over when a trace
+ends is not credited to the next trace; a digest read back gives the same
+sets and generations; eighteen damaged digests are refused, one of them a
+record that inflates past its limit; the byte cap is enforced; a code map built from a digest equals the
+one built from the streams; a planted error in each is caught.
+`light_check.py` holds the runner: a light capture's code map, event count,
+picture, sound and record digest equal the full capture's, with and without
+`--records-digest`; a light capture stopped early leaves no digest; windows
+1:1, 2:2, 3:3 and 2:3 hold exactly the full capture's records for those
+frames; a window is refused as evidence.
+
+`mise run test:md-decomp` (exit 0, 247 s) also runs
+`m68k_decoder_check.py`, `z80_decoder_check.py`, `census_check.py` and
+`identity_check.py` (an authored cartridge whose 68000 rewrites a Z80
+immediate, then an opcode: the first is merged as a variant, the second kept
+apart; five refusals of the rule on bytes; two planted rule errors). The
+census control captures an authored cartridge on the pinned reference core
+(dead code, a three-entry computed call table with one entry taken, a
+vector-only handler, decoy bytes, and two different Z80 programs uploaded to
+`$0000`, one verbatim and one from an inverted copy) and requires: both
+generations kept apart with the right source facts; dead code, untaken entries
+and decoys not classified as code; the computed call unresolved with its one
+observed target; an identical rebuild; and seven planted errors caught
+(changed 68000 instruction, changed Z80 instruction, changed data byte, changed
+placement, different source ROM, capture of a different ROM, missing capture).
+A second control with no trace holds an overlap conflict and a noncanonical
+instruction raw.
+
+## First title
+
+`md-f68818ae1a61`, SHA-256 `f68818ae1a616562e4c7dc77932bbc9f6bc4e42229f5b5d5796d4b2c2cc3f334`,
+524,288 bytes, run from 2026-11-10 to 2026-11-12 with the ROM path given at runtime. All output
+is under ignored `build/decomp/md-f68818ae1a61/`, whose `WORKSPACE.md` holds
+the exact commands; nothing from the image is tracked.
+
+Evidence: six complete captures on the pinned reference core (region U, model
+`md1va3`, two three-button pads). The first three each went through their own
+intake; the last three were read only by the combined intakes below:
+
+- 250 frames, START on frames 180-187 and 240-247; scenario SHA-256
+  `c70855a3…fa79e`; 16,202,726 events, 5.4 GB; caps raised from the 256 MB
+  default to 16 GiB and 560 s. The intake read it in 294 s with a 120 MB peak.
+- 900 frames, an eight-frame START press every 60 frames from 180 to 660 and
+  pad inputs from frame 420; scenario SHA-256 `4a434d8b…d4d690`; 61,716,550
+  events (8,991,561 68000 and 4,843,565 Z80 instructions), 20.6 GB, 939 s;
+  caps 64 GiB and 3,000 s. It needs the core with patch 0003 (below). Its
+  intake took 1,111 s with a 1.2 GB peak.
+- 3,000 frames, written with the picture in view (below): the options
+  screen, then play with no START press; scenario SHA-256
+  `12859186…d713c0`; 209,186,292 events (30,790,627 68000 and 17,707,113 Z80
+  instructions), 73.5 GB, 2,988 s; caps 320 GiB and 12,000 s. Its intake took
+  3,728 s with a 6.2 GB peak.
+- 3,100 frames with no input (`idle`); scenario SHA-256 `507c9db6…1c88f2`;
+  211,388,145 events (31,415,168 68000 and 17,089,675 Z80 instructions),
+  74.0 GB, 2,916 s.
+- 4,700 frames (`over`): START on 180, 240 and 300, no input until frame
+  3,960, then a four-frame A press every 12 frames; scenario SHA-256
+  `89ec09c0…56fc64`; 321,891,272 events (45,045,927 and 27,640,595
+  instructions), 112.4 GB, 4,441 s.
+- 5,800 frames (`long`), on the core with patch 0004 (below): the game
+  started from the menu at frame 300, then the 3,000-frame scenario's play
+  inputs with no later START press; scenario SHA-256 `58892cfc…32f8a5`;
+  402,705,039 events (59,048,738 and 34,905,552 instructions), 142.0 GB,
+  5,658 s; caps 320 GB and 12,000 s. Patch 0004 changes the core's SHA-256
+  (`ce03e7dc…b69287` against `bf954286…358998` for the five captures above).
+  The intake requires a capture's ROM hash to match, not its core hash, so
+  the last column mixes the two cores.
+
+The last two columns of the table are each one intake over several captures:
+the 3,000-frame, idle and `over` captures (260 GB; 13,068 s with a 16.5 GB
+peak, before the memory change below), and the same three with `long`
+(402 GB; 20,314 s with a 1.6 GB peak, after it).
+
+| Result | 250 frames | 900 frames | 3,000 frames | 3,000 + idle + over | 3,000 + idle + over + long |
+|---|---|---|---| --|---|
+| Rebuild from `asm/` and the external baserom | identical: 524,288 bytes, same SHA-256, 0 differing bytes; also identical with no capture | identical, same three measures | identical, same three measures | identical, same three measures | identical, same three measures |
+| ROM bytes assembled from verified text | 5,408 traced, 100 vector, 14,060 static | 12,060 traced, 100 vector, 8,148 static | 14,616 traced, 100 vector, 5,988 static | 18,494 traced, 100 vector, 3,944 static | 18,964 traced, 100 vector, 3,584 static |
+| ROM code kept raw (noncanonical encoding) | 20 bytes | 20 bytes | 20 bytes | 20 bytes | 20 bytes |
+| ROM bytes from separately assembled uploaded programs | 340 (two Z80 programs with a verbatim source) | 340 | 340 | 340 | 340 |
+| ROM bytes from the baserom | 504,360, of which 512 structure and the rest `read` | 503,620, same split | 503,224, same split | 501,390, same split | 501,280, same split |
+| ROM entries | 168: 71 traced (T1), 4 vector, 93 static | 222: 189 traced (T1), 4 vector, 29 static | 240: 218 traced (T1), 4 vector, 18 static | 273: 256 traced (T1), 4 vector, 13 static | 276: 260 traced (T1), 4 vector, 12 static |
+| Computed transfers in ROM | 14, of which 9 have no observed target | 14, of which 5 have none | 14, of which 4 have none | 14, of which 3 have none | 14, of which 2 have none |
+| Conflicts, undecodable entries | 0, 0 | 0, 0 | 0, 0 | 0, 0 | 0, 0 |
+| Orphan candidates | 18 | 19 | 17 | 14 | 13 |
+| Z80 RAM programs | 3, all at `$0000` (one with 504 variants over 4 rewritten bytes); no 68000 RAM code ran | 3, all at `$0000` (one with 34,776 variants in 45,193 generations over 12 rewritten bytes); none on the 68000 | 3, all at `$0000` (one with 262,271 variants in 287,973 generations over the same 12 rewritten bytes); none on the 68000 | the same 3 (the patched one with 630,077 variants in 782,650 generations over the same 12 bytes); none on the 68000 | the same 3 (the patched one with 1,180,165 variants in 1,408,183 generations over the same 12 bytes); none on the 68000 |
+
+Findings, none of them fixed here:
+
+- **Fifteen seconds found little new code, and about 100 of its frames were
+  play.** The 900-frame run decodes 20,308 of 524,288 ROM bytes against
+  19,568 at 250 frames: 740 more. Most of what it traced was already reached
+  statically. The scenario was written blind; its picture was checked
+  afterwards (2026-11-11) by running the same inputs through
+  `consoles/md/tests/oracle/run.py`, which writes every frame. The 900 frames
+  it wrote hash, as XRGB rows, to the capture's `video_sha256`
+  (`a4b7a934…341fe`), so they are the capture's picture. They show: black
+  until frame 64; the publisher logo to 182; the title animation from 198;
+  the START/OPTION menu after the press at 240; the game started by the press
+  at 300; the first stage's opening sequence from about frame 308 to 799; and
+  first-stage play, with the score rising, from about frame 800 to 900. The
+  presses at 360, 480 and 600 paused the game and those at 420, 540 and 660
+  resumed it, so 180 frames show a still paused picture. The capture
+  therefore holds boot, logo, title, menu, one opening sequence, pause and
+  about 100 frames of one stage. It holds no options screen, demonstration,
+  later stage, loss of a life, game over or ending, and the census does not
+  say how much code those would add.
+- **Fifty seconds, most of them play, found 396 more bytes.** The 3,000-frame
+  scenario was written against the picture: its inputs were first run
+  through `consoles/md/tests/oracle/run.py`, and those 3,000 frames hash to
+  the capture's `video_sha256` (`30901ce7…0367db`). They show the options
+  screen from about frame 306 to 630, with every row changed and its
+  pad-control screen entered and left; the game started by the press at 750;
+  the opening sequence to about frame 1090; then about 1,900 frames of play,
+  still in the first stage at frame 3,000 with 11 hits scored. It decodes
+  20,704 ROM bytes against 20,308 at 900 frames. Traced bytes rose by 2,556,
+  but 2,160 of those the static walk had already reached; 5,988 statically
+  reached bytes have still never executed. Decoded code is 3.9% of the image.
+  This run holds no later stage, demonstration, game over or ending either,
+  so it does not show whether the rest of the image is data or unreached
+  code; it does show that more first-stage play is not where new code is.
+- **The demonstration and a game over found 1,834 more bytes.** Both
+  scenarios were written against the picture, and each capture's
+  `video_sha256` (`f1b23359…275560`, `f70c43e7…bb5bcd`) equals the hash of the
+  frames `oracle/run.py` wrote for the same inputs. The idle run shows the
+  title animation looping, a digitized still picture near frame 1,500, a
+  self-playing demonstration on another stage from about frame 1,600 to
+  2,700, and the high-score table to about 3,000. The `over` run shows
+  first-stage play without input, lives lost, game over near frame 3,900, a
+  continue taken from its countdown, the stage-clear bonus, and about 450
+  frames of the second stage. With the 3,000-frame capture they decode 22,538
+  ROM bytes against 20,704: 4.3% of the image. 3,944 statically reached bytes
+  have still never executed, and 3 of 14 computed transfers have no observed
+  target.
+- **142 GB more capture, with a third stage in it, found 110 more bytes.**
+  The `long` scenario was written against the picture, and its capture's
+  `video_sha256` (`f77a570b…d617bc`) equals the hash of the 5,800 frames
+  `oracle/run.py` wrote for the same inputs on the patched core. The preview
+  shows first-stage play, the second stage, a game over at its end and a
+  continue taken, the refuelling sequence, and the third stage from about
+  frame 4,300 to the end. With the other three captures it decodes 22,648 ROM
+  bytes against 22,538. Traced bytes rose by 470, but 360 of those the static
+  walk had already reached; 3,584 statically reached bytes have still never
+  executed, and 2 of 14 computed transfers have no observed target. Decoded
+  code is still 4.3% of the image. More play of the kinds already captured is
+  not where new code is: 402 GB of events hold 18,964 distinct traced bytes.
+- **The reference core stopped returning at frame 4,783, since patched.** Two
+  preview runs through `oracle/run.py` with different inputs each had
+  `retro_run` call 4,783 never return while the core went on delivering
+  video frames. The core rebases every component clock once in about 4,783
+  frames, when a frame ends; the generated 68000 execute loop keeps its
+  target cycle in a local the rebase did not move. Here the frame ended
+  inside a read of the VDP status port (the title polls it), so the loop was
+  left with an unreachable target. The idle run's frame ended between
+  instructions and passed. Patch
+  `tools/toolchains/patches/blastem/0004-m68k-execute-target-follows-rebase.patch`
+  moves the target with the clock; `rebase_stall_check.py` is its authored
+  control, and one of the two preview runs now completes 5,200 frames. The
+  first five captures were taken before it, all below that frame; the `long`
+  capture was taken with it and runs 5,800 frames, with the picture of its
+  preview.
+- **The capture cap is split in half; the preflight now checks each half.**
+  `run.py` gives the NMDH and NMDT streams half of `--max-bytes` each. A first
+  3,000-frame attempt with a 128 GiB cap passed its preflight (83.7 GB
+  estimated in total) and ended `incomplete_storage_limit` after 48 minutes
+  when the NMDH stream reached 64 GiB; the completed capture's NMDH stream is
+  71.1 GB of its 73.5 GB. Since 2026-11-12 an estimate records
+  `estimated_stream_bytes` for each stream and a capture refuses to start
+  when either exceeds its half; `runner_check.py` holds a planted estimate
+  whose total fits and whose NMDH stream does not.
+- **Intake memory grew with the generation count, since reduced.** The
+  3,000-frame intake peaked at 6.2 GB against 1.2 GB at 900 frames, with
+  262,271 variants of the one patched Z80 program against 34,776; the
+  three-capture intake peaked at 16.5 GB with 630,077 and took 3.6 hours. The
+  code map kept every closed RAM generation, a full copy of RAM with its
+  per-instruction maps, until all captures were read. Since 2026-11-12 it
+  admits each generation into its family as it closes, in the same order, and
+  keeps member copies compressed. Over the first 30 million events of the
+  3,000-frame capture (10,456 generations, 10,399 variants) the old and new
+  code produce the same code map, with peaks of 318 MB and 74 MB. Time is
+  unchanged: each capture is still parsed twice, once to validate it and once
+  to read it. The four-capture intake (402 GB, 1,180,165 variants) peaked at
+  1.6 GB and took 5.6 hours.
+- **The first 900-frame run failed in the reference core, since patched.** It
+  ended `incomplete_core_error` near frame 258. BlastEm's Z80 bank-window
+  handlers set the Z80 clock to the 68000's clock whenever the 68000 was
+  stalled on a VDP transfer, even when the Z80 was already ahead, so a Z80 bus
+  event ran three master clocks backward and the NMDT stream latched its
+  per-device ordering error. Patch
+  `tools/toolchains/patches/blastem/0003-z80-bank-wait-never-rewinds.patch`
+  only ever delays the Z80; `bank_stall_check.py` is its authored control.
+  This is a deliberate timing difference from upstream, and which of the two
+  real hardware matches is not verified.
+- **The Z80 runs three programs, one of them in 34,776 variants.** Before the
+  family rule the 900-frame census held 30,121 Z80 identities, 30,118 of them
+  in five lengths (254, 240, 227, 209 and 241 bytes), and 30,171 Z80 T1
+  entries. They are one 303-byte program with a verbatim ROM source: the
+  68000 rewrites six 16-bit immediates in it (12 bytes; two of the six within
+  the first 250 frames), and its runs ended at five different last
+  instructions. The census now holds 3 Z80 programs and 3 Z80 T1 entries;
+  the 900-frame intake fell from about 56 minutes to 1,111 s (1.2 GB peak) and
+  its code map from 452 MB to 3 MB. ROM counts are unchanged.
+- **Every non-code ROM byte is `read`** because the boot checksum reads the
+  whole image; the class separates nothing for this title.
+- One 40-byte Z80 generation has 4 traced bytes, 36 unknown and no ROM source.
+
+### Light captures against the full-capture baseline
+
+2026-11-13. The four captures of the last column were taken again with
+`--evidence light --records-digest`, in parallel, on the same core, and one
+intake run over the four digests. The full captures' streams had been deleted;
+what was kept of them was each manifest, each record digest and the code map.
+
+| Capture | Events | Full streams | Digest | Full capture | Light, with record digest |
+|---|---:|---:|---:|---:|---:|
+| play, 3,000 frames | 209,186,292 | 73.5 GB | 118.0 MB | 2,988 s | 2,808 s |
+| idle, 3,100 frames | 211,388,145 | 74.0 GB | 47.3 MB | 2,916 s | 2,764 s |
+| game over, 4,700 frames | 321,891,272 | 112.4 GB | 182.3 MB | 4,441 s | 4,212 s |
+| long, 5,800 frames | 402,705,039 | 142.0 GB | 253.2 MB | 5,658 s | 5,352 s |
+| all four | 1,145,170,748 | 401.9 GB | 600.9 MB | | |
+
+- Every capture has the full capture's event count, video hash, audio hash
+  and record digest: the same events, one for one.
+- The code map from the four digests is byte-identical to the one from the
+  four full captures (SHA-256 `c4bbc66ca01523e0bc78790eeb168c62fb2b68b8d97a87ecc5aaae24614481d0`),
+  and the rebuild is identical.
+- The intake took 325 s where the full captures took 20,314 s, at the same
+  peak memory (1.7 GB against 1.6 GB).
+- The 5,800-frame capture run alone without `--records-digest` took 659 s
+  and wrote a digest byte-identical to the one above. The light captures in
+  the table ran four at a time and the full ones one at a time, so their
+  times are not a like-for-like comparison; the record digest costs about
+  what writing the events did.
+
+## Not done
+
+- The score-table name entry (it begins near frame 4,700 when the continue
+  countdown runs out), every stage after the third and the ending are
+  untraced. A scenario should not press START after the game starts, since
+  each press pauses or resumes it.
+- More code is not reached by more play of the same kinds. Finding the
+  targets of the 14 computed transfers statically (their jump tables) is the
+  next source, and was left out of
+  [the light-capture plan](../../../../docs/superpowers/plans/2026-11-12-nativemd-light-capture.md).
+- Frame windows are held by the authored controls only; no window of the
+  first title has been taken. D04 is their first user.
+- A light capture has not been taken on a title whose RAM programs change in
+  more than a few bytes a generation; the digest's size depends on that.
+- Checking patch 0003's bank-wait timing against hardware.
+- Generations that differ in data bytes inside their extent are still split;
+  no title or control has needed that yet.
+- What the rewritten operands are (they are listed by offset, not interpreted).
+- Compressed program sources are not reconstructed, only identified as absent.
+- No static discovery of jump tables; computed targets come from traces only.
+- 68000 RAM generations are implemented but exercised only by D01's fixture
+  shape, not by a dedicated control here.
+- Captures are streamed from disk (one validation pass, one read pass), but an
+  event costs about 330 bytes on disk: 21.6 MB per frame for this title.
