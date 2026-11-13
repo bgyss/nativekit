@@ -42,6 +42,10 @@ CHECKS = (
      "consoles/md/tests/decomp/evidence_check.py"),
     ("actual light capture against a full capture, and its refusals",
      "consoles/md/tests/decomp/light_check.py"),
+    ("flag helpers against the reference core's execution",
+     "consoles/md/tests/decomp/ops_check.py"),
+    ("C routines against recorded calls on both CPUs, and planted errors",
+     "consoles/md/tests/decomp/calls_check.py"),
 )
 
 

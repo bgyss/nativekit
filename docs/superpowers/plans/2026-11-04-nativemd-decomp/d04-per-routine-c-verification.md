@@ -1,6 +1,6 @@
 # D04: Verify C routines against original execution on both CPUs
 
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Acceptance gates met 2026-11-13 on authored synthetic controls ([method and evidence](../../../../consoles/md/docs/decomp/check-calls.md)): `hybrid.py`, `check_calls.py`, `check/replay.c`, `nmd_decomp.h`, `calls_check.py`, `ops_check.py`. No title routine has been checked; RAM access order is not compared; table rows are checked against the catalog, not generated from it. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
