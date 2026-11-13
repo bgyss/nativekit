@@ -342,7 +342,7 @@ class _Ram:
     """One CPU's RAM as a trace's writes leave it, and the program
     generations its executed instructions belong to."""
 
-    def __init__(self, cpu, size, origin):
+    def __init__(self, cpu, size, origin, on_generation):
         self.cpu = cpu
         self.size = size
         self.origin = origin          # CPU address of offset 0
@@ -350,7 +350,7 @@ class _Ram:
         self.code = bytearray(size)   # 1 where the open generation executed
         self.executed = {}            # offset -> length, the open generation
         self.edges = set()            # (from, to) flow edges seen in it
-        self.families = []            # program families, in the order generations closed
+        self.on_generation = on_generation  # called with each generation as it closes
 
     def write(self, address, value):
         offset = address % self.size
@@ -372,13 +372,89 @@ class _Ram:
 
     def close(self):
         if self.executed:
-            # admitted now, in closing order, so a generation's maps are not all held to the end
-            generation = (bytes(self.bytes), self.executed, self.edges)
-            if not any(family.admit(generation) for family in self.families):
-                self.families.append(_Family(self.cpu, self.origin, generation))
+            # handed on now, in closing order, so a generation's maps are not all held to the end
+            if self.on_generation:
+                self.on_generation(self.cpu, bytes(self.bytes), self.executed, self.edges)
             self.executed = {}
             self.edges = set()
             self.code = bytearray(self.size)
+
+
+class Ingest:
+    """What a trace's events reduce to for the code map: the ROM addresses
+    the 68000 executed, the ROM flow edges, the ROM reads, and each CPU's RAM
+    program generations, handed to `on_generation(cpu, snapshot, executed,
+    edges)` in the order they close. Nothing else of an event is used."""
+
+    def __init__(self, rom_size, on_generation=None):
+        self.rom_size = rom_size
+        self.on_generation = on_generation
+        self.traced_rom = set()
+        self.rom_edges = set()
+        self.reads = set()
+        self.rams = {"m68k": _Ram("m68k", WORK_RAM_SIZE, 0xFF0000, on_generation),
+                     "z80": _Ram("z80", Z80_RAM_SIZE, 0, on_generation)}
+
+    def begin(self):
+        """A new trace starts from power-on."""
+        for ram in self.rams.values():
+            ram.close()
+            ram.bytes = bytearray(ram.size)
+
+    def end(self):
+        for ram in self.rams.values():
+            ram.close()
+
+    def merge(self, traced_rom, rom_edges, reads):
+        self.traced_rom.update(traced_rom)
+        self.rom_edges.update(rom_edges)
+        self.reads.update(reads)
+
+    def instruction(self, cpu, pc):
+        if cpu == "m68k":
+            pc &= 0xFFFFFF
+            if pc < self.rom_size:
+                self.traced_rom.add(pc)
+            elif pc >= 0xE00000:
+                self.rams["m68k"].execute(pc)
+        elif pc < Z80_RAM_SIZE:
+            self.rams["z80"].execute(pc)
+
+    def flow(self, cpu, previous_pc, current_pc):
+        if cpu == "m68k" and (previous_pc & 0xFFFFFF) < self.rom_size:
+            self.rom_edges.add((previous_pc & 0xFFFFFF, current_pc & 0xFFFFFF))
+        elif cpu == "m68k":
+            self.rams["m68k"].edges.add((previous_pc | 0xFF0000, current_pc & 0xFFFFFF))
+        else:
+            self.rams["z80"].edges.add((previous_pc, current_pc))
+
+    def bus(self, cpu, address, width, value, operation, provenance):
+        if operation == 2:
+            for index, byte in enumerate(value.to_bytes(4, "big")[4 - width:]):
+                target = address + index
+                if cpu == "z80":
+                    if target < Z80_RAM_SIZE:
+                        self.rams["z80"].write(target, byte)
+                elif 0xA00000 <= (target & 0xFFFFFF) < 0xA00000 + Z80_RAM_SIZE:
+                    self.rams["z80"].write(target & 0x1FFF, byte)
+                elif (target & 0xFFFFFF) >= 0xE00000:
+                    self.rams["m68k"].write(target & 0xFFFF, byte)
+        elif cpu == "m68k" and provenance != 1 and (address & 0xFFFFFF) < self.rom_size:
+            self.reads.add((address & 0xFFFFFF, width))
+
+    def feed(self, event):
+        """One NMDH event; kinds other than instruction, flow and bus are ignored."""
+        cpu = "m68k" if event["cpu"] == 1 else "z80"
+        kind = event["kind"]
+        if kind == 1:
+            self.instruction(cpu, event["pc"])
+        elif kind == 2:
+            payload = event["payload"]
+            self.flow(cpu, payload["previous_pc"], payload["current_pc"])
+        elif kind == 3:
+            payload = event["payload"]
+            self.bus(cpu, payload["address"], payload["width"], payload["value"],
+                     payload["operation"], payload["provenance"])
 
 
 def load_evidence(capture_directory, rom_sha256):
@@ -420,6 +496,12 @@ class _Evidence:
         if not instructions:
             raise CodeMapError("capture holds no instruction events")
 
+    def replay(self, ingest):
+        ingest.begin()
+        for event in self:
+            ingest.feed(event)
+        ingest.end()
+
 
 def build(rom, evidence_sets=()):
     """The code map of `rom` from its vectors and any traces' events."""
@@ -430,54 +512,17 @@ def build(rom, evidence_sets=()):
     rom_space.mark(0, 0x100, STRUCTURE)
     if rom[0x100:0x104] == b"SEGA":
         rom_space.mark(0x100, 0x100, STRUCTURE)
-    rams = {"m68k": _Ram("m68k", WORK_RAM_SIZE, 0xFF0000), "z80": _Ram("z80", Z80_RAM_SIZE, 0)}
-    traced_rom = set()
-    rom_edges = set()
-    reads = set()
+    families = {"m68k": [], "z80": []}    # program families, in the order generations closed
 
-    for events in evidence_sets:
-        for ram in rams.values():   # a new trace starts from power-on
-            ram.close()
-            ram.bytes = bytearray(ram.size)
-        for event in events:
-            cpu = "m68k" if event["cpu"] == 1 else "z80"
-            if event["kind"] == 1:
-                pc = event["pc"]
-                if cpu == "m68k":
-                    pc &= 0xFFFFFF
-                    if pc < len(rom):
-                        traced_rom.add(pc)
-                    elif pc >= 0xE00000:
-                        rams["m68k"].execute(pc)
-                elif pc < Z80_RAM_SIZE:
-                    rams["z80"].execute(pc)
-            elif event["kind"] == 2:
-                edge = (event["payload"]["previous_pc"], event["payload"]["current_pc"])
-                if cpu == "m68k" and (edge[0] & 0xFFFFFF) < len(rom):
-                    rom_edges.add((edge[0] & 0xFFFFFF, edge[1] & 0xFFFFFF))
-                elif cpu == "m68k":
-                    rams["m68k"].edges.add((edge[0] | 0xFF0000, edge[1] & 0xFFFFFF))
-                else:
-                    rams["z80"].edges.add(edge)
-            else:
-                payload = event["payload"]
-                address, width = payload["address"], payload["width"]
-                data = payload["value"].to_bytes(4, "big")[4 - width:]
-                if payload["operation"] == 2:
-                    for index, value in enumerate(data):
-                        target = address + index
-                        if cpu == "z80":
-                            if target < Z80_RAM_SIZE:
-                                rams["z80"].write(target, value)
-                        elif 0xA00000 <= (target & 0xFFFFFF) < 0xA00000 + Z80_RAM_SIZE:
-                            rams["z80"].write(target & 0x1FFF, value)
-                        elif (target & 0xFFFFFF) >= 0xE00000:
-                            rams["m68k"].write(target & 0xFFFF, value)
-                elif cpu == "m68k" and payload["provenance"] != 1 and \
-                        (address & 0xFFFFFF) < len(rom):
-                    reads.add((address & 0xFFFFFF, width))
-        for ram in rams.values():
-            ram.close()
+    def admit(cpu, snapshot, executed, edges):
+        generation = (snapshot, executed, edges)
+        if not any(family.admit(generation) for family in families[cpu]):
+            families[cpu].append(_Family(cpu, 0xFF0000 if cpu == "m68k" else 0, generation))
+
+    ingest = Ingest(len(rom), admit)
+    for evidence in evidence_sets:
+        evidence.replay(ingest)
+    traced_rom, rom_edges, reads = ingest.traced_rom, ingest.rom_edges, ingest.reads
 
     # the ROM: traced code first, then vectors, each followed statically
     rom_space.walk(sorted(traced_rom, reverse=True), "traced")
@@ -500,8 +545,8 @@ def build(rom, evidence_sets=()):
         rom_space.mark(address, width, READ)
 
     spaces = [rom_space]
-    for ram in rams.values():
-        spaces.extend(family.finish(rom) for family in ram.families)
+    for cpu in ("m68k", "z80"):
+        spaces.extend(family.finish(rom) for family in families[cpu])
     return spaces
 
 
