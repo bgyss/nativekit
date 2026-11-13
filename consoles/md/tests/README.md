@@ -43,6 +43,9 @@ rebuilt byte-identically and attacked with planted errors. Counts, schemas and
 limits are in [`decomp/intake.md`](../docs/decomp/intake.md).
 `decomp/identity_check.py` holds the RAM program family rule: a rewritten
 immediate is a variant, a rewritten opcode is another program.
+`decomp/table_check.py` holds static jump-table discovery on an authored
+cartridge with no trace: four table forms found, five cases left alone, a
+table a trace contradicts refused, and the image still rebuilt.
 `decomp/evidence_check.py` holds the code map's event reduction and the NMDE
 v1 evidence digest (round trip, eighteen damaged digests refused, byte cap,
 the same code map from a digest as from the streams).

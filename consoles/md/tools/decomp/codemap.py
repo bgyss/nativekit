@@ -24,13 +24,17 @@ Each instruction carries its evidence: `traced` (an execution trace ran it),
 `vector` (reached from the reset or an exception vector without running) or
 `static` (reached only by following code). Overlapping instructions are kept
 as conflicts; computed transfers are kept as unresolved, with the targets a
-trace saw. Nothing here guesses.
+trace saw. The one inference is `table` evidence, the weakest: code reached
+only through a jump table read from the instructions before a computed
+transfer (`jumptable.py`), which a contradicting trace refuses and
+`build(..., tables=False)` leaves out.
 """
 import hashlib
 import json
 import re
 import zlib
 
+import jumptable
 import m68k_dis
 import z80_dis
 
@@ -38,7 +42,7 @@ SCHEMA = "nmd-codemap"
 VERSION = 1
 UNKNOWN, READ, STRUCTURE, OPERAND, OPCODE = range(5)
 CLASS_NAMES = ("unknown", "read", "structure", "operand", "opcode")
-EVIDENCE_RANK = {"static": 0, "vector": 1, "traced": 2}
+EVIDENCE_RANK = {"table": 0, "static": 1, "vector": 2, "traced": 3}
 DECODERS = {"m68k": m68k_dis.decode, "z80": z80_dis.decode}
 OPCODE_BYTES = {"m68k": 2, "z80": 1}
 Z80_RAM_SIZE = 0x2000
@@ -65,6 +69,7 @@ class Space:
         self.entries = {}           # address -> {"kinds": set, "evidence": str}
         self.conflicts = []         # (address, other address)
         self.unresolved = {}        # address -> set of observed targets
+        self.tables = []            # jumptable.discover records
         self.undecodable = {}       # address -> evidence
         self.external = set()       # direct targets outside the space
         self.source_rom_offset = None
@@ -201,6 +206,7 @@ class Space:
             "conflicts": [list(pair) for pair in sorted(set(self.conflicts))],
             "unresolved": [{"at": a, "observed_targets": sorted(t)}
                            for a, t in sorted(self.unresolved.items())],
+            "tables": sorted(self.tables, key=lambda t: (t["site"], t["at"], t["kind"])),
             "undecodable": [{"at": a, "evidence": e} for a, e in sorted(self.undecodable.items())],
             "external_targets": sorted(self.external),
             "orphan_candidates": self.orphan_candidates(),
@@ -534,8 +540,9 @@ class _Evidence:
         ingest.end()
 
 
-def build(rom, evidence_sets=()):
-    """The code map of `rom` from its vectors and any traces' events."""
+def build(rom, evidence_sets=(), tables=True):
+    """The code map of `rom` from its vectors and any traces' events, and
+    with `tables` from the jump tables its computed transfers read."""
     rom = bytes(rom)
     rom_space = Space("rom", "m68k", "rom", 0, rom)
     if len(rom) < 0x200:
@@ -574,6 +581,18 @@ def build(rom, evidence_sets=()):
                 rom_space.add_entry(target, "computed", "traced")
     for address, width in sorted(reads):
         rom_space.mark(address, width, READ)
+    # tables last: every stronger claim is in place, and table code can hold more tables
+    examined, starts = set(), set()
+    while tables and set(rom_space.unresolved) - examined:
+        sites = set(rom_space.unresolved) - examined
+        examined |= sites
+        records = jumptable.discover(rom_space, sites, starts)
+        rom_space.tables.extend(records)
+        targets = sorted({target for record in records if record["status"] == "accepted"
+                          for target in record["targets"]})
+        for target in targets:
+            rom_space.add_entry(target, "table", "table")
+        rom_space.walk(targets, "table")
 
     spaces = [rom_space]
     for cpu in ("m68k", "z80"):

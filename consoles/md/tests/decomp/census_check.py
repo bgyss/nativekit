@@ -78,13 +78,19 @@ def traced_control(temp):
     require(any(u["observed_targets"] for u in program_b["unresolved"]),
             "program B's computed jump has no observed target")
 
-    # dead code, the untaken table entries and decoy bytes are not code
-    for name in ("dead", "case0", "case2", "decoy"):
+    # dead code and decoy bytes are not code; the untaken table entries are
+    # code by table evidence only
+    for name in ("dead", "decoy"):
         require(class_at(rom_space, facts[name]) in ("unknown", "read"),
                 "%s was classified as code without evidence" % name)
+    for name in ("case0", "case2"):
+        require(evidence_at(rom_space, facts[name]) == "table",
+                "%s, an untaken table entry, is not table evidence" % name)
+    require([(t["kind"], t["at"], t["rows"], t["status"]) for t in rom_space["tables"]] ==
+            [("offset", facts["table"], 3, "accepted")],
+            "the computed call's table was not found: %r" % rom_space["tables"])
     orphans = {candidate["at"] for candidate in rom_space["orphan_candidates"]}
-    require(facts["dead"] in orphans and facts["case2"] in orphans,
-            "dead code is not listed as an orphan candidate")
+    require(facts["dead"] in orphans, "dead code is not listed as an orphan candidate")
     require(evidence_at(rom_space, facts["case1"]) == "traced",
             "the computed call's taken entry is not traced code")
     unresolved = {u["at"]: u["observed_targets"] for u in rom_space["unresolved"]}
@@ -130,16 +136,17 @@ def traced_control(temp):
                    "does not rebuild to its captured bytes")
     z80_source.write_text(saved)
 
-    dead_line = '\tincbin\t"baserom.bin",%d,32\t; not code\n' % facts["dead"]
+    # dead code up to case0, which table evidence now decodes
+    dead_line = '\tincbin\t"baserom.bin",%d,28\t; not code\n' % facts["dead"]
     saved = edit(asm / "rom.s", dead_line,
-                 '\tincbin\t"baserom.bin",%d,31\n\tdc.b\t$%02X\n'
-                 % (facts["dead"], rom[facts["dead"] + 31] ^ 0x01))
+                 '\tincbin\t"baserom.bin",%d,27\n\tdc.b\t$%02X\n'
+                 % (facts["dead"], rom[facts["dead"] + 27] ^ 0x01))
     expect_failure("changed data byte", lambda: skeleton.rebuild(out, rom_path),
-                   "image differs: 1 bytes, first at $%X" % (facts["dead"] + 31))
+                   "image differs: 1 bytes, first at $%X" % (facts["dead"] + 27))
     (asm / "rom.s").write_text(saved)
 
     saved = edit(asm / "rom.s", dead_line,
-                 '\tincbin\t"baserom.bin",%d,31\n' % facts["dead"])
+                 '\tincbin\t"baserom.bin",%d,27\n' % facts["dead"])
     expect_failure("changed placement", lambda: skeleton.rebuild(out, rom_path), "image differs")
     (asm / "rom.s").write_text(saved)
 

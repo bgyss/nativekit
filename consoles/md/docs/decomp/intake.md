@@ -30,7 +30,7 @@ never in nativekit.
 
 | File | Content |
 |---|---|
-| `codemap.json` | schema `nmd-codemap` 1: spaces, per-byte class runs, instructions with evidence, entries, conflicts, unresolved transfers, orphan candidates |
+| `codemap.json` | schema `nmd-codemap` 1: spaces, per-byte class runs, instructions with evidence, entries, conflicts, unresolved transfers, jump tables, orphan candidates |
 | `manifest.json` | schema `nmd-skeleton` 1: mode, image SHA-256 and size, program list with expected SHA-256 |
 | `asm/rom.s`, `asm/<program>.s` | the skeleton |
 | `census.json`, `catalog.json` | schemas `nmd-census` 1 and `nmd-catalog` 1 |
@@ -89,11 +89,44 @@ evidence is the union of what its variants ran. The census adds `variants` and
 Per-byte class: `opcode`, `operand`, `structure` (vector table, header), `read`
 (a traced CPU data read; a checksum loop reads unexecuted code too, so this is
 not "data"), `unknown`. Instruction evidence: `traced`, `vector` (reached from
-a vector without running), `static` (reached only by following code).
+a vector without running), `static` (reached only by following code), `table`
+(reached only through a [jump table](#jump-tables)).
 Overlapping instructions are recorded as conflicts and kept raw. Computed
 transfers are recorded as unresolved, with the targets a trace observed.
 `orphan_candidates` are unclaimed bytes after a non-returning instruction that
 decode to another one: a list to investigate, with no classification.
+
+### Jump tables
+
+A trace gives the targets a computed `jmp` or `jsr` took while it was watched.
+`jumptable.py` reads the rest from the 68000 instructions before the transfer.
+It follows the transfer's register backward over fall-through and branches and
+recognises five forms by their opcodes:
+
+| Kind | Code | Targets |
+|---|---|---|
+| `direct` | `lea T,An` … `jsr (An)` | `T` |
+| `pointer` | `lea T,Am` [`adda.w x,Am`] `movea.l (..Am..),An` … `jsr (An)`, or `movea.l (T,pc,Xn),An` | rows of long addresses at `T` |
+| `offset` | `lea T,An`, `move.w (d,An,Xm),Dn`, `jsr (d',An,Dn.w)` | rows of words added to `T+d'` |
+| `branch` | `jmp (T,pc,Xn)` with `bra.w` at `T` | each `bra.w` row |
+| `inline` | `jmp (T,pc,Xn)` otherwise | `T` only: code entered at a computed distance |
+
+A path that reaches a call, a routine entry, another write of the register or
+24 instructions is unknown, and the site's tables are marked incomplete. The
+code does not say how many rows a table has, so a table ends at the first row
+that is not an even ROM address at or after `$200` that decodes on an
+instruction boundary, that lies in decoded code, that is where another table
+begins, or that is at or past the table's own lowest target. A null long
+pointer is passed over; two in a row end the table. At most 256 rows are read.
+
+This is inference. Its instructions carry `table` evidence, the weakest; they
+are counted apart in the census and never earn a tier. A site whose tables are
+all complete and still do not hold a target a trace saw has them refused
+(`status`, `reason`). The transfer stays in `unresolved` either way, and each
+table is listed under `tables` with its site, kind, address, rows and targets.
+The rebuild gate holds whatever a table claims: a line that does not assemble
+to its bytes is kept raw. `codemap.build(..., tables=False)` leaves tables out.
+Tables are read in the ROM only, not in RAM programs.
 
 ## Skeleton, rebuild gate and credit
 
@@ -397,16 +430,39 @@ what was kept of them was each manifest, each record digest and the code map.
   times are not a like-for-like comparison; the record digest costs about
   what writing the events did.
 
+### Jump tables in the first title
+
+2026-11-13, the same four digests with [table discovery](#jump-tables):
+
+| | Without tables | With tables |
+|---|---:|---:|
+| Decoded ROM code bytes | 22,648 | 24,126 (1,478 by table evidence) |
+| Entries | 276 | 308 |
+| Computed transfers | 14 | 15 (one more in table code) |
+| of them with no known target | 2 | 0 |
+| Orphan candidates | 13 | 2 |
+
+Fourteen of the fifteen transfers have tables: seven pointer tables (2 to 18
+rows), four branch tables, two inline entries and one address loaded on two
+paths. Every target a trace saw is in its site's table and none was refused.
+The fifteenth jumps through an address its caller passes in a record. Five
+two-row tables are indexed by the same work-RAM word, and the traces took at
+most the first row of each. The rebuild is
+identical and there are no conflicts or undecodable entries. Decoded code is
+now 4.6% of the image.
+
 ## Not done
 
 - The score-table name entry (it begins near frame 4,700 when the continue
   countdown runs out), every stage after the third and the ending are
   untraced. A scenario should not press START after the game starts, since
   each press pauses or resumes it.
-- More code is not reached by more play of the same kinds. Finding the
-  targets of the 14 computed transfers statically (their jump tables) is the
-  next source, and was left out of
-  [the light-capture plan](../../../../docs/superpowers/plans/2026-11-12-nativemd-light-capture.md).
+- Table code is inference until a trace runs it. A scenario that reaches
+  the second rows of the five two-row tables (what sets their index word is
+  not known) would turn much of it into traced code.
+- Tables in RAM programs (the Z80's `jp (hl)`), offsets taken from data a
+  caller passes, and tables whose index is bounded only by a compare are not
+  read.
 - Frame windows are held by the authored controls only; no window of the
   first title has been taken. D04 is their first user.
 - A light capture has not been taken on a title whose RAM programs change in

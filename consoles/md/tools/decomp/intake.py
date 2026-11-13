@@ -71,7 +71,14 @@ def census(rom, spaces, states, manifest, rebuilt):
             "conflicts": len(set(space.conflicts)),
             "undecodable_entries": len(space.undecodable),
             "orphan_candidates": len(space.orphan_candidates()),
-            "unexecuted_candidate_bytes": by_evidence["static"] + by_evidence["vector"],
+            "tables": sum(1 for table in space.tables if table["status"] == "accepted"),
+            "tables_refused": sum(1 for table in space.tables if table["status"] == "refused"),
+            "unresolved_without_target": sum(
+                1 for site, targets in space.unresolved.items() if not targets and not any(
+                    table["site"] == site and table["status"] == "accepted"
+                    for table in space.tables)),
+            "unexecuted_candidate_bytes": (by_evidence["static"] + by_evidence["vector"] +
+                                           by_evidence["table"]),
         })
     return report
 
@@ -154,11 +161,13 @@ def summary(counts):
     for space in counts["spaces"]:
         decoded = space["decoded_code_bytes"]
         lines.append(
-            "  %s (%s, %d bytes): decoded code %d traced + %d vector + %d static; raw code %d; "
+            "  %s (%s, %d bytes): decoded code %d traced + %d vector + %d static + %d table; "
+            "raw code %d; "
             "structure %d; read %d; unknown %d; entries %d; unresolved indirect %d; "
             "conflicts %d; orphan candidates %d" % (
                 space["id"], space["cpu"], space["size"], decoded["traced"], decoded["vector"],
-                decoded["static"], space["raw_code_bytes"], space["class_bytes"]["structure"],
+                decoded["static"], decoded["table"], space["raw_code_bytes"],
+                space["class_bytes"]["structure"],
                 space["class_bytes"]["read"], space["unknown_bytes"], space["entries"],
                 space["unresolved_indirect"], space["conflicts"], space["orphan_candidates"]))
         if space.get("variants", 1) > 1:

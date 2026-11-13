@@ -91,7 +91,10 @@ four captures taken again as [light captures](../2026-11-12-nativemd-light-captu
 (2026-11-13) give the same events, one for one, and a byte-identical code map
 from 601 MB of digests in place of 402 GB of streams, with the intake at 325 s
 in place of 20,314 s and the longest capture at 659 s without the record
-digest; the captures complete only with reference-core patch
+digest; jump tables read from the code before each computed transfer
+(2026-11-13) add 1,478 bytes of `table` evidence, 24,126 decoded bytes in all
+and 4.6% of the image, with 14 of 15 computed transfers given tables and none
+refused by the traces; the captures complete only with reference-core patch
 0003, whose Z80 bank-wait timing is unverified against hardware; uploaded or
 compressed programs without a verbatim source are not reconstructed (work item
 5); the skeleton lives in the ignored workspace because no game repository is
