@@ -40,19 +40,30 @@ call-by-address helpers, for controls.
 ## Evidence
 
 `draft_check.py`: every 68000 routine of the per-call control cartridge
-drafted; the drafts reach the hand-written C's verdict on every routine (16
-IDENTICAL on 55 calls), and two planted generator errors (a draft that does
-not start at its entry when code lies below it, a branch condition read the
-wrong way) make a draft DIVERGENT.
+drafted; the drafts reach the hand-written C's verdict on every routine (17
+IDENTICAL on 58 calls), and three planted generator errors (a draft that does
+not start at its entry when code lies below it, a conditional tail call
+whose return is outside the condition, a branch condition read the wrong
+way) make a draft DIVERGENT.
 
 First title (its private repository): 278 routines entered by a call or a jump
 table and 4 interrupt handlers drafted, none refused. Over the 600-frame boot
 scenario, the 131 routines reached are all IDENTICAL on every judged call
-(94,577 of 94,702 calls). The first pass found two generator defects, both
-now fixed and pinned: a draft did not start at its entry when code lay below
-it, and a loop waiting on memory an interrupt changes spun for ever in a
-replay (the replay now stops a call after four times the original's accesses
-plus 4,096, as a difference).
+(94,577 of 94,702 calls). Over the 3,000-frame gameplay scenario (options
+screen and first-stage play): 219 routines reached, 214 IDENTICAL, none
+DIVERGENT, 488,710 of 488,918 calls identical; the 5 UNVERIFIED are calls a
+TRAP into the music engine or a wait on memory the vertical interrupt
+changes keeps from being judged. Three generator defects were found on the
+title, all fixed and pinned by draft_check: a draft did not start at its
+entry when code lay below it; a conditional tail call returned whatever the
+condition; and a loop waiting on memory an interrupt changes spun for ever in
+a replay (the replay now stops a call after four times the original's
+accesses plus 4,096, as a difference).
+
+Lockstep with the drafts over the boot scenario: 350 of 600 frames equal with
+14,738 calls substituted; at frame 351 the CPU regions (registers and clocks)
+differ while RAM and VDP memory do not, the open timing class of
+[lockstep.md](lockstep.md#first-title).
 
 ## Limits
 
