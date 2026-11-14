@@ -27,6 +27,8 @@ static uint32_t button_masks[2];
 static nmd_model machine_model;
 static nmd_region machine_region;
 static uint16_t tmss_signature[2];
+/* Since 1.2: the expansion port (port 3), with nothing connected. */
+static uint8_t ext_data, ext_control;
 
 static int md_io_tmss_present(void)
 {
@@ -188,6 +190,8 @@ void md_io_reset(const nmd_cart *cart)
     machine_region = cart && cart->region == NMD_PAL ? NMD_PAL : NMD_NTSC;
     tmss_signature[0] = 0;
     tmss_signature[1] = 0;
+    ext_data = 0;
+    ext_control = 0;
 
     for (port = 0; port < 2; port++) {
         ports[port].data = 0;
@@ -251,10 +255,16 @@ uint8_t md_io_read8(uint32_t addr)
         return md_io_data_read(0);
     case 0x05u:
         return md_io_data_read(1);
+    case 0x07u:
+        /* nothing drives the pins: outputs (and bit 7) read what was written,
+         * inputs read their pull-ups */
+        return (uint8_t)((ext_data & (ext_control | 0x80u)) | (~ext_control & 0x7Fu));
     case 0x09u:
         return ports[0].control;
     case 0x0Bu:
         return ports[1].control;
+    case 0x0Du:
+        return ext_control;
     default:
         nk_fatal("unsupported 68000 I/O byte read at $%06X", (unsigned)addr);
     }
@@ -328,6 +338,12 @@ void md_io_write8(uint32_t addr, uint8_t value)
         md_io_set_th(1, old_th);
         break;
     }
+    case 0x07u:
+        ext_data = value;
+        break;
+    case 0x0Du:
+        ext_control = value;
+        break;
     case 0x01u:
         break; /* The version register is read-only. */
     default:

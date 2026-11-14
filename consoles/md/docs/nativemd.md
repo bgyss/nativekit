@@ -5,7 +5,7 @@ decompiled game's C uses the real console-facing bus APIs and nmd's C routine
 tables; nmd advances the 68000 bus, Z80, VDP, DMA, interrupts, YM2612, PSG, and
 controllers on one master-clock timeline. It does not execute machine code.
 
-The public game contract is [1.1.0](contract.md); 1.1 adds
+The public game contract is [1.1.1](contract.md); 1.1 adds
 [native execution](decomp/native-execution.md): the game's reset routine and
 main logic run on the console's 68000 coroutine. The supported base system
 has selectable md1va3 and md1va6-with-TMSS models, NTSC/PAL regions, and two

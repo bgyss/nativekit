@@ -292,6 +292,24 @@ def _io_tmss_unlock_case():
     ), model="md1va6")
 
 
+def _io_expansion_port_case():
+    """The expansion port, port 3, with nothing connected: its data and
+    control registers read, then written and read back (byte accesses; word
+    reads of the I/O registers differ in the high byte, a separate finding)."""
+    return Case("io_expansion_port", (
+        Operation(READ, 1, 0xA10007),
+        Operation(READ, 1, 0xA1000D),
+        Operation(WRITE, 1, 0xA1000D, 0x40),
+        Operation(READ, 1, 0xA1000D),
+        Operation(WRITE, 1, 0xA10007, 0x40),
+        Operation(READ, 1, 0xA10007),
+        Operation(WRITE, 1, 0xA10007, 0x00),
+        Operation(READ, 1, 0xA10007),
+        Operation(WRITE, 2, 0xC00004, 0x8104),
+        Operation(WRITE, 2, 0xC00000, 0x000E),
+    ))
+
+
 def _io_version_md1va3_case():
     return Case("io_version_md1va3", (
         Operation(READ, 1, 0xA10001, 0xA0, compare_mask=0xFF),
@@ -475,6 +493,7 @@ def all_cases():
     )), _z80_bank_window_case(), _z80_psg_tone_case(), _z80_psg_noise_case(),
     _psg_data_only_volume_case(), _psg_tone3_noise_switch_case(),
     _io_pad6_sequence_case(), _io_tmss_unlock_case(), _io_version_md1va3_case(),
+    _io_expansion_port_case(),
     *_ym_sound_cases(), Case("tas_write", (
         Operation(WRITE, 1, 0xFF0020, 0x00),
         Operation(TAS, 1, 0xFF0020),

@@ -2,11 +2,14 @@
 
 ## Version and scope
 
-nativemd's public game contract is **1.1.0**, declared by `nmd/version.h`.
-1.1 adds native execution; every 1.0 game builds and runs the same.
+nativemd's public game contract is **1.1.1**, declared by `nmd/version.h`.
+1.1 adds native execution; every 1.0 game builds and runs the same. 1.1.1
+adds the expansion port's registers (below), which 1.1.0 failed on: a fix
+toward the hardware, found by the first title's cold start.
 It models the base Sega Mega Drive / Genesis: the 68000-facing bus, a native
 C routine model for interrupt handlers, a native Z80 routine model, Mode 5
-VDP output and DMA, YM2612 and SN76489 sound, and two controller ports. It does
+VDP output and DMA, YM2612 and SN76489 sound, two controller ports and the
+expansion port's registers with nothing connected. It does
 not execute 68000 or Z80 machine code and does not model Sega CD, 32X, or other
 expansion hardware. Unsupported operations fail explicitly.
 
@@ -58,6 +61,7 @@ handler's return restores the whole saved CPU state, as in 1.0.
 | `$A10001` | Read-only version and region bits; writes are ignored. |
 | `$A10003/$A10005` | Controller data ports 1 and 2. |
 | `$A10009/$A1000B` | Controller control ports 1 and 2. |
+| `$A10007/$A1000D` | Since 1.1.1: expansion port data and control, nothing connected. Control reads back what was written; data reads the written value on output pins and on bit 7, and 1 on input pins. The candidate core keeps a pin switched from output to input low for a while (slow rise); nmd does not. |
 | `$A11000` | Memory mode control. |
 | `$A11100` | Z80 BUSREQ control and acknowledgement status on the high byte lane. |
 | `$A11200` | Z80 reset control on the high byte lane. |
