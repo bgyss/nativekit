@@ -4,9 +4,10 @@
 Every 68000 routine of the per-call control cartridge is drafted and the
 drafts are checked per call against the original: each must reach the hand-
 written C's verdict, and the drafts must compile. Generating proves nothing;
-these verdicts are the drafts' only evidence. Two planted generator errors (a
-draft that does not start at its entry when code lies below it, and a
-condition code read the wrong way) must make a draft diverge.
+these verdicts are the drafts' only evidence. Three planted generator errors (a
+draft that does not start at its entry when code lies below it, a conditional
+tail call whose return is not inside the condition, and a condition code
+read the wrong way) must make a draft diverge.
 """
 import json
 import pathlib
@@ -62,6 +63,7 @@ def main():
         original = source.read_text()
         plants = (
             ("        if body[0] != entry:", "        if False:", calls_fixture.ROUTINES["below"]),
+            ('return "{ %s(); return; }', 'return "%s(); return;', calls_fixture.ROUTINES["tailc"]),
             ('"if (nmd_cc(%d)) %s" % (CONDITIONS[base[1:]],',
              '"if (!nmd_cc(%d)) %s" % (CONDITIONS[base[1:]],', calls_fixture.ROUTINES["send"]),
         )
@@ -78,7 +80,7 @@ def main():
         finally:
             source.write_text(original)
     print("draft_check: ok (%d routines drafted, %d IDENTICAL on %d calls, the same verdicts as "
-          "the hand C; 2 planted generator errors caught)" % (count, identical, calls))
+          "the hand C; 3 planted generator errors caught)" % (count, identical, calls))
 
 
 if __name__ == "__main__":

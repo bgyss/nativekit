@@ -251,9 +251,9 @@ class Drafter:
 
     def _tail_call(self, target, names):
         if target in names:
-            return "%s(); return;   /* continues into $%06X: its rts is this routine's */" % (
+            return "{ %s(); return; }   /* continues into $%06X: its rts is this routine's */" % (
                 names[target], target)
-        return "jmp_address(0x%06Xu); return;" % target
+        return "{ jmp_address(0x%06Xu); return; }" % target
 
     def _goto(self, target, inside, targets, names, entry):
         if target in inside:

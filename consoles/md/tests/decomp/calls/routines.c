@@ -196,6 +196,19 @@ static void below(void)
     nmd_rts();
 }
 
+/* $7F0 tailc: with D5.W nonzero, continues into count (its rts is this
+ * routine's); else sets D6 to 3. */
+static void tailc(void)
+{
+    nmd_tst16((uint16_t)D[5]);
+    if (!(nmd_cpu.sr & NMD_Z)) {
+        count();
+        return;
+    }
+    D[6] = nmd_tst32(3);
+    nmd_rts();
+}
+
 /* $5E0 dma: copy eight words from $FF0100 to VRAM $0000. */
 static void dma(void)
 {
@@ -256,6 +269,7 @@ const nmd_routine nmd_game_routines[] = {
     {0x5D0, count, "count"},
     {0x5E0, dma, "dma"},
     {0x7E2, below, "below"},
+    {0x7F0, tailc, "tailc"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
 #endif
