@@ -111,10 +111,26 @@ pad 1) and its authored C:
 - A run given 0.3 s is INCONCLUSIVE and leaves no worker running.
 - Breaking the frame comparison in `lockstep.py` makes the check fail.
 
-Making it match took three corrections to the substitution itself, each found
+Making it match took four corrections to the substitution itself, each found
 by the clock a later routine was entered at: the RAM refresh counter, the
-68000's run target, and the run loop's own slice end are machine state no
-event carries, and each must be what the original's was at the resume clock.
+68000's run target, the run loop's own slice end, and an interrupt latched at
+the boundary before the original's return (taken at the boundary after it)
+are machine state no event carries, and each must be what the original's
+was at the resume clock.
+
+### First title
+
+The first title's 23 routines with C (boot, publisher logo, attract loop;
+kept in its private repository) over the 600-frame no-input boot scenario:
+486 frames equal, 2,286 calls substituted, 12,703 hardware accesses made at
+the original's clocks, 434 calls left to the original. At frame 487 a routine
+is entered 56 clocks late. Traced back, both runs execute the same 68000
+instructions with the same refresh counter up to a machine sync at the end of
+a run slice ($674 in the attract piece at $57A, reached as the original); the
+hybrid leaves that sync 56 clocks (four refresh delays) later. No Z80
+instruction differs in that window and the bus-busy flag is not held across
+it. The cause is open; until it is found the gate is not reliable for runs
+of that length.
 
 ## Limits
 

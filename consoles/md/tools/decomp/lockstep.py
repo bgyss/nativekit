@@ -222,7 +222,8 @@ def _schedule_after(state):
     interrupt = state["int_cycle"]
     return (state["sync_cycle"] - state["cycles"],
             (1 << 63) - 1 if interrupt == 0xFFFFFFFF else interrupt - state["cycles"],
-            state["target_cycle"] - state["cycles"], state.get("slice_after", 0))
+            state["target_cycle"] - state["cycles"], state.get("slice_after", 0),
+            state["int_pending"] | state["int_pending_num"] << 8)
 
 
 def _hardware(cpu, address, rom_size):
@@ -346,7 +347,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
     core.nmd_decomp_z80_slice_end.restype = c.c_uint64
     core.nmd_decomp_m68k_live_resume.argtypes = [
         c.POINTER(c.c_uint32), c.POINTER(c.c_uint32), c.c_uint32, c.c_uint32, c.c_uint32,
-        c.c_uint64, c.c_uint32, c.c_uint64, c.c_int64, c.c_int64, c.c_int64, c.c_int64]
+        c.c_uint64, c.c_uint32, c.c_uint64, c.c_int64, c.c_int64, c.c_int64, c.c_int64,
+        c.c_uint32]
     core.nmd_decomp_z80_live_resume.argtypes = [c.POINTER(runner.Z80State), c.c_uint32,
                                                 c.c_uint64]
     library.nmd_live_bind(c.cast(core.nmd_decomp_m68k_live_access, c.c_void_p),

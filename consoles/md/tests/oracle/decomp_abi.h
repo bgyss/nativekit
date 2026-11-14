@@ -301,12 +301,14 @@ int nmd_decomp_m68k_live_resume(const uint32_t *d, const uint32_t *a, uint32_t o
                                 uint32_t sr, uint32_t pc, uint64_t master_clock,
                                 uint32_t refresh_counter, uint64_t refresh_sync,
                                 int64_t sync_after, int64_t interrupt_after, int64_t target_after,
-                                int64_t slice_after);
+                                int64_t slice_after, uint32_t pending);
 /* sync_after, interrupt_after, target_after and slice_after are the
  * original's next machine sync, next interrupt (INT64_MAX: none due), run
  * target and the end of the run loop's current slice, in master clocks
- * after master_clock. The machine is synchronised first if a slice ended
- * inside the call, then these are put in place. */
+ * after master_clock. They are put in place; a slice that ended inside the
+ * call ends the run loop, which synchronises the machine as the original's did.
+ * pending is the interrupt the original had latched at its return (level in
+ * bits 0-7, number in bits 8-15). */
 uint64_t nmd_decomp_m68k_slice_end(void);   /* the run loop's current slice end */
 uint64_t nmd_decomp_z80_slice_end(void);    /* the Z80's current run slice end */
 uint32_t nmd_decomp_z80_live_access(uint32_t address, uint32_t write, uint32_t value,

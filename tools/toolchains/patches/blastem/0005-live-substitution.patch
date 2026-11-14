@@ -253,7 +253,7 @@ diff --git a/m68k_util.c b/m68k_util.c
 +                                uint32_t sr, uint32_t pc, uint64_t master_clock,
 +                                uint32_t refresh_counter, uint64_t refresh_sync,
 +                                int64_t sync_after, int64_t interrupt_after, int64_t target_after,
-+                                int64_t slice_after)
++                                int64_t slice_after, uint32_t pending)
 +{
 +	m68k_context *context = live_context;
 +	uint32_t cycles;
@@ -277,17 +277,17 @@ diff --git a/m68k_util.c b/m68k_util.c
 +	m68k_read_16(context);
 +	context->prefetch = context->scratch1;
 +	context->pc = pc + 2;
++	/* the clock and the scheduler where the original's stood after its return; a
++	 * slice that ended inside the call ends the run loop now, and the machine is
++	 * synchronised by the caller as the original's was */
 +	context->cycles = cycles;
-+	if (context->cycles >= live_slice_end) {
-+		/* the original's slice ended inside the call and the machine was
-+		 * synchronised: do it now, then put the clock and the scheduler
-+		 * where the original's stood */
-+		context->sync_components(context, 0);
-+		context->cycles = cycles;
-+	}
 +	gen_decomp_refresh_impose(context, refresh_counter, refresh_sync);
 +	context->sync_cycle = (uint32_t)((int64_t)cycles + sync_after);
 +	context->target_cycle = (uint32_t)((int64_t)cycles + target_after);
++	/* an interrupt latched at the boundary before the original's return is
++	 * taken at the boundary after it */
++	context->int_pending = (uint8_t)pending;
++	context->int_pending_num = (uint8_t)(pending >> 8);
 +	live_slice_end = (uint32_t)((int64_t)cycles + slice_after);
 +	context->int_cycle = interrupt_after == INT64_MAX ? 0xFFFFFFFFU
 +		: (uint32_t)((int64_t)cycles + interrupt_after);
