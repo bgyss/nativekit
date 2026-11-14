@@ -57,6 +57,9 @@ instructions the reference core executed. `decomp/calls_check.py` holds the
 per-call checker ([`decomp/check-calls.md`](../docs/decomp/check-calls.md)):
 authored C replayed over 2,685 recorded calls on both CPUs, ten planted
 errors, and the calls that must never be IDENTICAL.
+`decomp/draft_check.py` holds the draft generator
+([`decomp/drafts.md`](../docs/decomp/drafts.md)): drafts of every control
+routine reach the hand C's verdicts, and two planted generator errors are caught.
 `decomp/lockstep_check.py` holds the lockstep gate
 ([`decomp/lockstep.md`](../docs/decomp/lockstep.md)): every authored routine
 substituted at once on the live machine for 4 frames, six planted defects,

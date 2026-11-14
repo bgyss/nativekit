@@ -116,6 +116,9 @@ A call is counted and not judged when:
 
 - `foreign_write`: the 68000 wrote Z80 RAM during a Z80 call.
 - `irregular_return`: it, or a call inside it, did not return by its own `rts`/`ret`.
+- A call whose C makes more than four times the original's bus accesses plus
+  4,096 is stopped as a difference (`runaway`): a loop on memory the
+  original's interrupt changed would otherwise never end.
 - `unsupported`: the C used `nmd_wait_vblank`, `nmd_stop`, a restart or a Z80 port.
 - `fallback`: the C called a routine with no C; the record's writes, hardware
   accesses and exit registers stood in for it. Fallbacks are counted.

@@ -1,6 +1,6 @@
 # D06: Deliver the first game slice through the actual native launch path
 
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** In progress, 2026-11-14. The first title's C lives in a private local repository (its location is the user's; nothing recovered is in nativekit). Its boot path is hand-written C (23 routines) and every other routine entered by a call or a jump table a draft from [draft68k.py](../../../../consoles/md/docs/decomp/drafts.md) (278, plus 4 interrupt handlers). Per call over 600 boot frames: 131 routines reached, all IDENTICAL. A native build boots through `nmd_main` with every routine as C and runs 400 frames headless; its publisher-logo frame is pixel-identical to the reference's (frame 150), and its timing differs (the logo appears earlier natively: D10). nativemd 1.1.1 adds the expansion port's registers, which the title's cold start reads. Open: the gameplay segment and its scenario, lockstep over the title (frame-487 difference, D05), keyboard/controller and windowed runs, the Z80 driver as C. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
