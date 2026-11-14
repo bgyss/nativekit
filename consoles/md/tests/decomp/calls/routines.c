@@ -177,6 +177,15 @@ static void irqon(void)
     nmd_rts();
 }
 
+/* $5D0 count: count D5.W down to zero; the loop branches back to the entry. */
+static void count(void)
+{
+    do
+        nmd_set16(&D[5], nmd_sub16((uint16_t)D[5], 1));
+    while (!(nmd_cpu.sr & NMD_Z));
+    nmd_rts();
+}
+
 /* $5E0 dma: copy eight words from $FF0100 to VRAM $0000. */
 static void dma(void)
 {
@@ -234,6 +243,7 @@ const nmd_routine nmd_game_routines[] = {
     {0x580, pad, "pad"},
     {0x5A0, tone, "tone"},
     {0x5C0, irqon, "irqon"},
+    {0x5D0, count, "count"},
     {0x5E0, dma, "dma"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},

@@ -1,6 +1,6 @@
 # D05: Verify combined C substitution under concurrent hardware execution
 
-**Status:** Partial, 2026-11-13 ([method and evidence](../../../../consoles/md/docs/decomp/lockstep.md)): `lockstep.py`, `check/live.c`, core patch 0005 and `lockstep_check.py`. Concurrent 68000/Z80 C substitution with every frame compared, six planted defects, timeout without orphans. Open: calls an interrupt overlaps or that span frames are left to the original, not judged; checkpoint starts, state loads and resets; YM/PSG registers, VDP FIFO and I/O state are compared only through picture, sound and RAM; the native testcart's changing per-frame input (work item 5) is not done. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Partial, 2026-11-13 ([method and evidence](../../../../consoles/md/docs/decomp/lockstep.md)): `lockstep.py`, `check/live.c`, core patch 0005 and `lockstep_check.py`. Concurrent 68000/Z80 C substitution with every frame compared, six planted defects, timeout without orphans. Open: calls an interrupt overlaps, that span frames or (most Z80 calls) that span a Z80 run slice are left to the original, not judged; checkpoint starts, state loads and resets; YM/PSG registers, VDP FIFO and I/O state are compared only through picture, sound and RAM; the native testcart's changing per-frame input (work item 5) is not done. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 

@@ -55,7 +55,7 @@ windows equal to the full capture's records for those frames.
 `decomp/ops_check.py` holds `nmd_decomp.h`'s flag helpers against 20,800
 instructions the reference core executed. `decomp/calls_check.py` holds the
 per-call checker ([`decomp/check-calls.md`](../docs/decomp/check-calls.md)):
-authored C replayed over 2,686 recorded calls on both CPUs, ten planted
+authored C replayed over 2,685 recorded calls on both CPUs, ten planted
 errors, and the calls that must never be IDENTICAL.
 `decomp/lockstep_check.py` holds the lockstep gate
 ([`decomp/lockstep.md`](../docs/decomp/lockstep.md)): every authored routine

@@ -342,12 +342,18 @@ diff --git a/z80.cpu b/z80.cpu
 diff --git a/z80_util.c b/z80_util.c
 --- a/z80_util.c
 +++ b/z80_util.c
-@@ -178,6 +178,95 @@ static uint8_t z80_decomp_emit_instruction(z80_context *context, uint16_t next_p
+@@ -178,6 +178,101 @@ static uint8_t z80_decomp_emit_instruction(z80_context *context, uint16_t next_p
  			nmd_decomp_clock(context->cycles));
  }
  
 +static z80_context *z80_live_context;
 +static uint8_t z80_live_resumed;
++static uint32_t z80_live_slice_end;	/* the cycle the current z80_execute runs to */
++
++uint64_t nmd_decomp_z80_slice_end(void)
++{
++	return nmd_decomp_clock(z80_live_slice_end);
++}
 +
 +void z80_read_8(z80_context *context);
 +void z80_write_8(z80_context *context);
@@ -438,7 +444,7 @@ diff --git a/z80_util.c b/z80_util.c
  uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode)
  {
  	if (!context->decomp_pending_fetch) {
-@@ -190,6 +279,21 @@ uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode)
+@@ -190,6 +285,21 @@ uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode)
  				return 1;
  			}
  		}
@@ -460,9 +466,11 @@ diff --git a/z80_util.c b/z80_util.c
  		context->decomp_instruction_pc = context->decomp_pending_pc;
  		context->decomp_fetch_len = 0;
  		context->decomp_active = 1;
-@@ -353,6 +457,11 @@ void z80_run(z80_context *context, uint32_t target_cycle)
+@@ -352,7 +462,13 @@ void z80_run(z80_context *context, uint32_t target_cycle)
+ 			//we can approximate that by running for a single m-cycle after a bus request
  			target_cycle = context->cycles + 4 * context->opts->gen.clock_divider;
  		}
++		z80_live_slice_end = target_cycle;
  		z80_execute(context, target_cycle);
 +		/* a substitution leaves the run early: finish the slice */
 +		while (z80_decomp_take_resumed() && context->cycles < target_cycle &&

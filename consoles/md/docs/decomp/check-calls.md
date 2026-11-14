@@ -59,6 +59,7 @@ for a native cart; the control's C is compiled both ways. It holds:
 | | `nmd_shl`, `nmd_shr` 8/16/32 | LSL, ASL, LSR, ASR by a register count |
 | | `nmd_rol` 8/16/32 | ROL, ROR by a register count |
 | | `nmd_swap`, `nmd_btst` | SWAP, BTST on a data register |
+| | `nmd_divs` | DIVS.W by a nonzero divisor, overflow included; C kept (below) |
 | | `nmd_dbf`, `nmd_set8`, `nmd_set16` | DBF's count and loop test; a byte or word into a data register (no flags) |
 | Z80 | `nmd_z_add8`, `nmd_z_sub8`, `nmd_z_cp8` | ADD, ADC, SUB, SBC, CP |
 | | `nmd_z_and8`, `nmd_z_or8` | AND, OR, XOR |
@@ -132,11 +133,12 @@ whose capabilities lack bus accesses or interrupt events.
 `calls_check.py`, on an authored cartridge captured on the pinned reference
 core (4 frames) with authored C:
 
-- 2,686 calls replayed, 2,622 of them the Z80 routine. Thirteen 68000
+- 2,685 calls replayed, 2,620 of them the Z80 routine. Fourteen 68000
   routines and the Z80 routine are IDENTICAL, among them routines with
   hardware accesses (VDP, pad, PSG, a DMA set-up, an interrupt enable), a
   computed call through a pointer table, a routine that calls another twice,
-  and the pair that passes a byte from the 68000 to the Z80 through Z80 RAM.
+  a routine whose loop branches back to its own entry (one call, not one per
+  pass), and the pair that passes a byte from the 68000 to the Z80 through Z80 RAM.
 - Ten planted errors in the C are each DIVERGENT for their reason: a sum
   without its flags (`sr`), a load from the wrong address (`d0`), a hardware
   write of another value, another handler called (call target), a return
@@ -158,6 +160,13 @@ core (4 frames) with authored C:
 core, 45 operations over operand pairs with the flags set both ways; every
 helper gives the core's result and flags, and two planted helper errors are
 caught as the operations planted.
+
+## Known reference difference
+
+The pinned core leaves C unchanged on DIVS.W (680 of 680 cases in `ops_check.py`,
+overflow or not); the 68000 manual says DIVS always clears C. `nmd_divs`
+follows the core, since every check measures equality with it. A routine
+whose behaviour depends on C right after a division would differ on hardware.
 
 ## Limits
 

@@ -133,6 +133,26 @@ static inline uint32_t nmd_swap(uint32_t value)
     return nmd_tst32(value << 16 | value >> 16);
 }
 
+/* DIVS.W by a nonzero divisor: the low word the quotient, the high word the
+ * remainder (sign of the dividend); N Z from the quotient, V clear. A
+ * quotient outside a signed word leaves the register and sets V and N,
+ * clears Z. X is kept. A zero divisor traps on the 68000: not here.
+ * C is KEPT, as the pinned reference core keeps it; the 68000 manual says
+ * DIVS clears C. A known reference difference (check-calls.md). */
+static inline void nmd_divs(uint32_t *reg, uint16_t divisor)
+{
+    int32_t dividend = (int32_t)*reg, by = (int16_t)divisor;
+    int64_t quotient = (int64_t)dividend / by;
+    int32_t remainder = (int32_t)((int64_t)dividend % by);
+
+    if (quotient < -32768 || quotient > 32767) {
+        nmd_flags(NMD_N | NMD_Z | NMD_V, NMD_N | NMD_V);
+        return;
+    }
+    *reg = (uint32_t)(uint16_t)remainder << 16 | (uint16_t)quotient;
+    nmd_flags(NMD_N | NMD_Z | NMD_V, (quotient < 0 ? NMD_N : 0) | (quotient == 0 ? NMD_Z : 0));
+}
+
 /* BTST: Z is the tested bit's complement; nothing else changes. */
 static inline void nmd_btst(uint32_t value, unsigned bit)
 {

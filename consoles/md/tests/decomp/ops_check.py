@@ -51,14 +51,23 @@ def m68k_tests():
             tests.append(("%s.%s %s" % (name, suffix, operands), index, bits))
     tests.append(("swap d0", len(M68K_OPS), 32))
     tests.append(("btst d3,d0", len(M68K_OPS) + 1, 32))
+    tests.append(("divs.w d3,d0", len(M68K_OPS) + 2, 32))     # a zero divisor traps: skipped
     return tests
+
+
+ZERO_DIVISORS = sum(1 for value in VALUES if not value & 0xFFFF)
 
 
 def sources():
     lines = []
-    for text, _, _ in m68k_tests():
+    for number, (text, _, _) in enumerate(m68k_tests()):
         for ccr in (0x00, 0x1F):
+            guard = text.startswith("divs")
+            if guard:
+                lines += ["        tst.w   d3", "        beq.s   skip%d_%d" % (number, ccr)]
             lines += ["        move.l  d2,d0", "        move.w  #$%02X,ccr" % ccr, "        " + text]
+            if guard:
+                lines += ["skip%d_%d:" % (number, ccr)]
     m68k = """\
         org     $200
 start:  move.w  #0,($A11200).l
@@ -217,7 +226,8 @@ def main():
         found = vectors(rom, program, capture / "capture.nmdh")
         m68k_count = sum(1 for row in found if row[0] == "m68k")
         z80_count = len(found) - m68k_count
-        require(m68k_count == len(VALUES) ** 2 * len(m68k_tests()) * 2,
+        require(m68k_count == len(VALUES) ** 2 * len(m68k_tests()) * 2 -
+                len(VALUES) * ZERO_DIVISORS * 2,
                 "the capture holds %d of the 68000 vectors" % m68k_count)
         require(z80_count == len(Z_VALUES) ** 2 * len(Z80_OPS) * 2,
                 "the capture holds %d of the Z80 vectors" % z80_count)

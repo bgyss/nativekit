@@ -25,7 +25,8 @@ holds. Only the schedule is the reference's. A call is left to the original
 (and counted, by reason) when an interrupt or exception was taken in it,
 when it spans a frame boundary, when the 68000 wrote Z80 RAM during a Z80
 call, when it did not return by its own rts/ret, when the run ended before it
-returned, or when it calls a routine that has no C. A run with such calls is not certified.
+returned, when it calls a routine that has no C, or when it is a Z80 call
+the original paused inside at the end of a Z80 run slice. A run with such calls is not certified.
 """
 import argparse
 import ctypes as c
@@ -283,21 +284,36 @@ def _reference(args, scenario, routines, rom_size):
         frames.append(machine.frame(inputs.get(number, {})))
         if machine.errors:
             raise LockstepError("reference: " + "; ".join(machine.errors))
+    # The core reports every arrival at an entry address, a loop back to the entry
+    # included. Each call is matched to its first arrival; arrivals inside a call are its
+    # loop passes, which the hybrid ignores; arrivals after the last call that returned
+    # are calls still open at the end (the first of them) and their loop passes.
+    loops = {key: set() for key in routines}
+    entered = {}
     for key, rows in schedule.items():
         rows.sort(key=lambda row: row["sequence"])     # entry order: nested calls close first
-        if len(entries[key]) < len(rows):
-            raise LockstepError("reference: $%06X returned more often than it was entered" % key[1])
-        for row, clock in zip(rows, entries[key]):
+        arrivals = list(entries[key])
+        position = 0
+        for row in rows:
             # the entry's own clock: a sync before the instruction can move it past the
             # clock of the instruction before
-            if not row["entry_clock"] <= clock <= row["entry_clock"] + 4096:
+            while position < len(arrivals) and arrivals[position] < row["entry_clock"]:
+                loops[key].add(arrivals[position])
+                position += 1
+            if position == len(arrivals) or arrivals[position] > row["entry_clock"] + 4096:
                 raise LockstepError("reference: the entries of $%06X do not line up with its "
                                     "calls" % key[1])
-            row["entry_clock"] = clock
+            row["entry_clock"] = arrivals[position]
+            position += 1
+            while position < len(arrivals) and arrivals[position] <= row["exit_clock"]:
+                loops[key].add(arrivals[position])
+                position += 1
             row["slots"] = [(start, (extra or (0, 0))[1], address, (extra or (0, 0))[0], width,
                              write) for start, address, width, write, extra in row.pop("hardware")]
-    return {"frames": frames, "schedule": schedule,
-            "entered": {key: len(clocks) for key, clocks in entries.items()}}
+        leftover = arrivals[position:]
+        loops[key].update(leftover[1:])
+        entered[key] = len(rows) + (1 if leftover else 0)
+    return {"frames": frames, "schedule": schedule, "entered": entered, "loops": loops}
 
 
 def _register(core, handler, routines):
@@ -327,6 +343,7 @@ def _hybrid(args, scenario, routines, rom_size, reference):
     core = machine.core
     core.nmd_decomp_m68k_live_state.argtypes = [c.POINTER(runner.M68KState)]
     core.nmd_decomp_z80_live_state.argtypes = [c.POINTER(runner.Z80State)]
+    core.nmd_decomp_z80_slice_end.restype = c.c_uint64
     core.nmd_decomp_m68k_live_resume.argtypes = [
         c.POINTER(c.c_uint32), c.POINTER(c.c_uint32), c.c_uint32, c.c_uint32, c.c_uint32,
         c.c_uint64, c.c_uint32, c.c_uint64, c.c_int64, c.c_int64, c.c_int64, c.c_int64]
@@ -342,6 +359,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
 
     def substitute(cpu, pc, clock):
         key = (cpu, pc)
+        if clock in reference["loops"][key]:
+            return 0            # the original's loop back to the entry, inside a call it runs
         index = taken[key]
         taken[key] += 1
         name = routines[key][1]
@@ -362,6 +381,10 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         reason = record["reasons"][0] if record["reasons"] else (
             "fallback" if any((cpu, address) not in routines for address in record["tree"])
             else None)
+        if reason is None and cpu == Z80 and record["exit_clock"] > core.nmd_decomp_z80_slice_end():
+            # the original Z80 paused inside this call while the 68000 ran: run all at
+            # once, its accesses would come before the 68000's that the original's followed
+            reason = "spans_slice"
         if reason:
             skipped[key][reason] = skipped[key].get(reason, 0) + 1
             return 0

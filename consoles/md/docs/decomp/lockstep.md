@@ -65,6 +65,13 @@ A call is not substituted, and is counted by reason, when:
 - `irregular_return`: it, or a call inside it, did not return by its own `rts`/`ret`.
 - `fallback`: it calls a routine that has no C.
 - `unfinished`: the run ended before it returned.
+- `spans_slice`: a Z80 call the original paused inside at the end of a Z80
+  run slice while the 68000 ran. Run all at once, the C's accesses would come
+  before 68000 accesses that the original's followed (the sound differed).
+
+The core reports every arrival at an entry address, a branch back to the
+entry inside a call included. Each call is matched to its first arrival, and
+the arrivals inside it are loop passes the hybrid ignores.
 
 Such a call runs as the original. A run with any of them is not **certified**,
 however its frames compare.
@@ -87,14 +94,15 @@ how many were left to the original by reason.
 `lockstep_check.py`, on the per-call control cartridge (4 frames, B held on
 pad 1) and its authored C:
 
-- All 4 frames equal with 2,653 calls substituted on both CPUs and 5,290
+- All 4 frames equal with 1,702 calls substituted on both CPUs and 3,386
   hardware accesses made at the original's clocks, among them the 68000
   passing a byte to the Z80 through Z80 RAM under a bus request, a pad read,
   a PSG tone, a RAM-to-VRAM DMA and a routine that enables the vertical
   interrupt.
-- 16 calls left to the original: one that the vertical interrupt overlaps and
-  that spans frames, six that call a routine with no C, and Z80 calls the
-  68000 wrote into or that were still open at the end. The run is not certified.
+- 966 calls left to the original: one that the vertical interrupt overlaps and
+  that spans frames, six that call a routine with no C, Z80 calls the 68000
+  wrote into or that were still open at the end, and Z80 calls that span a Z80
+  run slice (most of them). The run is not certified.
 - Six planted defects DIVERGENT where planted: a hardware access out of order
   (in the call), a store to the wrong address (`work_ram`), an interrupt mask
   left up (`work_ram`: the handler's counter), half a DMA length
@@ -114,7 +122,10 @@ event carries, and each must be what the original's was at the resume clock.
 - The reference is the candidate core, not hardware. Equality is with its
   scheduling; native timing is D10's.
 - Calls that interrupts overlap, that span frames or that need a routine
-  without C run as the original: the gate does not judge them. A title's
+  without C run as the original: the gate does not judge them. Nor does it
+  judge Z80 calls that span a Z80 run slice, which on this core is most Z80
+  calls: judging them needs the C suspended at the slice end, as the
+  original is. A title's
   main loop and its interrupt handlers need work before they can be substituted.
 - YM2612/PSG registers, the VDP FIFO and I/O state are compared only through
   sound, picture and RAM.

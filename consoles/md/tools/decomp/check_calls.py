@@ -231,7 +231,11 @@ def segmenter(routines, frame_number=lambda: 0):
         elif kind == 1:
             before, after = state[cpu], payload["state"]
             frames = stack[cpu]
-            if before is not None and (entered_by_call[cpu] or (cpu, event["pc"]) in routines):
+            looping = (before is not None and frames and frames[-1].address == event["pc"] and
+                       frames[-1].entry_sp == stack_pointer(cpu, before) and
+                       not entered_by_call[cpu])        # a branch back to its own entry
+            if before is not None and not looping and (
+                    entered_by_call[cpu] or (cpu, event["pc"]) in routines):
                 frames.append(Frame(cpu, event["pc"], before, mark[cpu], event["sequence"],
                                     clock[cpu], frame_number(), len(handlers[cpu])))
             mark[cpu] = len(accesses[cpu])
@@ -351,7 +355,7 @@ class Checker:
             return dict(outcome, result="UNVERIFIED", reason=sorted(reasons)[0])
         outcome = self._judge(call, compared, outcome)
         if interrupted and outcome["result"] == "DIVERGENT":
-            return dict(outcome, result="UNVERIFIED", reason="interrupt")
+            return dict(outcome, result="UNVERIFIED", reason="interrupt")   # difference kept
         return outcome
 
     def _judge(self, call, compared, outcome):
@@ -525,6 +529,9 @@ def _count(rows, call, outcome):
     row["fallbacks"] += outcome["fallbacks"]
     if outcome["result"] == "UNVERIFIED":
         row["unverified"][outcome["reason"]] = row["unverified"].get(outcome["reason"], 0) + 1
+        if "difference" in outcome:
+            row.setdefault("first_unverified_difference",
+                           dict(outcome["difference"], call=row["calls"], sequence=call.sequence))
         return
     for name, value in outcome["compared"].items():
         row["compared"][name] += value
