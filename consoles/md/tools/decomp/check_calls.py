@@ -140,11 +140,12 @@ def _is_return(cpu, opcode, fetched):
 class Frame:
     """One open call of the original."""
     __slots__ = ("cpu", "address", "entry_sp", "entry", "start", "children", "tree",
-                 "reasons", "low_sp", "sequence", "entry_clock", "frame")
+                 "reasons", "low_sp", "sequence", "entry_clock", "frame", "depth")
 
-    def __init__(self, cpu, address, entry, start, sequence, entry_clock=0, frame=0):
+    def __init__(self, cpu, address, entry, start, sequence, entry_clock=0, frame=0, depth=0):
         self.cpu, self.address, self.entry, self.start = cpu, address, entry, start
         self.entry_clock, self.frame = entry_clock, frame
+        self.depth = depth      # interrupt and exception handlers open when it was entered
         self.entry_sp = self.low_sp = stack_pointer(cpu, entry)
         self.children = []      # direct children: (address, start, end, exit registers)
         self.tree = []          # every descendant in call order: (address, descendants)
@@ -158,13 +159,22 @@ class Call:
     def __init__(self, frame, accesses, exit_state, return_pc, exit_clock=0, exit_frame=0):
         self.cpu, self.address, self.entry = frame.cpu, frame.address, frame.entry
         self.frame_entered = frame.frame
-        self.accesses = accesses    # (address, width, value, write, start clock, extra)
+        # an interrupt handler's accesses inside the call are set aside: they are not the
+        # routine's. Positions are renumbered over what is kept.
+        kept, position = [], []
+        for access in accesses:
+            position.append(len(kept))
+            if access[6] == frame.depth:
+                kept.append(access)
+        position.append(len(kept))
+        self.accesses = kept    # (address, width, value, write, start clock, extra, depth)
+        self.handler_accesses = len(accesses) - len(kept)
         self.entry_clock, self.exit_clock = frame.entry_clock, exit_clock
         self.exit_state = exit_state
         if exit_frame != frame.frame:
             frame.reasons.add("spans_frames")
-        self.children = [(address, start - frame.start, end - frame.start, registers)
-                         for address, start, end, registers in frame.children]
+        self.children = [(address, position[start - frame.start], position[end - frame.start],
+                          registers) for address, start, end, registers in frame.children]
         self.tree = frame.tree
         self.reasons = frame.reasons
         self.exit = REGISTERS[frame.cpu](exit_state, return_pc)
@@ -202,7 +212,8 @@ def segmenter(routines, frame_number=lambda: 0):
             if payload["provenance"] != FETCH:
                 write = payload["operation"] == 2
                 accesses[cpu].append((payload["address"], payload["width"], payload["value"],
-                                      write, payload["start_clock"], payload.get("extra")))
+                                      write, payload["start_clock"], payload.get("extra"),
+                                      len(handlers[cpu])))
                 if cpu == M68K and write and 0xA00000 <= payload["address"] < 0xA10000:
                     for frame in stack[Z80]:
                         frame.reasons.add("foreign_write")
@@ -222,7 +233,7 @@ def segmenter(routines, frame_number=lambda: 0):
             frames = stack[cpu]
             if before is not None and (entered_by_call[cpu] or (cpu, event["pc"]) in routines):
                 frames.append(Frame(cpu, event["pc"], before, mark[cpu], event["sequence"],
-                                    clock[cpu], frame_number()))
+                                    clock[cpu], frame_number(), len(handlers[cpu])))
             mark[cpu] = len(accesses[cpu])
             after_sp = stack_pointer(cpu, after)
             for frame in frames:
@@ -253,14 +264,14 @@ def segmenter(routines, frame_number=lambda: 0):
                                                event["next_pc"], event["master_clock"],
                                                frame_number()))
                         inner = frame
-                    if frames:
+                    if frames and frames[-1].depth == inner.depth:     # not a handler's call
                         parent = frames[-1]
                         parent.tree.append((inner.address, len(inner.tree)))
                         parent.tree.extend(inner.tree)
                         parent.children.append((inner.address, inner.start,
                                                 len(accesses[cpu]),
                                                 REGISTERS[cpu](after, event["next_pc"])))
-                    else:
+                    elif not frames:
                         accesses[cpu].clear()
                         mark[cpu] = 0
             entered_by_call[cpu] = (
@@ -331,9 +342,19 @@ class Checker:
         """One call's outcome: {"result", "reason" | "difference", "compared", "fallbacks"}."""
         compared = {"registers": 0, "hardware_accesses": 0, "memory_bytes": 0, "calls": 0}
         outcome = {"compared": compared, "fallbacks": 0}
-        reasons = call.reasons - {"spans_frames"}     # a lockstep concern; a replay has no time
+        # frame spans are a lockstep concern (a replay has no time); an interrupted call is
+        # judged without its handler's accesses, and a difference in it is not the C's
+        # for certain
+        interrupted = "interrupt" in call.reasons
+        reasons = call.reasons - {"spans_frames", "interrupt"}
         if reasons:
             return dict(outcome, result="UNVERIFIED", reason=sorted(reasons)[0])
+        outcome = self._judge(call, compared, outcome)
+        if interrupted and outcome["result"] == "DIVERGENT":
+            return dict(outcome, result="UNVERIFIED", reason="interrupt")
+        return outcome
+
+    def _judge(self, call, compared, outcome):
         cpu, library = call.cpu, self.library
         space = WORK if cpu == M68K else ZRAM
         library.nmd_check_reset(self.rom_buffer, len(self.rom))

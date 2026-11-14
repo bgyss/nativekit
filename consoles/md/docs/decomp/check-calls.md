@@ -100,12 +100,19 @@ number and the stream sequence of its entry.
 |---|---|
 | `IDENTICAL` | At least one call was judged and every judged call matched. |
 | `DIVERGENT` | A judged call differed. |
-| `UNVERIFIED` | It was called, but no call could be judged. |
+| `UNVERIFIED` | It was called, but no call could be judged, or every call that differed was interrupted. |
 | `UNCOVERED` | No call of it is in the stream. |
+
+A call an interrupt or exception was taken in is judged without the
+handler's accesses: they are set aside from the call's, as are the calls the
+handler made, and its RAM writes are not the routine's. A value the routine
+reads after the handler wrote it is the value the original read. If such a
+call matches it counts as identical; if it differs it is counted as
+`interrupt` and not as divergent, since the handler may be the cause (the
+SNES playbook's rule).
 
 A call is counted and not judged when:
 
-- `interrupt`: an interrupt or exception was taken during it.
 - `foreign_write`: the 68000 wrote Z80 RAM during a Z80 call.
 - `irregular_return`: it, or a call inside it, did not return by its own `rts`/`ret`.
 - `unsupported`: the C used `nmd_wait_vblank`, `nmd_stop`, a restart or a Z80 port.
@@ -136,9 +143,10 @@ core (4 frames) with authored C:
   that does not read its address (`pc`), a store to the wrong address
   (missing write), two hardware accesses swapped, an interrupt mask left up
   (`sr`), half a DMA length and a silent PSG volume (hardware values).
-- A call the vertical interrupt overlapped, a routine that needs the
-  original for a callee, and a routine never called are UNVERIFIED,
-  UNVERIFIED and UNCOVERED.
+- A call the vertical interrupt overlapped is IDENTICAL without the
+  handler's accesses, and UNVERIFIED (`interrupt`) with a planted error in
+  it. A routine that needs the original for a callee is UNVERIFIED and a
+  routine never called is UNCOVERED.
 - Three refusals: a table address outside the catalog, the same stream with
   its bus accesses left out, a stream of another ROM.
 - A light capture's window of frames 2 to 4 judges 1,642 calls, all identical.
@@ -155,7 +163,8 @@ caught as the operations planted.
 
 - Authored synthetic controls only; no routine of a title has been checked.
 - The reference is the candidate core, not hardware.
-- No timing, and no judgement of calls an interrupt overlaps: both are D05.
+- No timing: that is D05, where calls an interrupt overlaps are still left
+  to the original.
 - Routines that end in `rte`, that never return, or that return by editing
   the stack are not judged.
 - RAM access order is not compared, only RAM effects.

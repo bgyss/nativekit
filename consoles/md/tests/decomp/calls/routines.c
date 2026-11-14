@@ -125,7 +125,11 @@ static void spin(void)
 {
     nmd_set16(&D[1], nmd_tst16(7999));
     do {
+#ifdef PLANT_SPIN
+        wr16(0xFF0050, nmd_add16(rd16(0xFF0050), 2));
+#else
         wr16(0xFF0050, nmd_add16(rd16(0xFF0050), 1));
+#endif
         nmd_set16(&D[1], (uint16_t)(D[1] - 1));
     } while ((uint16_t)D[1] != 0xFFFF);
     nmd_rts();

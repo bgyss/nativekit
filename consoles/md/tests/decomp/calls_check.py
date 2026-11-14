@@ -76,10 +76,11 @@ def correct(temp, rom_path, capture, catalog):
             fetch["compared"]["hardware_accesses"] >= 2 * fetch["identical"] and
             routine("send")["compared"]["hardware_accesses"] >= 4 * loops,
             "the Z80 routine or the send to it is not IDENTICAL: %r" % fetch)
-    # never IDENTICAL: an overlapped call, a call that used the original, no call at all
+    # an interrupted call is judged without the handler's accesses
     spin, relay, unused = routine("spin"), routine("relay"), routine("unused")
-    require(spin["verdict"] == "UNVERIFIED" and spin["calls"] == 1 and
-            spin["unverified"] == {"interrupt": 1}, "an interrupted call was judged: %r" % spin)
+    require(spin["verdict"] == "IDENTICAL" and spin["calls"] == 1 and spin["identical"] == 1,
+            "an interrupted call was not judged apart from its handler: %r" % spin)
+    # never IDENTICAL: a call that used the original, no call at all
     require(relay["verdict"] == "UNVERIFIED" and relay["calls"] == loops and
             relay["unverified"] == {"fallback": loops} and relay["fallbacks"] == loops,
             "a call the original stood in for was judged IDENTICAL: %r" % relay)
@@ -116,6 +117,16 @@ def planted(temp, rom_path, capture):
         require({r["name"] for r in others} <= allowed,
                 "%s made other routines diverge: %r" % (define, [r["name"] for r in others]))
     return len(cases)
+
+
+def interrupted_difference(temp, rom_path, capture):
+    """A difference in an interrupted call may be the interrupt's: UNVERIFIED."""
+    library = hybrid.build([calls_fixture.SOURCE], temp / "hybrid-spin", defines=["PLANT_SPIN"])
+    _, by = verdicts(rom_path, capture, library, temp / "spin.json")
+    spin = by[("m68k", calls_fixture.ROUTINES["spin"])]
+    require(spin["verdict"] == "UNVERIFIED" and spin["unverified"] == {"interrupt": 1} and
+            spin["divergent"] == 0,
+            "a difference in an interrupted call was not UNVERIFIED: %r" % spin)
 
 
 def refusals(temp, rom_path, capture, library):
@@ -203,13 +214,14 @@ def main():
         _, catalog, _ = intake.run_intake(rom_path, temp / "intake", [capture], "call-control")
         z80_calls, calls, stream_report = correct(temp, rom_path, capture, catalog)
         errors = planted(temp, rom_path, capture)
+        interrupted_difference(temp, rom_path, capture)
         refusals(temp, rom_path, capture, temp / "hybrid" / hybrid.LIBRARY)
         windowed = window(temp, rom_path, scenario_path, temp / "hybrid" / hybrid.LIBRARY)
         native_source(temp)
         live(temp, rom_path, scenario_path, temp / "hybrid" / hybrid.LIBRARY, stream_report)
     print("calls_check: ok (%d calls replayed through C, %d of the Z80 routine; 68000, Z80 and "
           "the byte sent between them IDENTICAL; %d planted errors DIVERGENT for their reason; "
-          "interrupted, fallback and uncalled routines never IDENTICAL; 3 refusals; "
+          "an interrupted call judged apart from its handler, UNVERIFIED when it differs; fallback and uncalled routines never IDENTICAL; 3 refusals; "
           "%d calls IDENTICAL from a frame window; the same verdicts from a live run; "
           "the C compiles for a native cart)"
           % (calls, z80_calls, errors, windowed))

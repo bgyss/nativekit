@@ -258,7 +258,7 @@ def _reference(args, scenario, routines, rom_size):
                 "sequence": call.sequence, "entry_clock": call.entry_clock,
                 "exit_clock": call.exit_clock, "reasons": sorted(call.reasons),
                 "hardware": [(clock, address & 0xFFFFFF, width, int(write), extra)
-                             for address, width, _, write, clock, extra in call.accesses
+                             for address, width, _, write, clock, extra, _depth in call.accesses
                              if _hardware(call.cpu, address, rom_size)],
                 "exit_refresh": call.exit_state.get("refresh", (0, 0)),
                 "exit_schedule": _schedule_after(call.exit_state) if call.cpu == M68K else None,
