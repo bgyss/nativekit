@@ -59,6 +59,11 @@ class LockstepError(RuntimeError):
     """The lockstep run could not be made."""
 
 
+class SyncPoint(c.Structure):
+    _fields_ = [("clock", c.c_uint64), ("refresh_sync", c.c_uint64),
+                ("refresh_counter", c.c_uint32)]
+
+
 class Slot(c.Structure):
     _fields_ = [("clock", c.c_uint64), ("refresh_sync", c.c_uint64), ("address", c.c_uint32),
                 ("refresh_counter", c.c_uint32), ("width", c.c_uint8), ("write", c.c_uint8)]
@@ -262,7 +267,9 @@ def _reference(args, scenario, routines, rom_size):
             event["payload"]["state"]["refresh"] = refresh(0)
             count = core[0].nmd_decomp_m68k_loop_syncs()
             if count != last_syncs[0]:          # synced before this instruction
-                syncs.append((event["sequence"], core[0].nmd_decomp_m68k_loop_sync_clock()))
+                core[0].nmd_decomp_m68k_loop_sync_refresh(c.byref(counter), c.byref(last_sync))
+                syncs.append((event["sequence"], (core[0].nmd_decomp_m68k_loop_sync_clock(),
+                                                  last_sync.value, counter.value)))
                 last_syncs[0] = count
             event["payload"]["state"]["slice_after"] = (
                 core[0].nmd_decomp_m68k_slice_end() - event["master_clock"])
@@ -371,7 +378,7 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         c.c_uint32]
     core.nmd_decomp_z80_live_resume.argtypes = [c.POINTER(runner.Z80State), c.c_uint32,
                                                 c.c_uint64]
-    core.nmd_decomp_m68k_live_sync.argtypes = [c.c_uint64]
+    core.nmd_decomp_m68k_live_sync.argtypes = [c.c_uint64, c.c_uint32, c.c_uint64]
     live_sync = c.cast(core.nmd_decomp_m68k_live_sync, c.c_void_p)
     library.nmd_live_syncs.argtypes = [c.c_void_p, c.c_void_p, c.c_uint32]
     library.nmd_live_syncs_made.restype = c.c_uint32
@@ -416,8 +423,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             return 0
         slots = (Slot * max(1, len(record["slots"])))(*record["slots"])
         library.nmd_live_begin(cpu, slots, len(record["slots"]))
-        sync_clocks = (c.c_uint64 * max(1, len(record["syncs"])))(*record["syncs"])
-        library.nmd_live_syncs(live_sync, sync_clocks, len(record["syncs"]))
+        sync_points = (SyncPoint * max(1, len(record["syncs"])))(*record["syncs"])
+        library.nmd_live_syncs(live_sync, sync_points, len(record["syncs"]))
         if cpu == M68K:
             state = runner.M68KState()
             core.nmd_decomp_m68k_live_state(c.byref(state))
@@ -447,8 +454,9 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                                            "write": bool(expected[3])})
             core.nmd_decomp_fail()      # the machine holds half a routine: stop the run
             return 0
-        for clock in record["syncs"][library.nmd_live_syncs_made():]:
-            core.nmd_decomp_m68k_live_sync(clock)      # the original's syncs after the C's last access
+        for point in record["syncs"][library.nmd_live_syncs_made():]:
+            clock, refresh_sync, refresh_counter = point   # syncs after the C's last access
+            core.nmd_decomp_m68k_live_sync(clock, refresh_counter, refresh_sync)
         for address in record["tree"]:
             taken[(cpu, address)] += 1  # the C ran these inside this call
         if cpu == M68K:

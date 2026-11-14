@@ -310,7 +310,9 @@ int nmd_decomp_m68k_live_resume(const uint32_t *d, const uint32_t *a, uint32_t o
  * with nmd_decomp_m68k_live_sync. */
 uint64_t nmd_decomp_m68k_loop_syncs(void);      /* syncs between 68000 instructions so far */
 uint64_t nmd_decomp_m68k_loop_sync_clock(void); /* the clock of the last */
-void nmd_decomp_m68k_live_sync(uint64_t master_clock);
+void nmd_decomp_m68k_loop_sync_refresh(uint32_t *counter, uint64_t *last_sync);
+void nmd_decomp_m68k_live_sync(uint64_t master_clock, uint32_t refresh_counter,
+                               uint64_t refresh_sync);
 /* The resume's pending is the interrupt the original had latched at its return (level in
  * bits 0-7, number in bits 8-15). */
 uint64_t nmd_decomp_m68k_slice_end(void);   /* the run loop's current slice end */

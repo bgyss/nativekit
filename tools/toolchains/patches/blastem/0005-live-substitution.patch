@@ -176,7 +176,7 @@ diff --git a/m68k.cpu b/m68k.cpu
 diff --git a/m68k_util.c b/m68k_util.c
 --- a/m68k_util.c
 +++ b/m68k_util.c
-@@ -10,10 +10,158 @@ void m68k_trace_mark_fetch(m68k_context *context)
+@@ -10,10 +10,161 @@ void m68k_trace_mark_fetch(m68k_context *context)
  	context->trace_fetch = 1;
  }
  
@@ -223,7 +223,8 @@ diff --git a/m68k_util.c b/m68k_util.c
 +
 +/* A sync the original made between two instructions inside a substituted
 + * call, made again at its clock. */
-+void nmd_decomp_m68k_live_sync(uint64_t master_clock)
++void nmd_decomp_m68k_live_sync(uint64_t master_clock, uint32_t refresh_counter,
++                               uint64_t refresh_sync)
 +{
 +	m68k_context *context = live_context;
 +
@@ -232,6 +233,8 @@ diff --git a/m68k_util.c b/m68k_util.c
 +		return;
 +	}
 +	context->cycles = nmd_decomp_local_clock(master_clock);
++	/* the refresh counter as the original's stood: the sync charges its delays */
++	gen_decomp_refresh_impose(context, refresh_counter, refresh_sync);
 +	m68k_decomp_note_sync(context);
 +	context->sync_components(context, 0);
 +}
@@ -336,7 +339,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  }
  
  void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state)
-@@ -164,6 +312,7 @@ int m68k_decomp_complete_instruction(m68k_context *context)
+@@ -164,6 +315,7 @@ int m68k_decomp_complete_instruction(m68k_context *context)
  void m68k_read_8(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -344,7 +347,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  #ifdef DEBUG_DISASM
  	uint32_t tmp = context->scratch1;
-@@ -188,6 +337,7 @@ uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
+@@ -188,6 +340,7 @@ uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
  void m68k_read_16(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -352,7 +355,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  #ifdef DEBUG_DISASM
  	uint32_t tmp = context->scratch1;
-@@ -220,6 +370,7 @@ void m68k_read_16(m68k_context *context)
+@@ -220,6 +373,7 @@ void m68k_read_16(m68k_context *context)
  void m68k_write_8(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -360,7 +363,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  	uint32_t address = context->scratch2 & context->opts->gen.address_mask;
  	uint32_t index = address >> 16;
-@@ -245,6 +396,7 @@ void m68k_rmw_writeback(m68k_context *context)
+@@ -245,6 +399,7 @@ void m68k_rmw_writeback(m68k_context *context)
  void m68k_write_16(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -368,19 +371,28 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  	int32_t address = context->scratch2 & context->opts->gen.address_mask;
  	uint32_t index = address >> 16;
-@@ -258,9 +410,31 @@ void m68k_write_16(m68k_context *context)
+@@ -258,9 +413,40 @@ void m68k_write_16(m68k_context *context)
  #endif
  }
  
 +/* Syncs of the machine between 68000 instructions (the run loop's, and the
 + * frame loop's between runs), counted with the clock of the last: the
 + * lockstep schedule replays them inside a substituted call (D05). */
-+static uint64_t decomp_loop_syncs, decomp_loop_sync_clock;
++static uint64_t decomp_loop_syncs, decomp_loop_sync_clock, decomp_loop_sync_refresh_last;
++static uint32_t decomp_loop_sync_refresh;
 +
 +void m68k_decomp_note_sync(m68k_context *context)
 +{
 +	decomp_loop_syncs++;
 +	decomp_loop_sync_clock = nmd_decomp_clock(context->cycles);
++	nmd_decomp_refresh_state(0, &decomp_loop_sync_refresh, &decomp_loop_sync_refresh_last);
++}
++
++/* The refresh counter as it stood when the last loop sync began. */
++void nmd_decomp_m68k_loop_sync_refresh(uint32_t *counter, uint64_t *last_sync)
++{
++	*counter = decomp_loop_sync_refresh;
++	*last_sync = decomp_loop_sync_refresh_last;
 +}
 +
 +uint64_t nmd_decomp_m68k_loop_syncs(void)

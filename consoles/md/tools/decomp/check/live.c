@@ -25,7 +25,7 @@ nmd_z80_state nmd_z80;
 
 static nmd_live_m68k_bus m68k_bus;
 static nmd_live_sync sync_fn;
-static const uint64_t *sync_clocks;
+static const nmd_live_sync_point *sync_points;
 static uint32_t sync_count, sync_next;
 static nmd_live_z80_bus z80_bus;
 static uint32_t rom_size;
@@ -59,10 +59,10 @@ void nmd_live_bind(nmd_live_m68k_bus m68k, nmd_live_z80_bus z80, uint32_t image_
     rom_size = image_size;
 }
 
-void nmd_live_syncs(nmd_live_sync sync, const uint64_t *clocks, uint32_t count)
+void nmd_live_syncs(nmd_live_sync sync, const nmd_live_sync_point *points, uint32_t count)
 {
     sync_fn = sync;
-    sync_clocks = clocks;
+    sync_points = points;
     sync_count = count;
     sync_next = 0;
 }
@@ -126,8 +126,11 @@ static uint32_t m68k_access(uint32_t address, uint32_t width, int write, uint32_
     else {
         const nmd_live_slot *slot = timed(M68K, address, width, write);
 
-        while (sync_next < sync_count && sync_clocks[sync_next] <= slot->clock)
-            sync_fn(sync_clocks[sync_next++]);
+        while (sync_next < sync_count && sync_points[sync_next].clock <= slot->clock) {
+            const nmd_live_sync_point *point = &sync_points[sync_next++];
+
+            sync_fn(point->clock, point->refresh_counter, point->refresh_sync);
+        }
 
         return m68k_bus(address, width, (uint32_t)write, value, slot->clock,
                         slot->refresh_counter, slot->refresh_sync);

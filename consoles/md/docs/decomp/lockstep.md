@@ -120,21 +120,21 @@ was at the resume clock. And the machine syncs the original made between
 instructions inside the call (devices run, a finished frame noted) are made
 again at their clocks: the core counts them, the reference records the ones
 inside each call, and the C makes each before its first hardware access at or
-after that clock, the rest before the resume. Without them a frame ended one
-instruction late (first title, frame 351); syncing at the resume clock
-instead ran the Z80 too far ahead.
+after that clock, the rest before the resume, each with the RAM refresh
+counter the original's had when it began (the sync charges refresh delay,
+and the clock it reaches decides how far the Z80 runs and so which sync
+charges the 68000 for the Z80's bank-window reads). Without the syncs a
+frame ended one instruction late (first title, frame 351); syncing at the
+resume clock ran the Z80 too far ahead; without the refresh counter a bank
+read's 56 clocks were charged at another sync (frame 485).
 
 ### First title
 
 All 301 routines of the first title with C (23 hand-written, 278 drafts;
 kept in its private repository) over the 600-frame no-input boot scenario:
-484 frames equal, 37,178 calls substituted, 44,275 hardware accesses made at
-the original's clocks, 1,600 calls left to the original. At frame 485 a
-routine is entered 56 clocks early: both runs reach a sync after the same
-instructions with the same refresh counter, and on the original the 68000
-leaves it 56 clocks (four bus cycles) later than refresh alone explains. The
-title plays samples through the Z80's window onto the 68000 bus, which
-stalls the 68000 in this core; that contention is the open lead.
+IDENTICAL on all 600 frames, 57,245 calls substituted, 61,945 hardware
+accesses made at the original's clocks; 2,453 calls left to the original
+(interrupted, spanning frames, or Z80), so not certified.
 
 Earlier, with the 23 hand-written routines only: 486 frames equal, then a
 routine entered 56 clocks late. Traced back, both runs execute the same 68000
