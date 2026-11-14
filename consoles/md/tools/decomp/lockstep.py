@@ -29,6 +29,7 @@ returned, when it calls a routine that has no C, or when it is a Z80 call
 the original paused inside at the end of a Z80 run slice. A run with such calls is not certified.
 """
 import argparse
+import bisect
 import ctypes as c
 import hashlib
 import json
@@ -246,6 +247,7 @@ def _reference(args, scenario, routines, rom_size):
     feed = check_calls.segmenter(set(routines), lambda: frame[0])
     core = [None]
     counter, last_sync = c.c_uint32(), c.c_uint64()
+    syncs, last_syncs = [], [0]                 # (instruction sequence, clock) per sync
 
     def refresh(at_access_start):
         core[0].nmd_decomp_refresh_state(at_access_start, c.byref(counter), c.byref(last_sync))
@@ -258,6 +260,10 @@ def _reference(args, scenario, routines, rom_size):
             event["payload"]["extra"] = refresh(1)
         elif event["cpu"] == M68K and event["kind"] == 1:
             event["payload"]["state"]["refresh"] = refresh(0)
+            count = core[0].nmd_decomp_m68k_loop_syncs()
+            if count != last_syncs[0]:          # synced before this instruction
+                syncs.append((event["sequence"], core[0].nmd_decomp_m68k_loop_sync_clock()))
+                last_syncs[0] = count
             event["payload"]["state"]["slice_after"] = (
                 core[0].nmd_decomp_m68k_slice_end() - event["master_clock"])
         for call in feed(event):
@@ -268,6 +274,7 @@ def _reference(args, scenario, routines, rom_size):
                              for address, width, _, write, clock, extra, _depth in call.accesses
                              if _hardware(call.cpu, address, rom_size)],
                 "exit_refresh": call.exit_state.get("refresh", (0, 0)),
+                "exit_sequence": call.exit_sequence,
                 "exit_schedule": _schedule_after(call.exit_state) if call.cpu == M68K else None,
                 "tree": [address for address, _ in call.tree],
                 "r": call.exit_state.get("r", 0), "wz": call.exit_state.get("wz", 0)})
@@ -275,6 +282,8 @@ def _reference(args, scenario, routines, rom_size):
     machine = Machine(args.core, args.rom, scenario, args.out, on_event)
     core[0] = machine.core
     machine.core.nmd_decomp_m68k_slice_end.restype = c.c_uint64
+    machine.core.nmd_decomp_m68k_loop_syncs.restype = c.c_uint64
+    machine.core.nmd_decomp_m68k_loop_sync_clock.restype = c.c_uint64
 
     # the original is never replaced here: the handler only notes when each entry is reached
     def note(cpu, pc, clock):
@@ -294,6 +303,7 @@ def _reference(args, scenario, routines, rom_size):
     # included. Each call is matched to its first arrival; arrivals inside a call are its
     # loop passes, which the hybrid ignores; arrivals after the last call that returned
     # are calls still open at the end (the first of them) and their loop passes.
+    sync_sequences = [sequence for sequence, _ in syncs]    # in event order: sorted
     loops = {key: set() for key in routines}
     entered = {}
     for key, rows in schedule.items():
@@ -316,6 +326,11 @@ def _reference(args, scenario, routines, rom_size):
                 position += 1
             row["slots"] = [(start, (extra or (0, 0))[1], address, (extra or (0, 0))[0], width,
                              write) for start, address, width, write, extra in row.pop("hardware")]
+        for row in rows:                        # syncs strictly inside the call (68000)
+            last = row.pop("exit_sequence")
+            low = bisect.bisect_right(sync_sequences, row["sequence"])
+            high = bisect.bisect_right(sync_sequences, last)
+            row["syncs"] = [clock for _, clock in syncs[low:high]] if key[0] == M68K else []
         leftover = arrivals[position:]
         loops[key].update(leftover[1:])
         entered[key] = len(rows) + (1 if leftover else 0)
@@ -356,6 +371,10 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         c.c_uint32]
     core.nmd_decomp_z80_live_resume.argtypes = [c.POINTER(runner.Z80State), c.c_uint32,
                                                 c.c_uint64]
+    core.nmd_decomp_m68k_live_sync.argtypes = [c.c_uint64]
+    live_sync = c.cast(core.nmd_decomp_m68k_live_sync, c.c_void_p)
+    library.nmd_live_syncs.argtypes = [c.c_void_p, c.c_void_p, c.c_uint32]
+    library.nmd_live_syncs_made.restype = c.c_uint32
     library.nmd_live_bind(c.cast(core.nmd_decomp_m68k_live_access, c.c_void_p),
                           c.cast(core.nmd_decomp_z80_live_access, c.c_void_p), rom_size)
     current = [0]
@@ -397,6 +416,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             return 0
         slots = (Slot * max(1, len(record["slots"])))(*record["slots"])
         library.nmd_live_begin(cpu, slots, len(record["slots"]))
+        sync_clocks = (c.c_uint64 * max(1, len(record["syncs"])))(*record["syncs"])
+        library.nmd_live_syncs(live_sync, sync_clocks, len(record["syncs"]))
         if cpu == M68K:
             state = runner.M68KState()
             core.nmd_decomp_m68k_live_state(c.byref(state))
@@ -426,6 +447,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                                            "write": bool(expected[3])})
             core.nmd_decomp_fail()      # the machine holds half a routine: stop the run
             return 0
+        for clock in record["syncs"][library.nmd_live_syncs_made():]:
+            core.nmd_decomp_m68k_live_sync(clock)      # the original's syncs after the C's last access
         for address in record["tree"]:
             taken[(cpu, address)] += 1  # the C ran these inside this call
         if cpu == M68K:

@@ -305,9 +305,13 @@ int nmd_decomp_m68k_live_resume(const uint32_t *d, const uint32_t *a, uint32_t o
 /* sync_after, interrupt_after, target_after and slice_after are the
  * original's next machine sync, next interrupt (INT64_MAX: none due), run
  * target and the end of the run loop's current slice, in master clocks
- * after master_clock. They are put in place; a slice that ended inside the
- * call ends the run loop, which synchronises the machine as the original's did.
- * pending is the interrupt the original had latched at its return (level in
+ * after master_clock. They are put in place. The syncs the original made
+ * between instructions inside the call are replayed first, each at its clock,
+ * with nmd_decomp_m68k_live_sync. */
+uint64_t nmd_decomp_m68k_loop_syncs(void);      /* syncs between 68000 instructions so far */
+uint64_t nmd_decomp_m68k_loop_sync_clock(void); /* the clock of the last */
+void nmd_decomp_m68k_live_sync(uint64_t master_clock);
+/* The resume's pending is the interrupt the original had latched at its return (level in
  * bits 0-7, number in bits 8-15). */
 uint64_t nmd_decomp_m68k_slice_end(void);   /* the run loop's current slice end */
 uint64_t nmd_decomp_z80_slice_end(void);    /* the Z80's current run slice end */

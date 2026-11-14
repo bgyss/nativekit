@@ -40,7 +40,14 @@ typedef uint32_t (*nmd_live_m68k_bus)(uint32_t address, uint32_t width, uint32_t
 typedef uint32_t (*nmd_live_z80_bus)(uint32_t address, uint32_t write, uint32_t value,
                                      uint64_t master_clock);
 
+typedef void (*nmd_live_sync)(uint64_t master_clock);
+
 void nmd_live_bind(nmd_live_m68k_bus m68k, nmd_live_z80_bus z80, uint32_t image_size);
+/* The machine syncs the original made between instructions inside the call:
+ * each is made before the first hardware access that begins at or after its
+ * clock (68000 only); the runner makes those left after the C returns. */
+void nmd_live_syncs(nmd_live_sync sync, const uint64_t *clocks, uint32_t count);
+uint32_t nmd_live_syncs_made(void);
 void nmd_live_begin(int cpu, const nmd_live_slot *list, uint32_t count);
 const nmd_live_result *nmd_live_run(int cpu, void (*routine)(void));
 

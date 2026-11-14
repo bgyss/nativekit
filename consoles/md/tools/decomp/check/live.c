@@ -24,6 +24,9 @@ nmd_z80_state nmd_z80;
 #define UNTIMED UINT64_MAX
 
 static nmd_live_m68k_bus m68k_bus;
+static nmd_live_sync sync_fn;
+static const uint64_t *sync_clocks;
+static uint32_t sync_count, sync_next;
 static nmd_live_z80_bus z80_bus;
 static uint32_t rom_size;
 /* One call under way for each CPU: a 68000 hardware access lets the Z80
@@ -54,6 +57,19 @@ void nmd_live_bind(nmd_live_m68k_bus m68k, nmd_live_z80_bus z80, uint32_t image_
     m68k_bus = m68k;
     z80_bus = z80;
     rom_size = image_size;
+}
+
+void nmd_live_syncs(nmd_live_sync sync, const uint64_t *clocks, uint32_t count)
+{
+    sync_fn = sync;
+    sync_clocks = clocks;
+    sync_count = count;
+    sync_next = 0;
+}
+
+uint32_t nmd_live_syncs_made(void)
+{
+    return sync_next;
 }
 
 void nmd_live_begin(int cpu, const nmd_live_slot *list, uint32_t count)
@@ -109,6 +125,9 @@ static uint32_t m68k_access(uint32_t address, uint32_t width, int write, uint32_
         return m68k_bus(address, width, (uint32_t)write, value, UNTIMED, 0, 0);
     else {
         const nmd_live_slot *slot = timed(M68K, address, width, write);
+
+        while (sync_next < sync_count && sync_clocks[sync_next] <= slot->clock)
+            sync_fn(sync_clocks[sync_next++]);
 
         return m68k_bus(address, width, (uint32_t)write, value, slot->clock,
                         slot->refresh_counter, slot->refresh_sync);

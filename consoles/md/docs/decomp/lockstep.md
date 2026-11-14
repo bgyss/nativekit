@@ -111,20 +111,33 @@ pad 1) and its authored C:
 - A run given 0.3 s is INCONCLUSIVE and leaves no worker running.
 - Breaking the frame comparison in `lockstep.py` makes the check fail.
 
-Making it match took four corrections to the substitution itself, each found
+Making it match took five corrections to the substitution itself, each found
 by the clock a later routine was entered at: the RAM refresh counter, the
 68000's run target, the run loop's own slice end, and an interrupt latched at
 the boundary before the original's return (taken at the boundary after it)
 are machine state no event carries, and each must be what the original's
-was at the resume clock.
+was at the resume clock. And the machine syncs the original made between
+instructions inside the call (devices run, a finished frame noted) are made
+again at their clocks: the core counts them, the reference records the ones
+inside each call, and the C makes each before its first hardware access at or
+after that clock, the rest before the resume. Without them a frame ended one
+instruction late (first title, frame 351); syncing at the resume clock
+instead ran the Z80 too far ahead.
 
 ### First title
 
-The first title's 23 routines with C (boot, publisher logo, attract loop;
+All 301 routines of the first title with C (23 hand-written, 278 drafts;
 kept in its private repository) over the 600-frame no-input boot scenario:
-486 frames equal, 2,286 calls substituted, 12,703 hardware accesses made at
-the original's clocks, 434 calls left to the original. At frame 487 a routine
-is entered 56 clocks late. Traced back, both runs execute the same 68000
+484 frames equal, 37,178 calls substituted, 44,275 hardware accesses made at
+the original's clocks, 1,600 calls left to the original. At frame 485 a
+routine is entered 56 clocks early: both runs reach a sync after the same
+instructions with the same refresh counter, and on the original the 68000
+leaves it 56 clocks (four bus cycles) later than refresh alone explains. The
+title plays samples through the Z80's window onto the 68000 bus, which
+stalls the 68000 in this core; that contention is the open lead.
+
+Earlier, with the 23 hand-written routines only: 486 frames equal, then a
+routine entered 56 clocks late. Traced back, both runs execute the same 68000
 instructions with the same refresh counter up to a machine sync at the end of
 a run slice ($674 in the attract piece at $57A, reached as the original); the
 hybrid leaves that sync 56 clocks (four refresh delays) later. No Z80

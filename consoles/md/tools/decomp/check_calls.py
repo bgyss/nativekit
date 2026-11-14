@@ -157,7 +157,8 @@ class Frame:
 class Call:
     """A closed call of a routine that has C."""
 
-    def __init__(self, frame, accesses, exit_state, return_pc, exit_clock=0, exit_frame=0):
+    def __init__(self, frame, accesses, exit_state, return_pc, exit_clock=0, exit_frame=0,
+                 exit_sequence=0):
         self.cpu, self.address, self.entry = frame.cpu, frame.address, frame.entry
         self.frame_entered = frame.frame
         # an interrupt handler's accesses inside the call are set aside: they are not the
@@ -172,6 +173,7 @@ class Call:
         self.handler_accesses = len(accesses) - len(kept)
         self.entry_clock, self.exit_clock = frame.entry_clock, exit_clock
         self.exit_state = exit_state
+        self.exit_sequence = exit_sequence
         if exit_frame != frame.frame:
             frame.reasons.add("spans_frames")
         self.children = [(address, position[start - frame.start], position[end - frame.start],
@@ -267,7 +269,7 @@ def segmenter(routines, frame_number=lambda: 0):
                         if (cpu, frame.address) in routines:
                             closed.append(Call(frame, accesses[cpu][frame.start:end], after,
                                                event["next_pc"], event["master_clock"],
-                                               frame_number()))
+                                               frame_number(), event["sequence"]))
                         inner = frame
                     if frames and frames[-1].depth == inner.depth:     # not a handler's call
                         parent = frames[-1]
