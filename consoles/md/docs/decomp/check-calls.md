@@ -13,7 +13,14 @@ python3 consoles/md/tools/decomp/hybrid.py --out DIR [--catalog catalog.json] \
     [--define NAME]... SOURCE.c...
 python3 consoles/md/tools/decomp/check_calls.py --rom ROM --stream STREAM.nmdh \
     --library DIR/hybrid.dylib --out calls.json [--contracts contracts.json]
+python3 consoles/md/tools/decomp/check_calls.py --rom ROM --scenario SCENARIO.json \
+    --core CORE --frames N [--first-frame F] --library DIR/hybrid.dylib --out calls.json
 ```
+
+The second form keeps no stream: it runs the scenario on the reference core
+and checks each call as it returns, so a whole scenario can be checked
+without a full-event capture (about 17 MB a frame for the first title). It
+gives the stream's verdicts.
 
 `STREAM.nmdh` is a full capture's `capture.nmdh` or a light capture's
 `window.nmdh` ([intake.md](intake.md#light-captures-and-the-evidence-digest)):
@@ -50,7 +57,9 @@ for a native cart; the control's C is compiled both ways. It holds:
 | 68000 | `nmd_tst8/16/32` | MOVE, AND, OR, EOR, NOT, TST, CLR, MOVEQ results: N Z, V C clear (held with TST) |
 | | `nmd_add`, `nmd_sub`, `nmd_cmp`, `nmd_neg` 8/16/32 | ADD, SUB, CMP, NEG to a data register |
 | | `nmd_shl`, `nmd_shr` 8/16/32 | LSL, ASL, LSR, ASR by a register count |
-| | `nmd_btst` | BTST on a data register |
+| | `nmd_rol` 8/16/32 | ROL, ROR by a register count |
+| | `nmd_swap`, `nmd_btst` | SWAP, BTST on a data register |
+| | `nmd_dbf`, `nmd_set8`, `nmd_set16` | DBF's count and loop test; a byte or word into a data register (no flags) |
 | Z80 | `nmd_z_add8`, `nmd_z_sub8`, `nmd_z_cp8` | ADD, ADC, SUB, SBC, CP |
 | | `nmd_z_and8`, `nmd_z_or8` | AND, OR, XOR |
 | | `nmd_z_inc8`, `nmd_z_dec8` | INC, DEC |
@@ -134,9 +143,11 @@ core (4 frames) with authored C:
   its bus accesses left out, a stream of another ROM.
 - A light capture's window of frames 2 to 4 judges 1,642 calls, all identical.
 - The C compiles without `NMD_HYBRID` against nmd's headers.
+- The same scenario run live gives the stream's verdicts, and a planted
+  error is DIVERGENT in it.
 
-`ops_check.py`: 14,336 68000 and 2,880 Z80 instructions of the reference
-core, 38 operations over operand pairs with the flags set both ways; every
+`ops_check.py`: 17,920 68000 and 2,880 Z80 instructions of the reference
+core, 45 operations over operand pairs with the flags set both ways; every
 helper gives the core's result and flags, and two planted helper errors are
 caught as the operations planted.
 
