@@ -18,7 +18,8 @@ enum {
     NMD_CHECK_UNMAPPED = 6,
     NMD_CHECK_ODD = 7,          /* word access at an odd address */
     NMD_CHECK_UNSUPPORTED = 8,  /* a wait or restart a per-call check cannot judge */
-    NMD_CHECK_NO_ROUTINE = 9    /* a call to an address with no C and no recorded call */
+    NMD_CHECK_NO_ROUTINE = 9,   /* a call to an address with no C and no recorded call */
+    NMD_CHECK_RUNAWAY = 10      /* far more bus accesses than the original made */
 };
 
 typedef struct nmd_check_access {
@@ -56,6 +57,7 @@ void nmd_check_entry_byte(int space, uint32_t offset, uint8_t value);
 int nmd_check_exit_byte(int space, uint32_t offset);   /* -1: the C did not write it */
 void nmd_check_hardware(int cpu, const nmd_check_access *list, uint32_t count);
 void nmd_check_set_fallback(nmd_check_fallback handler);
+void nmd_check_access_limit(uint32_t limit);
 uint32_t nmd_check_hardware_next(void);
 void nmd_check_hardware_skip(uint32_t count);
 void nmd_check_ram_store(int space, uint32_t offset, uint8_t value);

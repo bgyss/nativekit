@@ -186,6 +186,16 @@ static void count(void)
     nmd_rts();
 }
 
+/* $7E2 below: returns at once when D5.W is zero (through the RTS at $7E0, below
+ * the entry); else sets D6 to 1. */
+static void below(void)
+{
+    nmd_tst16((uint16_t)D[5]);
+    if (!(nmd_cpu.sr & NMD_Z))
+        D[6] = nmd_tst32(1);
+    nmd_rts();
+}
+
 /* $5E0 dma: copy eight words from $FF0100 to VRAM $0000. */
 static void dma(void)
 {
@@ -245,6 +255,7 @@ const nmd_routine nmd_game_routines[] = {
     {0x5C0, irqon, "irqon"},
     {0x5D0, count, "count"},
     {0x5E0, dma, "dma"},
+    {0x7E2, below, "below"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
 #endif

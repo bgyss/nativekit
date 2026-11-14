@@ -153,6 +153,75 @@ static inline void nmd_divs(uint32_t *reg, uint16_t divisor)
     nmd_flags(NMD_N | NMD_Z | NMD_V, (quotient < 0 ? NMD_N : 0) | (quotient == 0 ? NMD_Z : 0));
 }
 
+/* MULU.W, MULS.W: the low words multiplied into the whole register; N Z from
+ * the long, V C clear. */
+static inline void nmd_mulu(uint32_t *reg, uint16_t source)
+{
+    *reg = nmd_tst32((uint32_t)(uint16_t)*reg * source);
+}
+
+static inline void nmd_muls(uint32_t *reg, uint16_t source)
+{
+    *reg = nmd_tst32((uint32_t)((int32_t)(int16_t)*reg * (int16_t)source));
+}
+
+/* DIVU.W by a nonzero divisor, as the pinned core computes it (its shift-and-
+ * subtract loop, overflow when the divisor shifted up 16 is below the
+ * dividend): N from bit 15 of the quotient, Z, V clear; C KEPT as the core
+ * keeps it (the 68000 clears it, as for DIVS). Overflow sets N V, clears Z,
+ * and leaves the register. */
+static inline void nmd_divu(uint32_t *reg, uint16_t divisor)
+{
+    uint32_t dividend = *reg, shifted = (uint32_t)divisor << 16;
+    uint16_t quotient = 0, bit = 0;
+
+    if (shifted < dividend) {
+        nmd_flags(NMD_N | NMD_Z | NMD_V, NMD_N | NMD_V);
+        return;
+    }
+    for (int step = 0; step < 16; step++) {
+        uint32_t force = dividend >> 31;
+
+        quotient = (uint16_t)(quotient << 1 | bit);
+        dividend <<= 1;
+        if (force || dividend >= shifted) {
+            dividend -= shifted;
+            bit = 1;
+        } else {
+            bit = 0;
+        }
+    }
+    quotient = (uint16_t)(quotient << 1 | bit);
+    *reg = dividend | quotient;
+    nmd_flags(NMD_N | NMD_Z | NMD_V, (quotient & 0x8000 ? NMD_N : 0) | (quotient ? 0 : NMD_Z));
+}
+
+/* The 68000's condition codes, as Bcc, DBcc and Scc test them (0 T ... 15 LE). */
+static inline int nmd_cc(unsigned condition)
+{
+    unsigned sr = nmd_cpu.sr;
+    int c = !!(sr & NMD_C), v = !!(sr & NMD_V), z = !!(sr & NMD_Z), n = !!(sr & NMD_N);
+
+    switch (condition & 15) {
+    case 0: return 1;
+    case 1: return 0;
+    case 2: return !c && !z;            /* HI */
+    case 3: return c || z;              /* LS */
+    case 4: return !c;                  /* CC */
+    case 5: return c;                   /* CS */
+    case 6: return !z;                  /* NE */
+    case 7: return z;                   /* EQ */
+    case 8: return !v;                  /* VC */
+    case 9: return v;                   /* VS */
+    case 10: return !n;                 /* PL */
+    case 11: return n;                  /* MI */
+    case 12: return n == v;             /* GE */
+    case 13: return n != v;             /* LT */
+    case 14: return !z && n == v;       /* GT */
+    default: return z || n != v;        /* LE */
+    }
+}
+
 /* BTST: Z is the tested bit's complement; nothing else changes. */
 static inline void nmd_btst(uint32_t value, unsigned bit)
 {

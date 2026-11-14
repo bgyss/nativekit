@@ -79,6 +79,8 @@ class Machine:
         self.core = core = c.CDLL(str(pathlib.Path(core_path).resolve()))
         self.errors = []
         self.inputs = {}
+        self.keep_picture = False       # keep the last frame's pixels in self.picture
+        self.picture = None
         self.video = hashlib.sha256()
         self.audio = hashlib.sha256()
         options = {
@@ -123,8 +125,11 @@ class Machine:
             if not data or pixel_format[0] != 1:
                 self.errors.append("missing or unsupported video frame")
                 return
-            for y in range(height):
-                self.video.update(c.string_at(data + y * pitch, width * 4))
+            rows = [c.string_at(data + y * pitch, width * 4) for y in range(height)]
+            for row in rows:
+                self.video.update(row)
+            if self.keep_picture:
+                self.picture = (width, height, b"".join(rows))
 
         @c.CFUNCTYPE(c.c_size_t, c.POINTER(c.c_int16), c.c_size_t)
         def audio_batch(data, frames):

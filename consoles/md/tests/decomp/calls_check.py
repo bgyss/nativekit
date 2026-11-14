@@ -63,7 +63,7 @@ def correct(temp, rom_path, capture, catalog):
             routine("outer")["compared"]["memory_bytes"] >= 2 * loops and
             routine("dispatch")["compared"]["calls"] == loops,
             "a compared count is missing: %r" % report["routines"])
-    for name in ("pad", "tone", "irqon", "dma", "count"):
+    for name in ("pad", "tone", "irqon", "dma", "count", "below"):
         require(routine(name)["verdict"] == "IDENTICAL" and routine(name)["calls"] == 1,
                 "%s is not IDENTICAL on its call: %r" % (name, routine(name)))
     handlers = [routine("handler%d" % index) for index in range(4)]

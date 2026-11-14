@@ -73,6 +73,8 @@ skip:   move.l  #$12345678,($FF0100).l
         bsr.w   pad
         moveq   #5,d5
         bsr.w   count
+        moveq   #2,d5
+        bsr.w   below
         bsr.w   tone
         bsr.w   dma
         bsr.w   irqon
@@ -198,13 +200,21 @@ dma:    lea     ($C00004).l,a5
         move.w  #$0080,(a5)
         rts
 
+        org     $7E0
+back:   rts
+below:  tst.w   d5
+        beq.s   back
+        moveq   #1,d6
+        rts
+
         org     $7FE
         dc.w    0
 """
 ROUTINES = {"sum": 0x400, "poke": 0x420, "dispatch": 0x440, "handler0": 0x480,
             "handler1": 0x48A, "handler2": 0x494, "handler3": 0x49E, "outer": 0x4C0,
             "send": 0x4E0, "spin": 0x510, "unused": 0x530, "relay": 0x550,
-            "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0, "count": 0x5D0}
+            "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0, "count": 0x5D0,
+            "below": 0x7E2}
 NOCODE = 0x560
 Z_FETCH = 0x20
 LOOPS = 6

@@ -49,7 +49,8 @@ NEEDED = {"bus accesses": 1 << 7, "interrupt events": 1 << 5}
 STATUS = {1: ("hardware", "access"), 2: ("hardware", "value"), 3: ("hardware", "past the record"),
           4: ("memory", "read the original did not make"), 5: ("memory", "write to ROM"),
           6: ("memory", "unmapped address"), 7: ("memory", "odd address"),
-          9: ("call", "no such call in the record")}
+          9: ("call", "no such call in the record"),
+          10: ("runaway", "far more bus accesses than the original made")}
 UNSUPPORTED = 8
 
 
@@ -384,6 +385,8 @@ class Checker:
         hardware_at.append(len(hardware))
         records = (Access * max(1, len(hardware)))(*hardware)
         library.nmd_check_hardware(cpu, records, len(hardware))
+        # a loop the original left when its interrupt changed memory would never end here
+        library.nmd_check_access_limit(4 * len(call.accesses) + 4096)
         cursor = [0]
 
         def stand_in(wanted_cpu, address):

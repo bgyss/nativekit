@@ -49,6 +49,7 @@ static nmd_check_result result;
 static jmp_buf stop;
 static int running;
 static nmd_check_fallback fallback;
+static uint32_t access_limit = 0xFFFFFFFFu;
 static nmd_check_call calls[MAX_CALLS];
 static uint32_t call_count;
 static uint32_t work_written[WORK_SIZE], zram_written[ZRAM_SIZE];   /* offsets, in first-write order */
@@ -174,6 +175,19 @@ void nmd_check_hardware(int cpu, const nmd_check_access *list, uint32_t count)
     hardware_next = 0;
 }
 
+void nmd_check_access_limit(uint32_t limit)
+{
+    access_limit = limit;
+}
+
+/* Every bus call counts; a C that loops on memory the original's interrupt
+ * would have changed stops here instead of running for ever. */
+static void count_access(void)
+{
+    if (++result.accesses > access_limit)
+        fail(NMD_CHECK_RUNAWAY, 0, 0, 0, 0);
+}
+
 void nmd_check_set_fallback(nmd_check_fallback handler)
 {
     fallback = handler;
@@ -265,7 +279,7 @@ static int m68k_memory(uint32_t address)
 
 uint8_t rd8(uint32_t addr)
 {
-    result.accesses++;
+    count_access();
     if (m68k_memory(addr))
         return m68k_byte(addr);
     return (uint8_t)hardware_access(addr & 0xFFFFFFu, 1, 0, 0);
@@ -273,7 +287,7 @@ uint8_t rd8(uint32_t addr)
 
 uint16_t rd16(uint32_t addr)
 {
-    result.accesses++;
+    count_access();
     if (addr & 1)
         fail(NMD_CHECK_ODD, addr, 2, 0, 0);
     if (m68k_memory(addr))
@@ -298,7 +312,7 @@ static void m68k_store(uint32_t address, uint8_t value)
 
 void wr8(uint32_t addr, uint8_t value)
 {
-    result.accesses++;
+    count_access();
     if (m68k_memory(addr))
         m68k_store(addr, value);
     else
@@ -307,7 +321,7 @@ void wr8(uint32_t addr, uint8_t value)
 
 void wr16(uint32_t addr, uint16_t value)
 {
-    result.accesses++;
+    count_access();
     if (addr & 1)
         fail(NMD_CHECK_ODD, addr, 2, value, 1);
     if (m68k_memory(addr)) {
@@ -378,7 +392,7 @@ void nmd_restart(uint32_t addr)
 
 uint8_t zrd(uint16_t addr)
 {
-    result.accesses++;
+    count_access();
     if (addr < ZRAM_SIZE)
         return ram_read(zram, zram_state, addr, addr);
     return (uint8_t)hardware_access(addr, 1, 0, 0);
@@ -386,7 +400,7 @@ uint8_t zrd(uint16_t addr)
 
 void zwr(uint16_t addr, uint8_t value)
 {
-    result.accesses++;
+    count_access();
     if (addr < ZRAM_SIZE) {
         store(NMD_CHECK_ZRAM, addr, value);
     } else {
