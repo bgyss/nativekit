@@ -49,6 +49,19 @@ without one. `consoles/md/tests/decomp/rebase_stall_check.py` fails ("frame
 count mismatch") on the core without it. Whether the pinned upstream's other
 front ends are affected was not checked.
 
+The fifth, `0005-live-substitution.patch`, lets the lockstep check
+([`lockstep.md`](../../consoles/md/docs/decomp/lockstep.md)) run C in place
+of a routine on the live machine. Before a registered 68000 instruction
+address runs, or when a registered Z80 opcode address has been fetched, a
+handler may make that CPU's bus accesses at given clocks and resume it
+elsewhere, with the RAM refresh counter, the next sync, interrupt and run
+target, and the run loop's slice end set to what the original's were at that
+clock. It also adds a comparison snapshot (both CPUs, work and Z80 RAM, VRAM,
+CRAM, VSRAM, VDP registers). With no handler registered the 59 synthetic
+reference cases (`test:md-rom`) and the trace, oracle-smoke and decomp checks
+pass. The core's SHA-256 changes, so captures made before it carry another
+core identity; the first title has not been captured again on it.
+
 `mise run test:md-oracle-smoke` exercises the exploratory runner with generated
 cartridges. After `mise run tools:md`, `--trace` requires the candidate trace
 ABI and writes `bus.trace`. The current patch advertises M68K and Z80 CPU

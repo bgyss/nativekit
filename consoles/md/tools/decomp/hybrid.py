@@ -24,8 +24,12 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[4]
 TOOLS = pathlib.Path(__file__).resolve().parent
 INCLUDES = (ROOT / "consoles/md/include", TOOLS / "include", TOOLS / "check")
-REPLAY = TOOLS / "check" / "replay.c"
-LIBRARY = "hybrid.dylib" if sys.platform == "darwin" else "hybrid.so"
+RUNTIMES = {"replay": TOOLS / "check" / "replay.c",     # one recorded call (check_calls.py)
+            "live": TOOLS / "check" / "live.c"}         # the reference core's machine (lockstep.py)
+REPLAY = RUNTIMES["replay"]
+SUFFIX = ".dylib" if sys.platform == "darwin" else ".so"
+LIBRARY = "hybrid" + SUFFIX
+LIVE_LIBRARY = "hybrid-live" + SUFFIX
 MANIFEST = "hybrid.json"
 
 
@@ -70,8 +74,8 @@ def tables(library):
     return found
 
 
-def build(sources, out, catalog=None, defines=()):
-    """Compile `sources` with the replay runtime; return the library path."""
+def build(sources, out, catalog=None, defines=(), runtime="replay"):
+    """Compile `sources` with the replay or the live runtime; return the library path."""
     out = pathlib.Path(out)
     out.mkdir(parents=True, exist_ok=True)
     compiler = os.environ.get("CC", "cc")
@@ -83,9 +87,9 @@ def build(sources, out, catalog=None, defines=()):
         # every routine entry is reported to the checker: -finstrument-functions
         _compile([compiler, *flags, "-finstrument-functions", "-c", "-o", str(target), str(source)])
         objects.append(target)
-    replay = out / "replay.o"
-    _compile([compiler, *flags, "-c", "-o", str(replay), str(REPLAY)])
-    library = out / LIBRARY
+    replay = out / (runtime + ".o")
+    _compile([compiler, *flags, "-c", "-o", str(replay), str(RUNTIMES[runtime])])
+    library = out / (LIBRARY if runtime == "replay" else LIVE_LIBRARY)
     _compile([compiler, "-shared", "-o", str(library), *map(str, objects), str(replay)])
     found = tables(ctypes.CDLL(str(library)))
     if catalog is not None:
@@ -98,12 +102,13 @@ def build(sources, out, catalog=None, defines=()):
         "schema": "nmd-hybrid", "version": 1, "library_sha256": _sha256(library),
         "sources": [{"name": pathlib.Path(source).name, "sha256": _sha256(source)}
                     for source in sources],
-        "replay_sha256": _sha256(REPLAY), "defines": sorted(defines),
+        "runtime": runtime, "replay_sha256": _sha256(RUNTIMES[runtime]),
+        "defines": sorted(defines),
         "catalog_checked": catalog is not None,
         "routines": [{"cpu": cpu, "address": address, "name": name}
                      for cpu, address, _, name in found],
     }
-    (out / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
+    (out / (MANIFEST if runtime == "replay" else "hybrid-live.json")).write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     return library
 
 
@@ -112,11 +117,12 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--catalog", help="the intake's catalog.json")
     parser.add_argument("--define", action="append", default=[])
+    parser.add_argument("--runtime", choices=sorted(RUNTIMES), default="replay")
     parser.add_argument("source", nargs="+")
     args = parser.parse_args()
     catalog = json.loads(pathlib.Path(args.catalog).read_text()) if args.catalog else None
     try:
-        library = build(args.source, args.out, catalog, args.define)
+        library = build(args.source, args.out, catalog, args.define, args.runtime)
     except HybridError as exc:
         sys.exit(str(exc))
     print("hybrid: %s, %d routines" % (library, len(tables(ctypes.CDLL(str(library))))))

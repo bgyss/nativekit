@@ -1,0 +1,474 @@
+diff --git a/cpu_dsl.py b/cpu_dsl.py
+--- a/cpu_dsl.py
++++ b/cpu_dsl.py
+@@ -2775,7 +2775,7 @@ class Program:
+ 					bodyPieces.append('\n\t\t\t}')
+ 					self.meta = {}
+ 					if self.prefix == 'm68k_':
+-						bodyPieces.append('\n\t\t\tm68k_decomp_begin_instruction(context);')
++						bodyPieces.append('\n\t\t\tif (m68k_decomp_begin_instruction(context, &target_cycle)) continue;')
+ 					self.subroutines[self.body].inline(self, [], bodyPieces, 'c', None)
+ 					if self.prefix == 'm68k_':
+ 						bodyPieces.append('\n\t\tif (m68k_decomp_complete_instruction(context)) { context->should_return = 1; return; }')
+@@ -2795,7 +2795,7 @@ class Program:
+ 					self.subroutines[self.interrupt].inline(self, [], bodyPieces, 'c', None)
+ 				self.meta = {}
+ 				if self.prefix == 'm68k_':
+-					bodyPieces.append('\n\t\tm68k_decomp_begin_instruction(context);')
++					bodyPieces.append('\n\t\tif (m68k_decomp_begin_instruction(context, &target_cycle)) continue;')
+ 				self.subroutines[self.body].inline(self, [], bodyPieces, 'c', None)
+ 				if self.prefix == 'm68k_':
+ 					bodyPieces.append('\n\t\tif (m68k_decomp_complete_instruction(context)) { context->should_return = 1; return; }')
+diff --git a/genesis.c b/genesis.c
+--- a/genesis.c
++++ b/genesis.c
+@@ -792,6 +792,32 @@ static uint32_t refresh_advance(genesis_context *gen, uint32_t elapsed)
+ 	return delay;
+ }
+ 
++/* The RAM refresh counter is machine state no event carries. The lockstep
++ * schedule (D05) takes it from the original at the clocks it imposes: as it
++ * stood when the current 68000 bus access began, or as it stands now. */
++static uint32_t decomp_refresh_mark_counter, decomp_refresh_mark_sync;
++
++void gen_decomp_refresh_mark(m68k_context *context)
++{
++	genesis_context *gen = context->system;
++	decomp_refresh_mark_counter = gen->refresh_counter;
++	decomp_refresh_mark_sync = gen->last_sync_cycle;
++}
++
++void nmd_decomp_refresh_state(uint32_t at_access_start, uint32_t *counter, uint64_t *last_sync)
++{
++	genesis_context *gen = (genesis_context *)current_system;
++	*counter = at_access_start ? decomp_refresh_mark_counter : gen->refresh_counter;
++	*last_sync = nmd_decomp_clock(at_access_start ? decomp_refresh_mark_sync : gen->last_sync_cycle);
++}
++
++void gen_decomp_refresh_impose(m68k_context *context, uint32_t counter, uint64_t last_sync)
++{
++	genesis_context *gen = context->system;
++	gen->refresh_counter = counter;
++	gen->last_sync_cycle = nmd_decomp_local_clock(last_sync);
++}
++
+ void gen_update_refresh(m68k_context *context)
+ {
+ 	genesis_context *gen = context->system;
+@@ -4031,3 +4057,80 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on,
+ #endif
+ 	return gen;
+ }
++
++/* The comparison snapshot for the lockstep check (D05): what both CPUs and
++ * the VDP hold that a game can observe, one region at a time. */
++size_t nmd_decomp_snapshot(uint32_t region, uint8_t *out, size_t capacity,
++                           char *name, size_t name_capacity)
++{
++	genesis_context *gen = (genesis_context *)current_system;
++	static const char *names[] = {"m68k", "z80", "work_ram", "z80_ram", "vram", "cram",
++	                              "vsram", "vdp_registers"};
++	uint8_t cpu[128];
++	const void *data = cpu;
++	size_t size = 0;
++
++	if (!gen || region >= sizeof names / sizeof names[0]) {
++		return 0;
++	}
++	memset(cpu, 0, sizeof cpu);
++	if (region == 0) {
++		m68k_context *m68k = gen->m68k;
++		uint64_t clock = nmd_decomp_clock(m68k->cycles);
++		uint32_t pc = m68k->pc - 2;
++		uint8_t flags[8] = {m68k->status, m68k->xflag != 0, m68k->nflag != 0, m68k->zflag != 0,
++		                    m68k->vflag != 0, m68k->cflag != 0, m68k->stopped != 0, 0};
++		memcpy(cpu, m68k->dregs, 32);
++		memcpy(cpu + 32, m68k->aregs, 32);
++		memcpy(cpu + 64, &m68k->other_sp, 4);
++		memcpy(cpu + 68, &pc, 4);
++		memcpy(cpu + 72, flags, 8);
++		memcpy(cpu + 80, &m68k->prefetch, 2);
++		memcpy(cpu + 84, &clock, 8);
++		size = 92;
++	} else if (region == 1) {
++		z80_context *z80 = gen->z80;
++		uint64_t clock = nmd_decomp_clock(z80->cycles);
++		uint8_t rest[12] = {
++			(uint8_t)((z80->last_flag_result & 0xA8) | (z80->zflag ? 0x40 : 0) |
++			          (z80->chflags & 8 ? 0x10 : 0) | (z80->pvflag ? 4 : 0) |
++			          (z80->nflag ? 2 : 0) | (z80->chflags & 0x80 ? 1 : 0)),
++			z80->i, z80->iff1 != 0, z80->iff2 != 0, z80->imode, z80->busreq != 0,
++			z80->busack != 0, z80->reset != 0, 0, 0, 0, 0};
++		memcpy(cpu, z80->main, 6);
++		cpu[6] = z80->main[7];
++		memcpy(cpu + 8, z80->alt, 8);
++		memcpy(cpu + 16, &z80->ix, 2);
++		memcpy(cpu + 18, &z80->iy, 2);
++		memcpy(cpu + 20, &z80->sp, 2);
++		memcpy(cpu + 22, &z80->pc, 2);
++		memcpy(cpu + 24, rest, 12);
++		memcpy(cpu + 36, &clock, 8);
++		size = 44;
++	} else if (region == 2) {
++		data = gen->work_ram;
++		size = RAM_WORDS * 2;
++	} else if (region == 3) {
++		data = gen->zram;
++		size = Z80_RAM_BYTES;
++	} else if (region == 4) {
++		data = gen->vdp->vdpmem;
++		size = VRAM_SIZE;
++	} else if (region == 5) {
++		data = gen->vdp->cram;
++		size = sizeof gen->vdp->cram;
++	} else if (region == 6) {
++		data = gen->vdp->vsram;
++		size = sizeof gen->vdp->vsram;
++	} else {
++		data = gen->vdp->regs;
++		size = sizeof gen->vdp->regs;
++	}
++	if (size > capacity || !name_capacity) {
++		return 0;
++	}
++	memcpy(out, data, size);
++	strncpy(name, names[region], name_capacity - 1);
++	name[name_capacity - 1] = 0;
++	return size;
++}
+diff --git a/m68k.cpu b/m68k.cpu
+--- a/m68k.cpu
++++ b/m68k.cpu
+@@ -18,7 +18,7 @@ declare
+ 	m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_handler);
+ 	void m68k_reset(m68k_context *context);
+ 	void m68k_print_regs(m68k_context *context);
+-	void m68k_decomp_begin_instruction(m68k_context *context);
++	int m68k_decomp_begin_instruction(m68k_context *context, uint32_t *slice_end);
+ 	int m68k_decomp_complete_instruction(m68k_context *context);
+ 	void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state);
+ 	void m68k_decomp_exception(m68k_context *context, uint32_t vector);
+diff --git a/m68k_util.c b/m68k_util.c
+--- a/m68k_util.c
++++ b/m68k_util.c
+@@ -10,10 +10,143 @@ void m68k_trace_mark_fetch(m68k_context *context)
+ 	context->trace_fetch = 1;
+ }
+ 
+-void m68k_decomp_begin_instruction(m68k_context *context)
++static m68k_context *live_context;
++static int live_resumed;
++static uint32_t live_slice_end;	/* the cycle the run loop's current slice ends at */
++
++/* genesis.c: the RAM refresh counter. A clock taken from the original's
++ * record already holds the delays the original was charged on the way. */
++void gen_decomp_refresh_impose(m68k_context *context, uint32_t counter, uint64_t last_sync);
++void gen_decomp_refresh_mark(m68k_context *context);
++
++void m68k_read_8(m68k_context *context);
++void m68k_read_16(m68k_context *context);
++void m68k_write_8(m68k_context *context);
++void m68k_write_16(m68k_context *context);
++
++/* Nonzero when C ran in place of the routine at this address and the CPU was
++ * resumed elsewhere: the run loop then looks at interrupts and the next
++ * instruction afresh. */
++int m68k_decomp_begin_instruction(m68k_context *context, uint32_t *slice_end)
+ {
++	uint32_t pc = (context->pc - 2) & context->opts->gen.address_mask;
++	int done;
++
++	live_context = context;
++	live_resumed = 0;
++	live_slice_end = *slice_end;
++	done = nmd_decomp_substitute_at(NMD_DECOMP_M68K, pc, nmd_decomp_clock(context->cycles));
++	live_context = NULL;
++	if (done) {
++		if (live_resumed) {
++			*slice_end = live_slice_end;
++			return 1;
++		}
++		nmd_decomp_fail();
++	}
+ 	context->decomp_instruction_pc = context->pc - 2;
+ 	context->decomp_instruction_opcode = context->prefetch;
++	return 0;
++}
++
++/* The end of the 68000's current run slice, as the loop itself holds it. */
++uint64_t nmd_decomp_m68k_slice_end(void)
++{
++	return nmd_decomp_clock(live_slice_end);
++}
++
++uint32_t nmd_decomp_m68k_live_access(uint32_t address, uint32_t width, uint32_t write,
++                                     uint32_t value, uint64_t master_clock,
++                                     uint32_t refresh_counter, uint64_t refresh_sync)
++{
++	m68k_context *context = live_context;
++	uint32_t saved;
++
++	if (!context || (width != 1 && width != 2)) {
++		nmd_decomp_fail();
++		return 0;
++	}
++	saved = context->cycles;
++	if (master_clock != NMD_DECOMP_UNTIMED) {
++		context->cycles = nmd_decomp_local_clock(master_clock);
++		gen_decomp_refresh_impose(context, refresh_counter, refresh_sync);
++	}
++	if (write) {
++		context->scratch2 = address;
++		context->scratch1 = value;
++		if (width == 1) {
++			m68k_write_8(context);
++		} else {
++			m68k_write_16(context);
++		}
++	} else {
++		context->scratch1 = address;
++		if (width == 1) {
++			m68k_read_8(context);
++		} else {
++			m68k_read_16(context);
++		}
++		value = context->scratch1;
++	}
++	if (master_clock == NMD_DECOMP_UNTIMED) {
++		context->cycles = saved;
++	}
++	return value;
++}
++
++int nmd_decomp_m68k_live_state(struct nmd_decomp_m68k_state *state)
++{
++	if (!live_context) {
++		return -1;
++	}
++	m68k_decomp_copy_state(live_context, state);
++	return 0;
++}
++
++int nmd_decomp_m68k_live_resume(const uint32_t *d, const uint32_t *a, uint32_t other_sp,
++                                uint32_t sr, uint32_t pc, uint64_t master_clock,
++                                uint32_t refresh_counter, uint64_t refresh_sync,
++                                int64_t sync_after, int64_t interrupt_after, int64_t target_after,
++                                int64_t slice_after)
++{
++	m68k_context *context = live_context;
++	uint32_t cycles;
++
++	if (!context) {
++		return -1;
++	}
++	memcpy(context->dregs, d, sizeof context->dregs);
++	memcpy(context->aregs, a, sizeof context->aregs);
++	context->other_sp = other_sp;
++	context->status = sr >> 8;
++	context->xflag = sr & 0x10 ? 128 : 0;
++	context->nflag = sr & 0x08 ? 128 : 0;
++	context->zflag = sr & 0x04 ? 1 : 0;
++	context->vflag = sr & 0x02 ? 128 : 0;
++	context->cflag = sr & 0x01 ? 128 : 0;
++	cycles = nmd_decomp_local_clock(master_clock);
++	/* the return's prefetch: its time is inside the call's recorded span */
++	context->scratch1 = pc;
++	m68k_trace_mark_fetch(context);
++	m68k_read_16(context);
++	context->prefetch = context->scratch1;
++	context->pc = pc + 2;
++	context->cycles = cycles;
++	if (context->cycles >= live_slice_end) {
++		/* the original's slice ended inside the call and the machine was
++		 * synchronised: do it now, then put the clock and the scheduler
++		 * where the original's stood */
++		context->sync_components(context, 0);
++		context->cycles = cycles;
++	}
++	gen_decomp_refresh_impose(context, refresh_counter, refresh_sync);
++	context->sync_cycle = (uint32_t)((int64_t)cycles + sync_after);
++	context->target_cycle = (uint32_t)((int64_t)cycles + target_after);
++	live_slice_end = (uint32_t)((int64_t)cycles + slice_after);
++	context->int_cycle = interrupt_after == INT64_MAX ? 0xFFFFFFFFU
++		: (uint32_t)((int64_t)cycles + interrupt_after);
++	live_resumed = 1;
++	return 0;
+ }
+ 
+ void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state)
+@@ -164,6 +297,7 @@ int m68k_decomp_complete_instruction(m68k_context *context)
+ void m68k_read_8(m68k_context *context)
+ {
+ 	uint32_t start_cycle = context->cycles;
++	gen_decomp_refresh_mark(context);
+ 	context->cycles += 4 * context->opts->gen.clock_divider;
+ #ifdef DEBUG_DISASM
+ 	uint32_t tmp = context->scratch1;
+@@ -188,6 +322,7 @@ uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
+ void m68k_read_16(m68k_context *context)
+ {
+ 	uint32_t start_cycle = context->cycles;
++	gen_decomp_refresh_mark(context);
+ 	context->cycles += 4 * context->opts->gen.clock_divider;
+ #ifdef DEBUG_DISASM
+ 	uint32_t tmp = context->scratch1;
+@@ -220,6 +355,7 @@ void m68k_read_16(m68k_context *context)
+ void m68k_write_8(m68k_context *context)
+ {
+ 	uint32_t start_cycle = context->cycles;
++	gen_decomp_refresh_mark(context);
+ 	context->cycles += 4 * context->opts->gen.clock_divider;
+ 	uint32_t address = context->scratch2 & context->opts->gen.address_mask;
+ 	uint32_t index = address >> 16;
+@@ -245,6 +381,7 @@ void m68k_rmw_writeback(m68k_context *context)
+ void m68k_write_16(m68k_context *context)
+ {
+ 	uint32_t start_cycle = context->cycles;
++	gen_decomp_refresh_mark(context);
+ 	context->cycles += 4 * context->opts->gen.clock_divider;
+ 	int32_t address = context->scratch2 & context->opts->gen.address_mask;
+ 	uint32_t index = address >> 16;
+diff --git a/z80.cpu b/z80.cpu
+--- a/z80.cpu
++++ b/z80.cpu
+@@ -30,6 +30,7 @@ declare
+ 	void z80_clock_divider_updated(z80_options *options);
+ 	void z80_decomp_note_fetch(z80_context *context, uint32_t address, uint8_t value);
+ 	uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode);
++	uint8_t z80_decomp_take_resumed(void);
+ 	void z80_decomp_copy_state(z80_context *context, struct nmd_decomp_z80_state *state);
+ 	void z80_decomp_interrupt(z80_context *context, uint32_t vector, uint32_t reason);
+ 	void z80_decomp_return(z80_context *context);
+diff --git a/z80_util.c b/z80_util.c
+--- a/z80_util.c
++++ b/z80_util.c
+@@ -178,6 +178,95 @@ static uint8_t z80_decomp_emit_instruction(z80_context *context, uint16_t next_p
+ 			nmd_decomp_clock(context->cycles));
+ }
+ 
++static z80_context *z80_live_context;
++static uint8_t z80_live_resumed;
++
++void z80_read_8(z80_context *context);
++void z80_write_8(z80_context *context);
++
++uint8_t z80_decomp_take_resumed(void)
++{
++	uint8_t resumed = z80_live_resumed;
++
++	z80_live_resumed = 0;
++	return resumed;
++}
++
++uint32_t nmd_decomp_z80_live_access(uint32_t address, uint32_t write, uint32_t value,
++                                    uint64_t master_clock)
++{
++	z80_context *context = z80_live_context;
++	uint32_t saved;
++
++	if (!context) {
++		nmd_decomp_fail();
++		return 0;
++	}
++	saved = context->cycles;
++	if (master_clock != NMD_DECOMP_UNTIMED) {
++		context->cycles = nmd_decomp_local_clock(master_clock);
++	}
++	if (write) {
++		context->scratch2 = address;
++		context->scratch1 = value;
++		z80_write_8(context);
++	} else {
++		context->scratch1 = address;
++		z80_read_8(context);
++		value = context->scratch1 & 0xFF;
++	}
++	if (master_clock == NMD_DECOMP_UNTIMED) {
++		context->cycles = saved;
++	}
++	return value;
++}
++
++int nmd_decomp_z80_live_state(struct nmd_decomp_z80_state *state)
++{
++	if (!z80_live_context) {
++		return -1;
++	}
++	z80_decomp_copy_state(z80_live_context, state);
++	return 0;
++}
++
++int nmd_decomp_z80_live_resume(const struct nmd_decomp_z80_state *state, uint32_t pc,
++                               uint64_t master_clock)
++{
++	z80_context *context = z80_live_context;
++	uint32_t fetch, cycles;
++
++	if (!context) {
++		return -1;
++	}
++	fetch = 4 * context->opts->gen.clock_divider;
++	cycles = nmd_decomp_local_clock(master_clock);
++	if (cycles < fetch) {
++		return -1;
++	}
++	memcpy(context->main, state->main, sizeof context->main);
++	memcpy(context->alt, state->alt, sizeof context->alt);
++	context->ix = state->ix;
++	context->iy = state->iy;
++	context->sp = state->sp;
++	context->i = state->i;
++	context->iff1 = state->iff1;
++	context->iff2 = state->iff2;
++	context->imode = state->imode;
++	context->zflag = state->zflag;
++	context->pvflag = state->pvflag;
++	context->nflag = state->nflag;
++	context->chflags = state->chflags;
++	context->last_flag_result = state->last_flag_result;
++	context->wz = state->wz;
++	/* the opcode at pc is fetched again by the run loop */
++	context->r = state->r - 1;
++	context->pc = pc;
++	context->cycles = cycles - fetch;
++	z80_live_resumed = 1;
++	return 0;
++}
++
+ uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode)
+ {
+ 	if (!context->decomp_pending_fetch) {
+@@ -190,6 +279,21 @@ uint8_t z80_decomp_dispatch(z80_context *context, uint8_t table, uint8_t opcode)
+ 				return 1;
+ 			}
+ 		}
++		z80_live_context = context;
++		z80_live_resumed = 0;
++		if (nmd_decomp_substitute_at(NMD_DECOMP_Z80, context->decomp_pending_pc,
++		                             nmd_decomp_clock(context->cycles))) {
++			z80_live_context = NULL;
++			if (!z80_live_resumed) {
++				nmd_decomp_fail();
++			}
++			/* C ran in place of the routine: leave the run; the next one
++			 * fetches at the address the CPU was resumed at */
++			context->decomp_pending_fetch = 0;
++			context->decomp_active = 0;
++			return 1;
++		}
++		z80_live_context = NULL;
+ 		context->decomp_instruction_pc = context->decomp_pending_pc;
+ 		context->decomp_fetch_len = 0;
+ 		context->decomp_active = 1;
+@@ -353,6 +457,11 @@ void z80_run(z80_context *context, uint32_t target_cycle)
+ 			target_cycle = context->cycles + 4 * context->opts->gen.clock_divider;
+ 		}
+ 		z80_execute(context, target_cycle);
++		/* a substitution leaves the run early: finish the slice */
++		while (z80_decomp_take_resumed() && context->cycles < target_cycle &&
++		       !nmd_decomp_should_stop_cpu(NMD_DECOMP_Z80, nmd_decomp_clock(context->cycles))) {
++			z80_execute(context, target_cycle);
++		}
+ 		if (context->busreq) {
+ 			context->busack = 1;
+ 		}

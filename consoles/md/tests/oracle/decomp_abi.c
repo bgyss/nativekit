@@ -1,6 +1,8 @@
 /* Shared candidate-only NMDH v1 callback state and event validation. */
 #include "decomp_abi.h"
 
+#include <string.h>
+
 #include <stddef.h>
 
 static nmd_decomp_callback receiver;
@@ -19,6 +21,9 @@ static uint64_t stop_value;
 static uint64_t stop_instruction_count;
 static int stop_metadata_set;
 static uint64_t master_clock_offset;
+static nmd_decomp_substitute substitute;
+static uint8_t m68k_entries[1u << 21];
+static uint8_t z80_entries[1u << 13];
 static uint64_t master_clock_epoch;
 static int test_rebase_requested;
 
@@ -100,6 +105,71 @@ void nmd_decomp_reset(void)
     master_clock_offset = 0;
     master_clock_epoch = 0;
     test_rebase_requested = 0;
+    substitute = NULL;
+    memset(m68k_entries, 0, sizeof m68k_entries);
+    memset(z80_entries, 0, sizeof z80_entries);
+}
+
+int nmd_decomp_set_substitute(nmd_decomp_substitute handler,
+                              const uint32_t *m68k_list, uint32_t m68k_count,
+                              const uint32_t *z80_list, uint32_t z80_count)
+{
+    uint32_t index;
+
+    memset(m68k_entries, 0, sizeof m68k_entries);
+    memset(z80_entries, 0, sizeof z80_entries);
+    substitute = NULL;
+    if (!handler) {
+        return 0;
+    }
+    for (index = 0; index < m68k_count; index++) {
+        if (m68k_list[index] > 0xFFFFFFu) {
+            return -1;
+        }
+        m68k_entries[m68k_list[index] >> 3] |= (uint8_t)(1u << (m68k_list[index] & 7));
+    }
+    for (index = 0; index < z80_count; index++) {
+        if (z80_list[index] > 0xFFFFu) {
+            return -1;
+        }
+        z80_entries[z80_list[index] >> 3] |= (uint8_t)(1u << (z80_list[index] & 7));
+    }
+    substitute = handler;
+    return 0;
+}
+
+int nmd_decomp_substitute_at(uint32_t cpu, uint32_t pc, uint64_t master_clock)
+{
+    if (!substitute) {
+        return 0;
+    }
+    if (cpu == NMD_DECOMP_M68K) {
+        pc &= 0xFFFFFFu;
+        if (!(m68k_entries[pc >> 3] & (1u << (pc & 7)))) {
+            return 0;
+        }
+    } else {
+        pc &= 0xFFFFu;
+        if (!(z80_entries[pc >> 3] & (1u << (pc & 7)))) {
+            return 0;
+        }
+    }
+    return substitute(cpu, pc, master_clock);
+}
+
+uint32_t nmd_decomp_local_clock(uint64_t master_clock)
+{
+    if (master_clock < master_clock_offset ||
+            master_clock - master_clock_offset > UINT32_MAX) {
+        failed = 1;
+        return 0;
+    }
+    return (uint32_t)(master_clock - master_clock_offset);
+}
+
+void nmd_decomp_fail(void)
+{
+    failed = 1;
 }
 
 int nmd_decomp_error(void)

@@ -41,12 +41,17 @@ static void sum(void)
 static void poke(void)
 {
     nmd_set16(&D[0], nmd_tst16((uint16_t)(D[0] | 0x8F00)));     /* or.w #$8F00,d0 */
+#ifdef PLANT_ORDER
+    nmd_set16(&D[1], nmd_tst16(rd16(0xC00004)));    /* the status before the register */
+    wr16(0xC00004, nmd_tst16((uint16_t)D[0]));
+#else
 #ifdef PLANT_STORE
     wr16(0xC00004, (uint16_t)(D[0] ^ 1));
 #else
     wr16(0xC00004, nmd_tst16((uint16_t)D[0]));
 #endif
     nmd_set16(&D[1], nmd_tst16(rd16(0xC00004)));
+#endif
     nmd_set16(&D[1], nmd_tst16((uint16_t)(D[1] & 0x0200)));
     nmd_rts();
 }
@@ -133,6 +138,58 @@ static void unused(void)
     nmd_rts();
 }
 
+/* $580 pad: make TH an output, raise it, store what pad 1 answers at $FF0070. */
+static void pad(void)
+{
+    wr8(0xA10009, nmd_tst8(0x40));
+    wr8(0xA10003, nmd_tst8(0x40));
+    nmd_set8(&D[0], nmd_tst8(rd8(0xA10003)));
+    wr8(0xFF0070, nmd_tst8((uint8_t)D[0]));
+    nmd_rts();
+}
+
+/* $5A0 tone: PSG channel 0 at a fixed pitch, full volume. */
+static void tone(void)
+{
+    wr8(0xC00011, nmd_tst8(0x8E));
+    wr8(0xC00011, nmd_tst8(0x0F));
+#ifdef PLANT_SAMPLE
+    wr8(0xC00011, nmd_tst8(0x9F));      /* silent */
+#else
+    wr8(0xC00011, nmd_tst8(0x90));
+#endif
+    nmd_rts();
+}
+
+/* $5C0 irqon: enable the vertical interrupt in the VDP and in SR. */
+static void irqon(void)
+{
+    wr16(0xC00004, nmd_tst16(0x8164));
+#ifdef PLANT_IRQ
+    nmd_set_sr(0x2700);                 /* the mask stays up */
+#else
+    nmd_set_sr(0x2000);
+#endif
+    nmd_rts();
+}
+
+/* $5E0 dma: copy eight words from $FF0100 to VRAM $0000. */
+static void dma(void)
+{
+    static const uint16_t words[9] = {0x8114, 0x8F02,
+#ifdef PLANT_DMA
+                                      0x9304,       /* half the length */
+#else
+                                      0x9308,
+#endif
+                                      0x9400, 0x9580, 0x9680, 0x977F, 0x4000, 0x0080};
+
+    A[5] = 0xC00004;
+    for (int index = 0; index < 9; index++)
+        wr16(A[5], nmd_tst16(words[index]));
+    nmd_rts();
+}
+
 /* $550 relay: calls a routine that has no C here (the record stands in). */
 #ifdef NMD_HYBRID
 static void relay(void)
@@ -170,6 +227,10 @@ const nmd_routine nmd_game_routines[] = {
     {0x4E0, send, "send"},
     {0x510, spin, "spin"},
     {0x530, unused, "unused"},
+    {0x580, pad, "pad"},
+    {0x5A0, tone, "tone"},
+    {0x5C0, irqon, "irqon"},
+    {0x5E0, dma, "dma"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
 #endif

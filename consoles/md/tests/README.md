@@ -55,8 +55,12 @@ windows equal to the full capture's records for those frames.
 `decomp/ops_check.py` holds `nmd_decomp.h`'s flag helpers against 17,216
 instructions the reference core executed. `decomp/calls_check.py` holds the
 per-call checker ([`decomp/check-calls.md`](../docs/decomp/check-calls.md)):
-authored C replayed over 2,680 recorded calls on both CPUs, six planted
+authored C replayed over 2,686 recorded calls on both CPUs, ten planted
 errors, and the calls that must never be IDENTICAL.
+`decomp/lockstep_check.py` holds the lockstep gate
+([`decomp/lockstep.md`](../docs/decomp/lockstep.md)): every authored routine
+substituted at once on the live machine for 4 frames, six planted defects,
+and an overrun that leaves no worker.
 `decomp/bank_stall_check.py` captures an authored cartridge whose Z80 reads
 its bank window while the 68000 repeats short VDP DMA stalls; it was observed
 failing ("core reported an NMDT trace error") on the core without patch 0003.

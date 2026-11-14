@@ -2,6 +2,7 @@
 #ifndef NMD_DECOMP_ABI_H
 #define NMD_DECOMP_ABI_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define NMD_DECOMP_ABI_VERSION 1u
@@ -267,5 +268,56 @@ void nmd_decomp_get_libretro_audio_checkpoint_state(
     struct nmd_decomp_libretro_audio_checkpoint_state *state);
 int nmd_decomp_set_libretro_audio_checkpoint_state(
     const struct nmd_decomp_libretro_audio_checkpoint_state *state);
+
+/*
+ * Live substitution (D05). A handler is called before the instruction at a
+ * registered entry address runs (68000), or when its first opcode byte has
+ * been fetched (Z80). It may run C in place of the routine: the live access
+ * calls below make that CPU's bus accesses on the real machine, a timed one
+ * starting at the given master clock, an untimed one leaving the clock
+ * alone. It then resumes the CPU at another address and clock and returns
+ * nonzero; returning zero without resuming lets the original run. The live
+ * calls are valid only inside the handler.
+ */
+#define NMD_DECOMP_UNTIMED UINT64_MAX
+typedef int (*nmd_decomp_substitute)(uint32_t cpu, uint32_t pc, uint64_t master_clock);
+int nmd_decomp_set_substitute(nmd_decomp_substitute handler,
+                              const uint32_t *m68k_entries, uint32_t m68k_count,
+                              const uint32_t *z80_entries, uint32_t z80_count);
+int nmd_decomp_substitute_at(uint32_t cpu, uint32_t pc, uint64_t master_clock);
+uint32_t nmd_decomp_local_clock(uint64_t master_clock);
+void nmd_decomp_fail(void);
+/* The RAM refresh counter and the clock it was last brought up to are
+ * machine state that delays the 68000. nmd_decomp_refresh_state reads them
+ * as they stand, or as they stood when the current 68000 bus access began.
+ * A timed access and a resume set them to what the original's were at that
+ * same clock, so the machine charges the delays the original was charged. */
+void nmd_decomp_refresh_state(uint32_t at_access_start, uint32_t *counter, uint64_t *last_sync);
+uint32_t nmd_decomp_m68k_live_access(uint32_t address, uint32_t width, uint32_t write,
+                                     uint32_t value, uint64_t master_clock,
+                                     uint32_t refresh_counter, uint64_t refresh_sync);
+int nmd_decomp_m68k_live_state(struct nmd_decomp_m68k_state *state);
+int nmd_decomp_m68k_live_resume(const uint32_t *d, const uint32_t *a, uint32_t other_sp,
+                                uint32_t sr, uint32_t pc, uint64_t master_clock,
+                                uint32_t refresh_counter, uint64_t refresh_sync,
+                                int64_t sync_after, int64_t interrupt_after, int64_t target_after,
+                                int64_t slice_after);
+/* sync_after, interrupt_after, target_after and slice_after are the
+ * original's next machine sync, next interrupt (INT64_MAX: none due), run
+ * target and the end of the run loop's current slice, in master clocks
+ * after master_clock. The machine is synchronised first if a slice ended
+ * inside the call, then these are put in place. */
+uint64_t nmd_decomp_m68k_slice_end(void);   /* the run loop's current slice end */
+uint32_t nmd_decomp_z80_live_access(uint32_t address, uint32_t write, uint32_t value,
+                                    uint64_t master_clock);
+int nmd_decomp_z80_live_state(struct nmd_decomp_z80_state *state);
+/* `state` gives the registers, raw flags, R and WZ; `master_clock` is the
+ * clock after the opcode at `pc` has been fetched, as an instruction event
+ * reports it. */
+int nmd_decomp_z80_live_resume(const struct nmd_decomp_z80_state *state, uint32_t pc,
+                               uint64_t master_clock);
+/* The comparison snapshot: region 0.. as bytes with its name; 0 past the last. */
+size_t nmd_decomp_snapshot(uint32_t region, uint8_t *out, size_t capacity,
+                           char *name, size_t name_capacity);
 
 #endif

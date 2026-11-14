@@ -4,7 +4,8 @@ The 68000 uploads a Z80 program, then six times: sums words, writes a VDP
 register and reads the status, calls one of four handlers through a pointer
 table, runs a routine that calls another twice, sends a byte to the Z80
 through its RAM, and calls a routine that calls one with no C. It then
-enables the vertical interrupt and runs a routine long enough to be
+reads the pad, sets a PSG tone, copies RAM to VRAM by DMA, enables the
+vertical interrupt in a routine and runs a routine long enough to be
 interrupted. The Z80 loops calling a routine that adds the byte the 68000
 sent to a total, writes the YM address port and reads the status. One
 routine with C is never called. Nothing here comes from a game.
@@ -35,7 +36,7 @@ M68K = """\
 start:  move.w  #0,($A11200).l
         move.w  #$0100,($A11100).l
         move.w  #$0100,($A11200).l
-        lea     ($600).w,a0
+        lea     ($800).w,a0
         lea     ($A00000).l,a1
         moveq   #{z_last},d1
 copy:   move.b  (a0)+,(a1)+
@@ -67,8 +68,12 @@ main:   lea     (words,pc),a0
         cmp.w   #7,d6
         bne.s   skip
         bsr.w   unused
-skip:   move.w  #$8164,($C00004).l
-        move.w  #$2000,sr
+skip:   move.l  #$12345678,($FF0100).l
+        move.l  #$9ABCDEF0,($FF0104).l
+        bsr.w   pad
+        bsr.w   tone
+        bsr.w   dma
+        bsr.w   irqon
         bsr.w   spin
         move.w  #$2700,sr
 forever:
@@ -155,26 +160,59 @@ nocode: move.w  #$5555,($FF0060).l
         moveq   #7,d4
         rts
 
-        org     $5FE
+        org     $580
+pad:    move.b  #$40,($A10009).l
+        move.b  #$40,($A10003).l
+        move.b  ($A10003).l,d0
+        move.b  d0,($FF0070).l
+        rts
+
+        org     $5A0
+tone:   move.b  #$8E,($C00011).l
+        move.b  #$0F,($C00011).l
+        move.b  #$90,($C00011).l
+        rts
+
+        org     $5C0
+irqon:  move.w  #$8164,($C00004).l
+        move.w  #$2000,sr
+        rts
+
+        org     $5E0
+dma:    lea     ($C00004).l,a5
+        move.w  #$8114,(a5)
+        move.w  #$8F02,(a5)
+        move.w  #$9308,(a5)
+        move.w  #$9400,(a5)
+        move.w  #$9580,(a5)
+        move.w  #$9680,(a5)
+        move.w  #$977F,(a5)
+        move.w  #$4000,(a5)
+        move.w  #$0080,(a5)
+        rts
+
+        org     $7FE
         dc.w    0
 """
 ROUTINES = {"sum": 0x400, "poke": 0x420, "dispatch": 0x440, "handler0": 0x480,
             "handler1": 0x48A, "handler2": 0x494, "handler3": 0x49E, "outer": 0x4C0,
-            "send": 0x4E0, "spin": 0x510, "unused": 0x530, "relay": 0x550}
+            "send": 0x4E0, "spin": 0x510, "unused": 0x530, "relay": 0x550,
+            "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0}
 NOCODE = 0x560
 Z_FETCH = 0x20
 LOOPS = 6
 SOURCE = pathlib.Path(__file__).resolve().parent / "calls" / "routines.c"
 
 
-def build(directory, capabilities=None):
-    """Write the ROM and scenario; return (rom path, scenario path)."""
+def build(directory, capabilities=None, pressed=("B",)):
+    """Write the ROM and scenario; return (rom path, scenario path). `pressed`
+    is held on pad 1 for the first four frames."""
     directory = pathlib.Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     program = census_fixture._assemble("z80", "vasmz80_oldstyle", Z80, directory)
     code = census_fixture._assemble("m68k", "vasmm68k_mot", M68K.format(z_last=len(program) - 1),
                                     directory, ("-m68000", "-no-opt"))
-    if len(code) != 0x400 or len(program) > 0x100:
+    if len(code) != 0x600 or len(program) > 0x100:
         raise RuntimeError("calls fixture: 68000 image is %d bytes, Z80 %d" % (len(code), len(program)))
     rom = bytearray(0x8000)
     rom[0:4] = (0x00FFFF00).to_bytes(4, "big")
@@ -186,12 +224,13 @@ def build(directory, capabilities=None):
     rom[0x120:0x150] = b"NATIVEKIT CALL CONTROL".ljust(48, b" ")
     rom[0x150:0x180] = b"NATIVEKIT CALL CONTROL".ljust(48, b" ")
     rom[0x1F0:0x200] = b"JUE             "
-    rom[0x200:0x600] = code
-    rom[0x600:0x600 + len(program)] = program
+    rom[0x200:0x800] = code
+    rom[0x800:0x800 + len(program)] = program
     rom_path = directory / "call-control.bin"
     rom_path.write_bytes(rom)
     scenario = {
-        "version": 1, "region": "U", "model": "md1va3", "pad1": "3", "pad2": "3", "input": {},
+        "version": 1, "region": "U", "model": "md1va3", "pad1": "3", "pad2": "3",
+        "input": {str(frame): {"1": list(pressed)} for frame in range(1, 5)} if pressed else {},
         "required_capabilities": capabilities or [
             "m68k_instruction", "m68k_state", "z80_instruction", "z80_state", "flow_edge",
             "reset_exception_interrupt", "fetch_provenance", "master_clock", "bus_intervals",

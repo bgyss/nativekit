@@ -46,6 +46,8 @@ CHECKS = (
      "consoles/md/tests/decomp/ops_check.py"),
     ("C routines against recorded calls on both CPUs, and planted errors",
      "consoles/md/tests/decomp/calls_check.py"),
+    ("all C routines substituted at once on the live machine, frame by frame",
+     "consoles/md/tests/decomp/lockstep_check.py"),
 )
 
 

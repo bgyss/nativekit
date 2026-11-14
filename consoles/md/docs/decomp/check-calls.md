@@ -116,16 +116,17 @@ whose capabilities lack bus accesses or interrupt events.
 `calls_check.py`, on an authored cartridge captured on the pinned reference
 core (4 frames) with authored C:
 
-- 2,680 calls replayed, 2,620 of them the Z80 routine. Nine 68000 routines
-  and the Z80 routine are IDENTICAL, among them a routine with hardware
-  accesses, a computed call through a pointer table, a routine that calls
-  another twice, and the pair that passes a byte from the 68000 to the Z80
-  through Z80 RAM.
-- Six planted errors in the C are each DIVERGENT for their reason: a sum
+- 2,686 calls replayed, 2,622 of them the Z80 routine. Thirteen 68000
+  routines and the Z80 routine are IDENTICAL, among them routines with
+  hardware accesses (VDP, pad, PSG, a DMA set-up, an interrupt enable), a
+  computed call through a pointer table, a routine that calls another twice,
+  and the pair that passes a byte from the 68000 to the Z80 through Z80 RAM.
+- Ten planted errors in the C are each DIVERGENT for their reason: a sum
   without its flags (`sr`), a load from the wrong address (`d0`), a hardware
   write of another value, another handler called (call target), a return
   that does not read its address (`pc`), a store to the wrong address
-  (missing write).
+  (missing write), two hardware accesses swapped, an interrupt mask left up
+  (`sr`), half a DMA length and a silent PSG volume (hardware values).
 - A call the vertical interrupt overlapped, a routine that needs the
   original for a callee, and a routine never called are UNVERIFIED,
   UNVERIFIED and UNCOVERED.

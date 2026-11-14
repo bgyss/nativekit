@@ -63,6 +63,9 @@ def correct(temp, rom_path, capture, catalog):
             routine("outer")["compared"]["memory_bytes"] >= 2 * loops and
             routine("dispatch")["compared"]["calls"] == loops,
             "a compared count is missing: %r" % report["routines"])
+    for name in ("pad", "tone", "irqon", "dma"):
+        require(routine(name)["verdict"] == "IDENTICAL" and routine(name)["calls"] == 1,
+                "%s is not IDENTICAL on its call: %r" % (name, routine(name)))
     handlers = [routine("handler%d" % index) for index in range(4)]
     require([row["calls"] for row in handlers] == [2, 2, 1, 1] and
             all(row["verdict"] == "IDENTICAL" for row in handlers),
@@ -94,6 +97,10 @@ def planted(temp, rom_path, capture):
         ("PLANT_TARGET", "dispatch", "call", "target"),
         ("PLANT_RETURN", "outer", "register", "pc"),
         ("PLANT_MEMORY", "outer", "memory", "missing"),
+        ("PLANT_ORDER", "poke", "hardware", "access"),
+        ("PLANT_IRQ", "irqon", "register", "sr"),
+        ("PLANT_DMA", "dma", "hardware", "value"),
+        ("PLANT_SAMPLE", "tone", "hardware", "value"),
     )
     for define, name, kind, detail in cases:
         library = hybrid.build([calls_fixture.SOURCE], temp / ("hybrid-" + define),

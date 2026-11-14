@@ -140,10 +140,11 @@ def _is_return(cpu, opcode, fetched):
 class Frame:
     """One open call of the original."""
     __slots__ = ("cpu", "address", "entry_sp", "entry", "start", "children", "tree",
-                 "reasons", "low_sp", "sequence")
+                 "reasons", "low_sp", "sequence", "entry_clock", "frame")
 
-    def __init__(self, cpu, address, entry, start, sequence):
+    def __init__(self, cpu, address, entry, start, sequence, entry_clock=0, frame=0):
         self.cpu, self.address, self.entry, self.start = cpu, address, entry, start
+        self.entry_clock, self.frame = entry_clock, frame
         self.entry_sp = self.low_sp = stack_pointer(cpu, entry)
         self.children = []      # direct children: (address, start, end, exit registers)
         self.tree = []          # every descendant in call order: (address, descendants)
@@ -154,9 +155,13 @@ class Frame:
 class Call:
     """A closed call of a routine that has C."""
 
-    def __init__(self, frame, accesses, exit_state, return_pc):
+    def __init__(self, frame, accesses, exit_state, return_pc, exit_clock=0, exit_frame=0):
         self.cpu, self.address, self.entry = frame.cpu, frame.address, frame.entry
-        self.accesses = accesses                    # (address, width, value, write)
+        self.accesses = accesses    # (address, width, value, write, start clock, extra)
+        self.entry_clock, self.exit_clock = frame.entry_clock, exit_clock
+        self.exit_state = exit_state
+        if exit_frame != frame.frame:
+            frame.reasons.add("spans_frames")
         self.children = [(address, start - frame.start, end - frame.start, registers)
                          for address, start, end, registers in frame.children]
         self.tree = frame.tree
@@ -169,18 +174,34 @@ class Call:
 
 def calls(stream_path, routines):
     """Yield every closed call of the `(cpu, address)` in `routines`."""
+    return calls_of(nmdh_trace.read_nmdh(stream_path), routines)
+
+
+def calls_of(events, routines, frame_number=lambda: 0):
+    """The same over any iterable of event dicts; `frame_number()` is the
+    frame the machine is in as each event is read."""
+    feed = segmenter(routines, frame_number)
+    for event in events:
+        yield from feed(event)
+
+
+def segmenter(routines, frame_number=lambda: 0):
+    """A function that takes one event at a time and returns the calls it closed."""
     state = {M68K: None, Z80: None}
+    clock = {M68K: 0, Z80: 0}
     entered_by_call = {M68K: False, Z80: False}
     accesses = {M68K: [], Z80: []}
     mark = {M68K: 0, Z80: 0}            # accesses[cpu][mark:] belong to the instruction under way
     stack = {M68K: [], Z80: []}
     handlers = {M68K: [], Z80: []}      # stack depth at each open interrupt or exception
-    for event in nmdh_trace.read_nmdh(stream_path):
+    def feed(event):
+        closed = []
         cpu, kind, payload = event["cpu"], event["kind"], event["payload"]
         if kind == 3:
             if payload["provenance"] != FETCH:
                 write = payload["operation"] == 2
-                accesses[cpu].append((payload["address"], payload["width"], payload["value"], write))
+                accesses[cpu].append((payload["address"], payload["width"], payload["value"],
+                                      write, payload["start_clock"], payload.get("extra")))
                 if cpu == M68K and write and 0xA00000 <= payload["address"] < 0xA10000:
                     for frame in stack[Z80]:
                         frame.reasons.add("foreign_write")
@@ -199,7 +220,8 @@ def calls(stream_path, routines):
             before, after = state[cpu], payload["state"]
             frames = stack[cpu]
             if before is not None and (entered_by_call[cpu] or (cpu, event["pc"]) in routines):
-                frames.append(Frame(cpu, event["pc"], before, mark[cpu], event["sequence"]))
+                frames.append(Frame(cpu, event["pc"], before, mark[cpu], event["sequence"],
+                                    clock[cpu], frame_number()))
             mark[cpu] = len(accesses[cpu])
             after_sp = stack_pointer(cpu, after)
             for frame in frames:
@@ -226,8 +248,9 @@ def calls(stream_path, routines):
                         if inner is not None:
                             frame.children.append((inner.address, inner.start, end, registers))
                         if (cpu, frame.address) in routines:
-                            yield Call(frame, accesses[cpu][frame.start:end], after,
-                                       event["next_pc"])
+                            closed.append(Call(frame, accesses[cpu][frame.start:end], after,
+                                               event["next_pc"], event["master_clock"],
+                                               frame_number()))
                         inner = frame
                     if frames:
                         parent = frames[-1]
@@ -244,6 +267,10 @@ def calls(stream_path, routines):
                 after_sp == (stack_pointer(cpu, before) - LINK[cpu]) &
                 (0xFFFFFFFF if cpu == M68K else 0xFFFF))
             state[cpu] = after
+            clock[cpu] = event["master_clock"]
+        return closed
+
+    return feed
 
 
 # ---- replaying one call through the C ----
@@ -311,7 +338,7 @@ class Checker:
         touched, final, hardware = set(), {}, []
         hardware_at = []                      # hardware entries before each access
         ram_writes = []                       # (access index, offset, byte)
-        for index, (address, width, value, write) in enumerate(call.accesses):
+        for index, (address, width, value, write, *_) in enumerate(call.accesses):
             hardware_at.append(len(hardware))
             offset = self._ram(cpu, address)
             if offset is None:
