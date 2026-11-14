@@ -295,7 +295,11 @@ void nmd_decomp_fail(void);
 void nmd_decomp_refresh_state(uint32_t at_access_start, uint32_t *counter, uint64_t *last_sync);
 uint32_t nmd_decomp_m68k_live_access(uint32_t address, uint32_t width, uint32_t write,
                                      uint32_t value, uint64_t master_clock,
-                                     uint32_t refresh_counter, uint64_t refresh_sync);
+                                     uint32_t refresh_counter, uint64_t refresh_sync,
+                                     uint32_t prefetch);
+/* The 68000's prefetch register now; a timed live access sets it to the
+ * original's, which VDP and I/O reads return in their open-bus bits. */
+uint32_t nmd_decomp_m68k_prefetch(void);
 int nmd_decomp_m68k_live_state(struct nmd_decomp_m68k_state *state);
 int nmd_decomp_m68k_live_resume(const uint32_t *d, const uint32_t *a, uint32_t other_sp,
                                 uint32_t sr, uint32_t pc, uint64_t master_clock,

@@ -66,7 +66,8 @@ class SyncPoint(c.Structure):
 
 class Slot(c.Structure):
     _fields_ = [("clock", c.c_uint64), ("refresh_sync", c.c_uint64), ("address", c.c_uint32),
-                ("refresh_counter", c.c_uint32), ("width", c.c_uint8), ("write", c.c_uint8)]
+                ("refresh_counter", c.c_uint32), ("prefetch", c.c_uint32), ("width", c.c_uint8),
+                ("write", c.c_uint8)]
 
 
 class LiveResult(c.Structure):
@@ -262,7 +263,7 @@ def _reference(args, scenario, routines, rom_size):
         # the machine's refresh counter rides along with the 68000's events: as it stood
         # when a bus access began, and as it stands after an instruction
         if event["cpu"] == M68K and event["kind"] == 3:
-            event["payload"]["extra"] = refresh(1)
+            event["payload"]["extra"] = refresh(1) + (core[0].nmd_decomp_m68k_prefetch(),)
         elif event["cpu"] == M68K and event["kind"] == 1:
             event["payload"]["state"]["refresh"] = refresh(0)
             count = core[0].nmd_decomp_m68k_loop_syncs()
@@ -290,6 +291,7 @@ def _reference(args, scenario, routines, rom_size):
 
     machine = Machine(args.core, args.rom, scenario, args.out, on_event)
     core[0] = machine.core
+    machine.core.nmd_decomp_m68k_prefetch.restype = c.c_uint32
     machine.core.nmd_decomp_m68k_slice_end.restype = c.c_uint64
     machine.core.nmd_decomp_m68k_loop_syncs.restype = c.c_uint64
     machine.core.nmd_decomp_m68k_loop_sync_clock.restype = c.c_uint64
@@ -333,8 +335,9 @@ def _reference(args, scenario, routines, rom_size):
             while position < len(arrivals) and arrivals[position] <= row["exit_clock"]:
                 loops[key].add(arrivals[position])
                 position += 1
-            row["slots"] = [(start, (extra or (0, 0))[1], address, (extra or (0, 0))[0], width,
-                             write) for start, address, width, write, extra in row.pop("hardware")]
+            row["slots"] = [(start, (extra or (0, 0, 0))[1], address, (extra or (0, 0, 0))[0],
+                             (extra or (0, 0, 0))[2], width, write)
+                            for start, address, width, write, extra in row.pop("hardware")]
         for row in rows:                        # syncs strictly inside the call (68000)
             last = row.pop("exit_sequence")
             low = bisect.bisect_right(sync_sequences, row["sequence"])
@@ -447,7 +450,7 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         if result.status or result.slots_used != len(record["slots"]):
             what = LIVE_STATUS.get(result.status, "a hardware access the original made is missing")
             expected = record["slots"][result.slot] if result.slot < len(record["slots"]) else None
-            expected = expected and (expected[0], expected[2], expected[4], expected[5])
+            expected = expected and (expected[0], expected[2], expected[5], expected[6])
             diverge(kind="hardware", what=what, cpu=check_calls.CPU_NAMES[cpu], address=pc,
                     name=name, call=index + 1, record_position=result.slot,
                     access={"address": result.address, "width": result.width,

@@ -176,7 +176,7 @@ diff --git a/m68k.cpu b/m68k.cpu
 diff --git a/m68k_util.c b/m68k_util.c
 --- a/m68k_util.c
 +++ b/m68k_util.c
-@@ -10,10 +10,161 @@ void m68k_trace_mark_fetch(m68k_context *context)
+@@ -10,10 +10,172 @@ void m68k_trace_mark_fetch(m68k_context *context)
  	context->trace_fetch = 1;
  }
  
@@ -199,12 +199,21 @@ diff --git a/m68k_util.c b/m68k_util.c
 +/* Nonzero when C ran in place of the routine at this address and the CPU was
 + * resumed elsewhere: the run loop then looks at interrupts and the next
 + * instruction afresh. */
-+int m68k_decomp_begin_instruction(m68k_context *context, uint32_t *slice_end)
++static m68k_context *decomp_m68k;
++
++/* The 68000's prefetch register: the open-bus value of a VDP or I/O read. */
++uint32_t nmd_decomp_m68k_prefetch(void)
  {
++	return decomp_m68k ? decomp_m68k->prefetch : 0;
++}
++
++int m68k_decomp_begin_instruction(m68k_context *context, uint32_t *slice_end)
++{
 +	uint32_t pc = (context->pc - 2) & context->opts->gen.address_mask;
 +	int done;
 +
 +	live_context = context;
++	decomp_m68k = context;
 +	live_resumed = 0;
 +	live_slice_end = *slice_end;
 +	done = nmd_decomp_substitute_at(NMD_DECOMP_M68K, pc, nmd_decomp_clock(context->cycles));
@@ -247,7 +256,8 @@ diff --git a/m68k_util.c b/m68k_util.c
 +
 +uint32_t nmd_decomp_m68k_live_access(uint32_t address, uint32_t width, uint32_t write,
 +                                     uint32_t value, uint64_t master_clock,
-+                                     uint32_t refresh_counter, uint64_t refresh_sync)
++                                     uint32_t refresh_counter, uint64_t refresh_sync,
++                                     uint32_t prefetch)
 +{
 +	m68k_context *context = live_context;
 +	uint32_t saved;
@@ -260,6 +270,7 @@ diff --git a/m68k_util.c b/m68k_util.c
 +	if (master_clock != NMD_DECOMP_UNTIMED) {
 +		context->cycles = nmd_decomp_local_clock(master_clock);
 +		gen_decomp_refresh_impose(context, refresh_counter, refresh_sync);
++		context->prefetch = (uint16_t)prefetch;  /* what an open-bus read returns */
 +	}
 +	if (write) {
 +		context->scratch2 = address;
@@ -339,7 +350,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  }
  
  void m68k_decomp_copy_state(m68k_context *context, struct nmd_decomp_m68k_state *state)
-@@ -164,6 +315,7 @@ int m68k_decomp_complete_instruction(m68k_context *context)
+@@ -164,6 +326,7 @@ int m68k_decomp_complete_instruction(m68k_context *context)
  void m68k_read_8(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -347,7 +358,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  #ifdef DEBUG_DISASM
  	uint32_t tmp = context->scratch1;
-@@ -188,6 +340,7 @@ uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
+@@ -188,6 +351,7 @@ uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
  void m68k_read_16(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -355,7 +366,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  #ifdef DEBUG_DISASM
  	uint32_t tmp = context->scratch1;
-@@ -220,6 +373,7 @@ void m68k_read_16(m68k_context *context)
+@@ -220,6 +384,7 @@ void m68k_read_16(m68k_context *context)
  void m68k_write_8(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -363,7 +374,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  	uint32_t address = context->scratch2 & context->opts->gen.address_mask;
  	uint32_t index = address >> 16;
-@@ -245,6 +399,7 @@ void m68k_rmw_writeback(m68k_context *context)
+@@ -245,6 +410,7 @@ void m68k_rmw_writeback(m68k_context *context)
  void m68k_write_16(m68k_context *context)
  {
  	uint32_t start_cycle = context->cycles;
@@ -371,7 +382,7 @@ diff --git a/m68k_util.c b/m68k_util.c
  	context->cycles += 4 * context->opts->gen.clock_divider;
  	int32_t address = context->scratch2 & context->opts->gen.address_mask;
  	uint32_t index = address >> 16;
-@@ -258,9 +413,40 @@ void m68k_write_16(m68k_context *context)
+@@ -258,9 +424,40 @@ void m68k_write_16(m68k_context *context)
  #endif
  }
  

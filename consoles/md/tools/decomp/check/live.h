@@ -19,6 +19,7 @@ typedef struct nmd_live_slot {
     uint64_t refresh_sync;
     uint32_t address;
     uint32_t refresh_counter;
+    uint32_t prefetch;      /* the 68000's prefetch register: open-bus bits */
     uint8_t width;
     uint8_t write;
 } nmd_live_slot;
@@ -36,7 +37,8 @@ typedef struct nmd_live_result {
 /* the reference core's nmd_decomp_m68k_live_access and nmd_decomp_z80_live_access */
 typedef uint32_t (*nmd_live_m68k_bus)(uint32_t address, uint32_t width, uint32_t write,
                                       uint32_t value, uint64_t master_clock,
-                                      uint32_t refresh_counter, uint64_t refresh_sync);
+                                      uint32_t refresh_counter, uint64_t refresh_sync,
+                                      uint32_t prefetch);
 typedef uint32_t (*nmd_live_z80_bus)(uint32_t address, uint32_t write, uint32_t value,
                                      uint64_t master_clock);
 

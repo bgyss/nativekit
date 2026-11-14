@@ -122,7 +122,7 @@ static uint32_t m68k_access(uint32_t address, uint32_t width, int write, uint32_
     if (width == 2 && (address & 1))
         fail(M68K, NMD_LIVE_ODD, address, width, write);
     if (m68k_memory(address))
-        return m68k_bus(address, width, (uint32_t)write, value, UNTIMED, 0, 0);
+        return m68k_bus(address, width, (uint32_t)write, value, UNTIMED, 0, 0, 0);
     else {
         const nmd_live_slot *slot = timed(M68K, address, width, write);
 
@@ -133,7 +133,7 @@ static uint32_t m68k_access(uint32_t address, uint32_t width, int write, uint32_
         }
 
         return m68k_bus(address, width, (uint32_t)write, value, slot->clock,
-                        slot->refresh_counter, slot->refresh_sync);
+                        slot->refresh_counter, slot->refresh_sync, slot->prefetch);
     }
 }
 

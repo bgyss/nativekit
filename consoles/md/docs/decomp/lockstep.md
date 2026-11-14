@@ -35,7 +35,9 @@ power-on with the scenario's input, each in its own worker process:
    - ROM and RAM accesses are made at once, without moving the clock.
    - A hardware access must be the original's next one (address, width,
      direction). It is made for real, starting at the clock the original's
-     began, with the refresh counter the original's had.
+     began, with the refresh counter the original's had and the 68000's
+     prefetch register set to the original's (VDP status and I/O reads return
+     it in their open-bus bits).
    - When the C returns, the CPU is resumed at the C's return address, at
      the clock the original returned, with the original's scheduling state.
 
@@ -137,7 +139,13 @@ All 301 routines of the first title with C (23 hand-written, 278 drafts;
 kept in its private repository) over the 600-frame no-input boot scenario:
 IDENTICAL on all 600 frames, 57,245 calls substituted, 61,945 hardware
 accesses made at the original's clocks; 2,453 calls left to the original
-(interrupted, spanning frames, or Z80), so not certified.
+(interrupted, spanning frames, or Z80), so not certified. Over the 3,000-frame
+gameplay scenario (options screen, carrier take-off, first-stage play):
+IDENTICAL on all 3,000 frames, 176,640 calls substituted, 774,929 hardware
+accesses made at the original's clocks; 11,404 calls left to the original, so
+not certified. The last difference on the way was open bus: the VDP status
+word's upper bits are the 68000's prefetch register, which the C's read did
+not carry until each recorded access did.
 
 Earlier, with the 23 hand-written routines only: 486 frames equal, then a
 routine entered 56 clocks late. Traced back, both runs execute the same 68000
