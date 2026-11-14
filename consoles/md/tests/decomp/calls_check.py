@@ -85,7 +85,7 @@ def correct(temp, rom_path, capture, catalog):
             "a call the original stood in for was judged IDENTICAL: %r" % relay)
     require(unused["verdict"] == "UNCOVERED" and unused["calls"] == 0,
             "a routine no call reached is not UNCOVERED: %r" % unused)
-    return fetch["identical"], sum(row["calls"] for row in report["routines"])
+    return fetch["identical"], sum(row["calls"] for row in report["routines"]), report
 
 
 def planted(temp, rom_path, capture):
@@ -168,6 +168,23 @@ def window(temp, rom_path, scenario_path, library):
     return fetch["identical"]
 
 
+def live(temp, rom_path, scenario_path, library, stream_report):
+    """With no stream file: the scenario run live gives the stream's verdicts."""
+    report = check_calls.run_live(census_fixture.CORE, rom_path, scenario_path, 4, library,
+                                  temp / "live.json")
+    def verdicts(rows):
+        return {(r["cpu"], r["address"]): (r["verdict"], r["calls"], r["identical"],
+                                           r["divergent"]) for r in rows}
+    require(verdicts(report["routines"]) == verdicts(stream_report["routines"]),
+            "a live run's verdicts differ from the stream's")
+    planted = hybrid.build([calls_fixture.SOURCE], temp / "hybrid-live-plant",
+                           defines=["PLANT_FLAGS"])
+    report = check_calls.run_live(census_fixture.CORE, rom_path, scenario_path, 4, planted,
+                                  temp / "live-plant.json")
+    row = next(r for r in report["routines"] if r["name"] == "sum")
+    require(row["verdict"] == "DIVERGENT", "a planted error passed a live run: %r" % row)
+
+
 def native_source(temp):
     """The same C compiles without the hybrid's macro, against nmd's headers alone."""
     result = subprocess.run(
@@ -184,15 +201,17 @@ def main():
         rom_path, scenario_path = calls_fixture.build(temp / "rom")
         capture = census_fixture.capture(rom_path, scenario_path, temp / "capture", frames=4)
         _, catalog, _ = intake.run_intake(rom_path, temp / "intake", [capture], "call-control")
-        z80_calls, calls = correct(temp, rom_path, capture, catalog)
+        z80_calls, calls, stream_report = correct(temp, rom_path, capture, catalog)
         errors = planted(temp, rom_path, capture)
         refusals(temp, rom_path, capture, temp / "hybrid" / hybrid.LIBRARY)
         windowed = window(temp, rom_path, scenario_path, temp / "hybrid" / hybrid.LIBRARY)
         native_source(temp)
+        live(temp, rom_path, scenario_path, temp / "hybrid" / hybrid.LIBRARY, stream_report)
     print("calls_check: ok (%d calls replayed through C, %d of the Z80 routine; 68000, Z80 and "
           "the byte sent between them IDENTICAL; %d planted errors DIVERGENT for their reason; "
           "interrupted, fallback and uncalled routines never IDENTICAL; 3 refusals; "
-          "%d calls IDENTICAL from a frame window; the C compiles for a native cart)"
+          "%d calls IDENTICAL from a frame window; the same verdicts from a live run; "
+          "the C compiles for a native cart)"
           % (calls, z80_calls, errors, windowed))
 
 

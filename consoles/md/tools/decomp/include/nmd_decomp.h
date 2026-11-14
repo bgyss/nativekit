@@ -103,11 +103,35 @@ static inline void nmd_flags(unsigned mask, unsigned flags)
         nmd_flags(NMD_X | NMD_N | NMD_Z | NMD_V | NMD_C, flags |                             \
                   (value >> (bits - 1) ? NMD_N : 0) | (value ? 0 : NMD_Z));                  \
         return value;                                                                        \
+    }                                                                                        \
+    /* ROL and ROR by a register count: C is the last bit rotated out (clear for 0), X kept */ \
+    static inline type nmd_rol##bits(type value, unsigned count, int right)                  \
+    {                                                                                        \
+        unsigned carry = 0;                                                                  \
+        count &= 63;                                                                         \
+        for (unsigned step = 0; step < count; step++) {                                      \
+            if (right) {                                                                     \
+                carry = value & 1;                                                           \
+                value = (type)((value >> 1) | ((type)carry << (bits - 1)));                  \
+            } else {                                                                         \
+                carry = (unsigned)(value >> (bits - 1)) & 1;                                 \
+                value = (type)((type)(value << 1) | carry);                                  \
+            }                                                                                \
+        }                                                                                    \
+        nmd_flags(NMD_N | NMD_Z | NMD_V | NMD_C, (carry ? NMD_C : 0) |                       \
+                  (value >> (bits - 1) ? NMD_N : 0) | (value ? 0 : NMD_Z));                  \
+        return value;                                                                        \
     }
 
 NMD_M68K_OPS(8, uint8_t, uint32_t)
 NMD_M68K_OPS(16, uint16_t, uint32_t)
 NMD_M68K_OPS(32, uint32_t, uint64_t)
+
+/* SWAP: the halves exchanged; N Z from the long, V C clear. */
+static inline uint32_t nmd_swap(uint32_t value)
+{
+    return nmd_tst32(value << 16 | value >> 16);
+}
 
 /* BTST: Z is the tested bit's complement; nothing else changes. */
 static inline void nmd_btst(uint32_t value, unsigned bit)
@@ -124,6 +148,15 @@ static inline void nmd_set8(uint32_t *reg, uint8_t value)
 static inline void nmd_set16(uint32_t *reg, uint16_t value)
 {
     *reg = (*reg & 0xFFFF0000u) | value;
+}
+
+/* DBF/DBRA on a data register's low word: decrement, and whether to loop. */
+static inline int nmd_dbf(uint32_t *reg)
+{
+    uint16_t count = (uint16_t)(*reg - 1);
+
+    nmd_set16(reg, count);
+    return count != 0xFFFF;
 }
 
 /* ---- 68000 call and return over the guest stack ---- */

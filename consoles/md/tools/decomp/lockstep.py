@@ -188,6 +188,13 @@ class Machine:
         self._buffer = c.create_string_buffer(1 << 17)
         self._name = c.create_string_buffer(32)
 
+    def close(self):
+        """Unload the cartridge and shut the core down, so another Machine can
+        use the same library in this process."""
+        self.core.nmd_decomp_reset()
+        self.core.retro_unload_game()
+        self.core.retro_deinit()
+
     def frame(self, inputs):
         """Run one frame; the hashes of its picture, sound and snapshot regions."""
         self.inputs = inputs

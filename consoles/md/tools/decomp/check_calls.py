@@ -157,6 +157,7 @@ class Call:
 
     def __init__(self, frame, accesses, exit_state, return_pc, exit_clock=0, exit_frame=0):
         self.cpu, self.address, self.entry = frame.cpu, frame.address, frame.entry
+        self.frame_entered = frame.frame
         self.accesses = accesses    # (address, width, value, write, start clock, extra)
         self.entry_clock, self.exit_clock = frame.entry_clock, exit_clock
         self.exit_state = exit_state
@@ -330,8 +331,9 @@ class Checker:
         """One call's outcome: {"result", "reason" | "difference", "compared", "fallbacks"}."""
         compared = {"registers": 0, "hardware_accesses": 0, "memory_bytes": 0, "calls": 0}
         outcome = {"compared": compared, "fallbacks": 0}
-        if call.reasons:
-            return dict(outcome, result="UNVERIFIED", reason=sorted(call.reasons)[0])
+        reasons = call.reasons - {"spans_frames"}     # a lockstep concern; a replay has no time
+        if reasons:
+            return dict(outcome, result="UNVERIFIED", reason=sorted(reasons)[0])
         cpu, library = call.cpu, self.library
         space = WORK if cpu == M68K else ZRAM
         library.nmd_check_reset(self.rom_buffer, len(self.rom))
@@ -471,31 +473,9 @@ def run(rom_path, stream_path, library_path, out=None, contracts=None):
         if not metadata["capabilities"] & bit:
             raise CheckError("the stream holds no %s: no call in it can be judged" % label)
     checker = Checker(rom, library_path, contracts)
-    rows = {key: {"cpu": CPU_NAMES[key[0]], "address": key[1], "name": name, "calls": 0,
-                  "identical": 0, "divergent": 0, "unverified": {}, "fallbacks": 0,
-                  "compared": {"registers": 0, "hardware_accesses": 0, "memory_bytes": 0,
-                               "calls": 0}}
-            for key, (_, name) in checker.routines.items()}
+    rows = _rows(checker)
     for call in calls(stream_path, set(checker.routines)):
-        row = rows[(call.cpu, call.address)]
-        outcome = checker.check(call)
-        row["calls"] += 1
-        row["fallbacks"] += outcome["fallbacks"]
-        if outcome["result"] == "UNVERIFIED":
-            row["unverified"][outcome["reason"]] = row["unverified"].get(outcome["reason"], 0) + 1
-            continue
-        for name, value in outcome["compared"].items():
-            row["compared"][name] += value
-        if outcome["result"] == "IDENTICAL":
-            row["identical"] += 1
-        else:
-            row["divergent"] += 1
-            row.setdefault("first_difference", dict(outcome["difference"],
-                                                    call=row["calls"], sequence=call.sequence))
-    for row in rows.values():
-        row["verdict"] = ("UNCOVERED" if not row["calls"] else
-                          "DIVERGENT" if row["divergent"] else
-                          "IDENTICAL" if row["identical"] else "UNVERIFIED")
+        _count(rows, call, checker.check(call))
     report = {
         "schema": SCHEMA, "version": VERSION,
         "identities": dict(metadata["identities"], rom_sha256=rom_sha256,
@@ -503,7 +483,87 @@ def run(rom_path, stream_path, library_path, out=None, contracts=None):
                                pathlib.Path(library_path).read_bytes()).hexdigest()),
         "window": metadata.get("window"),
         "contracts": contracts or {},
-        "routines": [rows[key] for key in sorted(rows)],
+        "routines": _finish(rows),
+    }
+    if out is not None:
+        pathlib.Path(out).write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
+    return report
+
+
+def _rows(checker):
+    return {key: {"cpu": CPU_NAMES[key[0]], "address": key[1], "name": name, "calls": 0,
+                  "identical": 0, "divergent": 0, "unverified": {}, "fallbacks": 0,
+                  "compared": {"registers": 0, "hardware_accesses": 0, "memory_bytes": 0,
+                               "calls": 0}}
+            for key, (_, name) in checker.routines.items()}
+
+
+def _count(rows, call, outcome):
+    row = rows[(call.cpu, call.address)]
+    row["calls"] += 1
+    row["fallbacks"] += outcome["fallbacks"]
+    if outcome["result"] == "UNVERIFIED":
+        row["unverified"][outcome["reason"]] = row["unverified"].get(outcome["reason"], 0) + 1
+        return
+    for name, value in outcome["compared"].items():
+        row["compared"][name] += value
+    if outcome["result"] == "IDENTICAL":
+        row["identical"] += 1
+    else:
+        row["divergent"] += 1
+        row.setdefault("first_difference", dict(outcome["difference"],
+                                                call=row["calls"], sequence=call.sequence))
+
+
+def _finish(rows):
+    for row in rows.values():
+        row["verdict"] = ("UNCOVERED" if not row["calls"] else
+                          "DIVERGENT" if row["divergent"] else
+                          "IDENTICAL" if row["identical"] else "UNVERIFIED")
+    return [rows[key] for key in sorted(rows)]
+
+
+def run_live(core, rom_path, scenario_path, frames, library_path, out=None, contracts=None,
+             first_frame=1):
+    """The same check with no stream file: the scenario runs on the reference
+    core and every call is checked as it closes. Calls that begin before
+    `first_frame` are still cut but not counted."""
+    import lockstep
+    import run as runner
+    rom = pathlib.Path(rom_path).read_bytes()
+    scenario = runner._validate_scenario(json.loads(pathlib.Path(scenario_path).read_text()),
+                                         frames)
+    checker = Checker(rom, library_path, contracts)
+    rows = _rows(checker)
+    frame = [0]
+    feed = segmenter(set(checker.routines), lambda: frame[0])
+    errors = []
+
+    def on_event(event):
+        for call in feed(event):
+            if call.frame_entered >= first_frame:
+                _count(rows, call, checker.check(call))
+
+    out_directory = pathlib.Path(out).parent if out else pathlib.Path(".")
+    machine = lockstep.Machine(core, rom_path, scenario, out_directory, on_event)
+    inputs = runner._load_inputs(scenario, frames)
+    try:
+        for number in range(1, frames + 1):
+            frame[0] = number
+            machine.frame(inputs.get(number, {}))
+            if machine.errors:
+                raise CheckError("reference core: " + "; ".join(machine.errors))
+    finally:
+        machine.close()
+    sha = lambda path: hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+    report = {
+        "schema": SCHEMA, "version": VERSION,
+        "identities": {"rom_sha256": hashlib.sha256(rom).hexdigest(),
+                       "core_sha256": sha(core), "scenario_sha256": sha(scenario_path),
+                       "library_sha256": sha(library_path)},
+        "window": {"first_frame": first_frame, "last_frame": frames, "live": True},
+        "contracts": contracts or {},
+        "routines": _finish(rows),
     }
     if out is not None:
         pathlib.Path(out).write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
@@ -525,14 +585,26 @@ def summary(report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--rom", required=True)
-    parser.add_argument("--stream", required=True, help="capture.nmdh or window.nmdh")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--stream", help="capture.nmdh or window.nmdh")
+    source.add_argument("--scenario", help="run this scenario live on --core instead of a stream")
+    parser.add_argument("--core", help="the reference core, with --scenario")
+    parser.add_argument("--frames", type=int, help="frames to run, with --scenario")
+    parser.add_argument("--first-frame", type=int, default=1,
+                        help="count only calls entered from this frame on, with --scenario")
     parser.add_argument("--library", required=True, help="the library hybrid.py built")
     parser.add_argument("--out", required=True)
     parser.add_argument("--contracts", help="JSON: {\"m68k:000400\": {\"ignore\": [\"d1\"]}}")
     args = parser.parse_args()
     contracts = json.loads(pathlib.Path(args.contracts).read_text()) if args.contracts else None
     try:
-        report = run(args.rom, args.stream, args.library, args.out, contracts)
+        if args.scenario:
+            if not args.core or not args.frames:
+                parser.error("--scenario needs --core and --frames")
+            report = run_live(args.core, args.rom, args.scenario, args.frames, args.library,
+                              args.out, contracts, args.first_frame)
+        else:
+            report = run(args.rom, args.stream, args.library, args.out, contracts)
     except (CheckError, hybrid.HybridError) as exc:
         sys.exit("check_calls: " + str(exc))
     print(summary(report))

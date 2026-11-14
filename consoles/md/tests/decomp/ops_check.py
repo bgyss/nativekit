@@ -31,7 +31,7 @@ SHIM = pathlib.Path(__file__).resolve().parent / "ops" / "shim.c"
 VALUES = (0, 1, 2, 7, 8, 0x7F, 0x80, 0xFF, 0x7FFF, 0x8000, 0xFFFF, 0x7FFFFFFF, 0x80000000,
           0xFFFFFFFF, 0x12345678, 33)
 Z_VALUES = (0x00, 0x01, 0x0F, 0x10, 0x7F, 0x80, 0x81, 0xFF, 0x55, 0xAA, 0x28, 0xD7)
-M68K_OPS = ("add", "sub", "cmp", "tst", "neg", "lsl", "asl", "lsr", "asr")
+M68K_OPS = ("add", "sub", "cmp", "tst", "neg", "lsl", "asl", "lsr", "asr", "rol", "ror")
 SIZES = (("b", 8), ("w", 16), ("l", 32))
 Z80_OPS = ("add a,b", "adc a,b", "sub b", "sbc a,b", "cp b", "and b", "or b", "xor b",
            "inc a", "dec a")
@@ -49,7 +49,8 @@ def m68k_tests():
         for suffix, bits in SIZES:
             operands = "d0" if name in ("tst", "neg") else "d3,d0"
             tests.append(("%s.%s %s" % (name, suffix, operands), index, bits))
-    tests.append(("btst d3,d0", len(M68K_OPS), 32))
+    tests.append(("swap d0", len(M68K_OPS), 32))
+    tests.append(("btst d3,d0", len(M68K_OPS) + 1, 32))
     return tests
 
 
