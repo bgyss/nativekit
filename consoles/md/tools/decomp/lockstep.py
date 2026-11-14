@@ -281,6 +281,8 @@ def _reference(args, scenario, routines, rom_size):
                              for address, width, _, write, clock, extra, _depth in call.accesses
                              if _hardware(call.cpu, address, rom_size)],
                 "exit_refresh": call.exit_state.get("refresh", (0, 0)),
+                "exit_registers": (check_calls.m68k_registers(call.exit_state, call.exit["pc"])
+                                   if call.cpu == M68K else None),
                 "exit_sequence": call.exit_sequence,
                 "exit_schedule": _schedule_after(call.exit_state) if call.cpu == M68K else None,
                 "tree": [address for address, _ in call.tree],
@@ -454,6 +456,18 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                                            "write": bool(expected[3])})
             core.nmd_decomp_fail()      # the machine holds half a routine: stop the run
             return 0
+        if cpu == M68K:             # the C's registers at its return, against the original's
+            got = {"d%d" % i: cpu_state.d[i] for i in range(8)}
+            got.update({"a%d" % i: cpu_state.a[i] for i in range(8)})
+            got.update(sr=cpu_state.sr, pc=cpu_state.pc)
+            for register, value in got.items():
+                expected = record["exit_registers"][register]
+                if value != expected:
+                    diverge(kind="register", what="the C returned another value",
+                            cpu=check_calls.CPU_NAMES[cpu], address=pc, name=name, call=index + 1,
+                            register=register, expected=expected, got=value)
+                    core.nmd_decomp_fail()
+                    return 0
         for point in record["syncs"][library.nmd_live_syncs_made():]:
             clock, refresh_sync, refresh_counter = point   # syncs after the C's last access
             core.nmd_decomp_m68k_live_sync(clock, refresh_counter, refresh_sync)

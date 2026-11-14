@@ -10,7 +10,7 @@ real frames, calls and accesses; that calls an interrupt overlapped, calls
 that span a frame and calls that need a routine with no C are left to the
 original and keep the run from being certified; that six planted defects
 (access order, memory, interrupt mask, DMA length, a sound sample, another
-frame's input) are each DIVERGENT where planted; and that a run that
+frame's input, caught at the pad routine's return) are each DIVERGENT where planted; and that a run that
 overruns its time stops with no worker left behind.
 """
 import pathlib
@@ -81,7 +81,7 @@ def planted(temp, rom, scenario):
     cases = (
         ("PLANT_ORDER", "hardware", "order", None),
         ("PLANT_MEMORY", "frame", None, "work_ram"),
-        ("PLANT_IRQ", "frame", None, "work_ram"),
+        ("PLANT_IRQ", "register", "another value", None),     # SR at the C's return
         # the words past the shortened length are zero in RAM and in VRAM alike: only
         # the length register left behind shows it
         ("PLANT_DMA", "frame", None, "vdp_registers"),
@@ -102,8 +102,10 @@ def planted(temp, rom, scenario):
     # the hybrid run fed another pad state: the frames no longer agree
     _, other = calls_fixture.build(temp / "other-input", pressed=("C",))
     report = lock(temp, "input", rom, scenario, hybrid_scenario=other)
-    require(report["verdict"] == "DIVERGENT" and report["divergence"]["kind"] == "frame" and
-            "work_ram" in report["divergence"]["regions"],
+    difference = report["divergence"] or {}
+    require(report["verdict"] == "DIVERGENT" and (
+                difference.get("kind") == "frame" and "work_ram" in difference["regions"] or
+                difference.get("kind") == "register" and difference.get("name") == "pad"),
             "another frame input is not DIVERGENT: " + lockstep.summary(report))
     return len(cases) + 1
 

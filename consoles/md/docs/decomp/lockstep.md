@@ -39,7 +39,10 @@ power-on with the scenario's input, each in its own worker process:
    - When the C returns, the CPU is resumed at the C's return address, at
      the clock the original returned, with the original's scheduling state.
 
-   After every frame the same hashes, which must equal the reference's.
+   When a 68000 call's C returns, its registers (D0-D7, A0-A7, SR and the
+   return address) must be the original's at its return; a difference stops
+   the run there, at the call that made it. After every frame the same
+   hashes, which must equal the reference's.
 
 Nothing is played back into the C. What it reads, from RAM, the VDP, the pads
 or the other CPU, is what the hybrid machine holds at that moment. Only the
@@ -105,9 +108,9 @@ pad 1) and its authored C:
   run slice (most of them). The run is not certified.
 - Six planted defects DIVERGENT where planted: a hardware access out of order
   (in the call), a store to the wrong address (`work_ram`), an interrupt mask
-  left up (`work_ram`: the handler's counter), half a DMA length
-  (`vdp_registers`), a silent PSG volume (`audio` only), and the hybrid run
-  fed another pad state (`work_ram`).
+  left up (SR at the C's return), half a DMA length (`vdp_registers`), a
+  silent PSG volume (`audio` only), and the hybrid run fed another pad state
+  (D0 at the pad routine's return).
 - A run given 0.3 s is INCONCLUSIVE and leaves no worker running.
 - Breaking the frame comparison in `lockstep.py` makes the check fail.
 
