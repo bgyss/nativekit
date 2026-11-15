@@ -8,7 +8,8 @@ these verdicts are the drafts' only evidence. Three planted generator errors (a
 draft that does not start at its entry when code lies below it, a conditional
 tail call whose return is not inside the condition, a condition code read
 the wrong way, and a computed jump into an unrolled run that knows only the
-run's start) must make a draft diverge.
+run's start, or that runs through another routine's entry inside the run
+instead of calling it) must make a draft diverge.
 """
 import json
 import pathlib
@@ -70,6 +71,9 @@ def main():
             # a computed jump part way into an unrolled run with only the run's start
             ("known = self.unrolled(address) or sorted(", "known = None or sorted(",
              calls_fixture.ROUTINES["unroll"]),
+            # the run run straight through another routine's entry inside it
+            ("return address != entry and address in self.entries and address in names",
+             "return False", calls_fixture.ROUTINES["unroll"]),
         )
         try:
             for index, (old, new, address) in enumerate(plants):

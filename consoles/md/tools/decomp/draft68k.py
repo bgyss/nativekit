@@ -262,7 +262,8 @@ class Drafter:
             lines.append((address, record["text"], out))
             # a body is a set of addresses: an address after it that is not in it is a jump
             following = address + record["length"]
-            if record["flow"] in ("seq", "cond", "call") and following not in inside:
+            if record["flow"] in ("seq", "cond", "call") and (
+                    following not in inside or self._foreign(following, entry, names)):
                 if following in names or self._tail(following, entry):
                     out.append(self._tail_call(following, names))
                 else:
@@ -282,8 +283,14 @@ class Drafter:
                 names[target], target)
         return "{ jmp_address(0x%06Xu); return; }" % target
 
+    def _foreign(self, address, entry, names):
+        """Another routine's entry, with C, inside this body (an unrolled run
+        others call into part way): reaching it is a call to that routine, as in
+        the original."""
+        return address != entry and address in self.entries and address in names
+
     def _goto(self, target, inside, targets, names, entry):
-        if target in inside:
+        if target in inside and not self._foreign(target, entry, names):
             targets.add(target)
             return "goto L_%06X;" % target
         return self._tail_call(target, names)

@@ -28,7 +28,11 @@ python3 consoles/md/tools/decomp/draft68k.py --rom ROM --codemap codemap.json \
   `JMP (base,PC,Dn)` whose one target starts a straight run of instructions
   ending in a transfer is an unrolled loop entered part way (Duff's device):
   the run is drafted into the routine itself and the switch has a label for
-  every instruction of it (first title: two copy loops of 160 and 256 moves,
+  every instruction of it. Another routine's entry inside the run (callers
+  that copy fewer words call into its middle) stays that routine's: reaching
+  it, by a landing or by falling through, is a tail call to its C, as the
+  original's reaching it is a call to it (first title: two copy loops of 160
+  and 256 moves,
   entered by count; with only the run's start the C diverged once the count
   changed, and natively stopped at `nmd_restart`).
 - **TRAP** calls `trap_call(number, return_pc)`: the exception frame pushed,

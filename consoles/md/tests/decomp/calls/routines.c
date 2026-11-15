@@ -298,15 +298,37 @@ static void vbwait(void)
     nmd_rts();
 }
 
+/* $694 ulast2: copy two words from (A0)+ to (A1)+ (the last two moves of
+ * unroll's run, called on their own). */
+static void ulast2(void)
+{
+    for (int count = 0; count < 2; count++) {
+        wr16(A[1], nmd_tst16(rd16(A[0])));
+        A[0] += 2;
+        A[1] += 2;
+    }
+    nmd_rts();
+}
+
 /* $680 unroll: copy the last D0 (0-4) of four words from (A0) to $FF00B0.
- * The original jumps into an unrolled run of four moves part way. */
+ * The original jumps into an unrolled run of four moves part way; the run's
+ * last two moves are ulast2, which it falls into. */
 static void unroll(void)
 {
     A[1] = 0xFF00B0;
     D[1] = nmd_tst32(4);
     nmd_set16(&D[1], nmd_sub16((uint16_t)D[1], (uint16_t)D[0]));
     nmd_set16(&D[1], nmd_add16((uint16_t)D[1], (uint16_t)D[1]));
-    for (unsigned count = (uint16_t)D[0]; count; count--) {
+    for (unsigned count = (uint16_t)D[0]; count > 2; count--) {
+        wr16(A[1], nmd_tst16(rd16(A[0])));
+        A[0] += 2;
+        A[1] += 2;
+    }
+    if ((uint16_t)D[0] >= 2) {
+        ulast2();                               /* its rts is this routine's */
+        return;
+    }
+    if ((uint16_t)D[0] == 1) {
         wr16(A[1], nmd_tst16(rd16(A[0])));
         A[0] += 2;
         A[1] += 2;
@@ -369,6 +391,7 @@ const nmd_routine nmd_game_routines[] = {
     {0x7F0, tailc, "tailc"},
     {0x660, vbwait, "vbwait"},
     {0x680, unroll, "unroll"},
+    {0x694, ulast2, "ulast2"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
     {0x620, trapper, "trapper"},

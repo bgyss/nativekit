@@ -89,6 +89,9 @@ skip:   move.l  #$12345678,($FF0100).l
         bsr.w   unroll                  ; enters its unrolled copy part way
         moveq   #3,d0
         bsr.w   unroll
+        lea     (words,pc),a0
+        lea     ($FF00C0).l,a1
+        bsr.w   ulast2                  ; called into the middle of the run
         move.w  #$8A20,($C00004).l      ; a horizontal interrupt every 33 lines
         move.w  #$8014,($C00004).l
         bsr.w   irqon
@@ -247,7 +250,7 @@ unroll: lea     ($FF00B0).l,a1          ; copy the last d0 (0-4) of four words
         jmp     ulist(pc,d1.w)
 ulist:  move.w  (a0)+,(a1)+
         move.w  (a0)+,(a1)+
-        move.w  (a0)+,(a1)+
+ulast2: move.w  (a0)+,(a1)+             ; copy two words: an entry of its own
         move.w  (a0)+,(a1)+
         rts
 
@@ -282,7 +285,7 @@ ROUTINES = {"sum": 0x400, "poke": 0x420, "dispatch": 0x440, "handler0": 0x480,
             "send": 0x4E0, "spin": 0x510, "unused": 0x530, "relay": 0x550,
             "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0, "count": 0x5D0,
             "below": 0x7E2, "tailc": 0x7F0, "busy": 0x720, "trapper": 0x620,
-            "vbwait": 0x660, "unroll": 0x680}
+            "vbwait": 0x660, "unroll": 0x680, "ulast2": 0x694}
 NOCODE = 0x560
 Z_FETCH = 0x20
 LOOPS = 6
