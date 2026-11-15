@@ -312,14 +312,22 @@ static void relay(void)
  * it to the YM address port and read the status. */
 static void z_fetch(void)
 {
+    NMD_ZAT(0x20);
     nmd_z80.a = zrd(0x1F00);
+    NMD_ZAT(0x23);
     nmd_z80.h = 0x1F;
     nmd_z80.l = 0x01;
+    NMD_ZAT(0x26);
     nmd_z80.a = nmd_z_add8(nmd_z80.a, zrd(0x1F01), 0);
+    NMD_ZAT(0x27);
     zwr(0x1F01, nmd_z80.a);
+    NMD_ZAT(0x28);
     zwr(0x4000, nmd_z80.a);
+    NMD_ZAT(0x2B);
     nmd_z80.a = zrd(0x4000);
+    NMD_ZAT(0x2E);
     nmd_z80.a = nmd_z_and8(nmd_z80.a, 0x80);
+    NMD_ZAT(0x30);
     nmd_z80_ret();
 }
 

@@ -174,14 +174,40 @@ int nmd_live_exception(uint32_t address)
     return 1;
 }
 
+/* The Z80 C starts the original instruction at `address`: pause here when the
+ * original's run slice ended before it, with these registers, once the C has
+ * made the accesses the original made before. */
+void nmd_live_zat(uint16_t address)
+{
+    call *c = current[1];
+
+    while (c && c->pause_next < c->pause_count) {
+        const nmd_live_pause *pause = &c->pauses[c->pause_next];
+        const uint8_t main[8] = {nmd_z80.a, nmd_z80.f, nmd_z80.b, nmd_z80.c, nmd_z80.d,
+                                 nmd_z80.e, nmd_z80.h, nmd_z80.l};
+        const uint8_t alt[8] = {nmd_z80.a2, nmd_z80.f2, nmd_z80.b2, nmd_z80.c2, nmd_z80.d2,
+                                nmd_z80.e2, nmd_z80.h2, nmd_z80.l2};
+        int index;
+
+        if (pause->pc != address || pause->index[0] != nmd_z80.ix ||
+            pause->index[1] != nmd_z80.iy || pause->index[2] != nmd_z80.sp ||
+            !accesses_done(c, pause))
+            return;
+        for (index = 0; index < 8; index++)
+            if (pause->d[index] != main[index] || pause->a[index] != alt[index])
+                return;
+        c->pause_next++;
+        leave(c, PAUSED);
+    }
+}
+
 static void trampoline(void)
 {
     call *c = starting;
 
     c->routine();
     c->at_end = 1;
-    if (c->cpu == 1)
-        reach(c, UNTIMED, 1);   /* the syncs and interrupts after the last hardware access */
+    reach(c, UNTIMED, 1);       /* the syncs and pauses after the last hardware access */
     leave(c, FINISHED);
 }
 
@@ -281,8 +307,7 @@ static const nmd_live_slot *timed(call *c, uint32_t address, uint32_t width, int
     slot = &c->slots[c->slot_next];
     if (slot->address != address || slot->width != width || slot->write != write)
         fail(c, NMD_LIVE_ORDER, address, width, write);
-    if (c->cpu == 1)
-        reach(c, slot->clock, 0);
+    reach(c, slot->clock, 0);
     c->slot_next++;
     c->result.hardware++;
     return slot;

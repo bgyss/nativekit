@@ -102,6 +102,22 @@ registers the handler left. C that runs past the original's TRAP without
 taking it is DIVERGENT (`the original took an exception the C did not`).
 Other exceptions are still left to the original.
 
+## Z80 calls across run slices
+
+The core runs the Z80 in slices up to the 68000's clock, so most Z80 calls
+are paused at a slice's end while the 68000 runs. The reference records
+where each slice ended inside a call (a `slice` pause: the PC after the
+last instruction it ran, its registers and clock). The Z80 C marks its
+instructions with `NMD_ZAT`; it stops at a slice pause once it has made the
+accesses the original made before, the Z80 is resumed there, and the C
+continues when the next slice fetches that address. The core publishes a
+Z80 instruction's event at the next opcode fetch, so the first event of a
+new slice is of the instruction that ended the last one: the slice end is
+recorded after it (recorded before it, the C ran an instruction short and
+the rest of the call, a bank-window read among it, landed in an earlier
+68000 slice, which the read's 8-cycle charge to the 68000 showed: first
+title, frame 474).
+
 ## What is left to the original
 
 A call is not substituted, and is counted by reason, when:
@@ -186,10 +202,12 @@ read's 56 clocks were charged at another sync (frame 485).
 All 303 routines of the first title with C (23 hand-written 68000, 278
 drafts, 2 hand-written Z80; kept in its private repository), with
 interrupted, frame-spanning and TRAP calls substituted: over the 600-frame
-boot scenario IDENTICAL on all 600 frames with 1,607 pauses. Every 68000 call
-that returned was substituted; left to the original are 3 calls still open
-at the end and the Z80 calls the original paused inside at the end of a Z80
-run slice (72,982), so not certified. With interrupted calls only: 50,010
+boot scenario IDENTICAL on all 600 frames: 92,521 calls substituted on both
+CPUs with 382,797 pauses. Every 68000 call that returned was substituted;
+left to the original are 3 calls still open at the end and 2,630 Z80 calls
+(a slice end the record has no pause for, or a 68000 write into Z80 RAM), so
+not certified. Over the first 260 gameplay frames: 240 equal, then a Z80
+call entered one T-state late (open). With interrupted calls only: 50,010
 calls substituted and 533 interrupt pauses. Before interrupted calls were
 substituted: IDENTICAL on all 600 boot frames (57,245 calls, counting
 nested ones differently) and all 3,000 gameplay frames (176,640 calls), the

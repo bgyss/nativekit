@@ -66,7 +66,7 @@ class LockstepError(RuntimeError):
 class PausePoint(c.Structure):
     _fields_ = [("clock", c.c_uint64), ("pc", c.c_uint32), ("d", c.c_uint32 * 8),
                 ("a", c.c_uint32 * 8), ("ccr", c.c_uint32), ("kind", c.c_uint32),
-                ("syncs_before", c.c_uint32)]
+                ("syncs_before", c.c_uint32), ("index", c.c_uint32 * 3)]
 
 
 class SyncPoint(c.Structure):
@@ -263,6 +263,7 @@ def _reference(args, scenario, routines, rom_size):
     feed = check_calls.segmenter(set(routines), lambda: frame[0])
     core = [None]
     counter, last_sync = c.c_uint32(), c.c_uint64()
+    last_slice = [None]                         # the Z80 run slice the last instruction ran in
     syncs, last_syncs = [], [0]                 # (instruction sequence, clock) per sync
 
     def refresh(at_access_start):
@@ -284,9 +285,20 @@ def _reference(args, scenario, routines, rom_size):
                 last_syncs[0] = count
             event["payload"]["state"]["slice_after"] = (
                 core[0].nmd_decomp_m68k_slice_end() - event["master_clock"])
-        for call in feed(event):
+        z80_slice = None
+        if event["cpu"] == Z80 and event["kind"] == 1:
+            z80_slice = core[0].nmd_decomp_z80_slice_end()
+        closed = feed(event)
+        if z80_slice is not None:
+            # an instruction's event comes at the next opcode fetch: the first one in a
+            # new run is of the instruction that ended the last run
+            if last_slice[0] is not None and z80_slice != last_slice[0]:
+                feed.slice_end()
+            last_slice[0] = z80_slice
+        for call in closed:
             schedule[(call.cpu, call.address)].append({
                 "sequence": call.sequence, "entry_clock": call.entry_clock,
+                "frame": call.frame_entered,
                 "exit_clock": call.exit_clock, "reasons": sorted(call.reasons),
                 "hardware": [(clock, address & 0xFFFFFF, width, int(write), extra)
                              for address, width, _, write, clock, extra, _depth in call.accesses
@@ -295,14 +307,17 @@ def _reference(args, scenario, routines, rom_size):
                 "exit_registers": (check_calls.m68k_registers(call.exit_state, call.exit["pc"])
                                    if call.cpu == M68K else None),
                 "pauses": [{"kind": pause["kind"], "clock": pause["clock"], "pc": pause["pc"],
-                            "registers": check_calls.m68k_registers(pause["state"], pause["pc"]),
+                            "registers": check_calls.REGISTERS[call.cpu](pause["state"],
+                                                                         pause["pc"]),
                             "refresh": pause["state"].get("refresh", (0, 0)),
-                            "schedule": _schedule_after(pause["state"]),
+                            "schedule": (_schedule_after(pause["state"])
+                                         if call.cpu == M68K else None),
+                            "r": pause["state"].get("r", 0), "wz": pause["state"].get("wz", 0),
                             "span": (pause["sequence"], pause["end_sequence"])
-                            if pause["kind"] != "frame" else None,
+                            if pause["kind"] in ("interrupt", "exception") else None,
                             # the events up to the pause: a frame's last, or the interrupt
                             "boundary": pause.get("boundary") or pause["sequence"]}
-                           for pause in call.pauses] if call.cpu == M68K else [],
+                           for pause in call.pauses],
                 "exit_sequence": call.exit_sequence,
                 "exit_schedule": _schedule_after(call.exit_state) if call.cpu == M68K else None,
                 "tree": [address for address, _ in call.tree],
@@ -314,6 +329,7 @@ def _reference(args, scenario, routines, rom_size):
     machine.core.nmd_decomp_m68k_slice_end.restype = c.c_uint64
     machine.core.nmd_decomp_m68k_loop_syncs.restype = c.c_uint64
     machine.core.nmd_decomp_m68k_loop_sync_clock.restype = c.c_uint64
+    machine.core.nmd_decomp_z80_slice_end.restype = c.c_uint64
 
     # the original is never replaced here: the handler only notes when each entry is reached
     def note(cpu, pc, clock):
@@ -328,6 +344,7 @@ def _reference(args, scenario, routines, rom_size):
         frame[0] = number
         frames.append(machine.frame(inputs.get(number, {})))
         feed.frame_end()
+        feed.slice_end()                        # the Z80 stopped where the frame ended
         if machine.errors:
             raise LockstepError("reference: " + "; ".join(machine.errors))
     # The core reports every arrival at an entry address, a loop back to the entry
@@ -389,6 +406,22 @@ def _register(core, handler, routines):
         raise LockstepError("the core refused the routine addresses")
 
 
+def _pause_point(cpu, pause):
+    registers = pause["registers"]
+    if cpu == Z80:
+        return PausePoint(pause["clock"], pause["pc"],
+                          (c.c_uint32 * 8)(*[registers[name] for name in "a f b c d e h l".split()]),
+                          (c.c_uint32 * 8)(*[registers[name + "2"]
+                                             for name in "a f b c d e h l".split()]),
+                          0, 0, 0, (c.c_uint32 * 3)(registers["ix"], registers["iy"],
+                                                    registers["sp"]))
+    return PausePoint(pause["clock"], pause["pc"],
+                      (c.c_uint32 * 8)(*[registers["d%d" % i] for i in range(8)]),
+                      (c.c_uint32 * 8)(*[registers["a%d" % i] for i in range(8)]),
+                      registers["sr"] & 0x1F, 1 if pause["kind"] == "exception" else 0,
+                      pause["syncs_before"], (c.c_uint32 * 3)())
+
+
 def _is_trap(image, pc):
     return pc + 2 <= len(image) and image[pc] == 0x4E and image[pc + 1] & 0xF0 == 0x40
 
@@ -436,8 +469,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
 
     def substitute(cpu, pc, clock):
         key = (cpu, pc)
-        if cpu == M68K and pc in continuations:
-            return continue_call(pc)
+        if (cpu, pc) in continuations:
+            return continue_call(cpu, pc)
         if clock in reference["loops"][key]:
             return 0            # the original's loop back to the entry, inside a call it runs
         index = taken[key]
@@ -460,7 +493,12 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         reason = record["reasons"][0] if record["reasons"] else (
             "fallback" if any((cpu, address) not in routines for address in record["tree"])
             else None)
-        if reason is None and cpu == Z80 and record["exit_clock"] > core.nmd_decomp_z80_slice_end():
+        if cpu == Z80 and record["pauses"] and set(record["reasons"]) <= {"spans_frames"} and \
+                all(pause["kind"] == "slice" for pause in record["pauses"]) and \
+                not any((cpu, address) not in routines for address in record["tree"]):
+            reason = None       # the C pauses where the original's run slices ended
+        elif reason is None and cpu == Z80 and \
+                record["exit_clock"] > core.nmd_decomp_z80_slice_end():
             # the original Z80 paused inside this call while the 68000 ran: run all at
             # once, its accesses would come before the 68000's that the original's followed
             reason = "spans_slice"
@@ -496,12 +534,7 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             "slots": (Slot * max(1, len(record["slots"])))(*record["slots"]),
             "syncs": (SyncPoint * max(1, len(record["syncs"])))(*record["syncs"]),
             "pauses": (PausePoint * max(1, len(record["pauses"])))(
-                *[PausePoint(pause["clock"], pause["pc"],
-                             (c.c_uint32 * 8)(*[pause["registers"]["d%d" % i] for i in range(8)]),
-                             (c.c_uint32 * 8)(*[pause["registers"]["a%d" % i] for i in range(8)]),
-                             pause["registers"]["sr"] & 0x1F,
-                             1 if pause["kind"] == "exception" else 0, pause["syncs_before"])
-                  for pause in record["pauses"]]),
+                *[_pause_point(cpu, pause) for pause in record["pauses"]]),
             "handle": c.c_int(-1),
         }
         status = library.nmd_live_start(
@@ -511,11 +544,21 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             raise LockstepError("too many substituted calls open at once")
         return after_run(context, status)
 
-    def continue_call(pc):
-        """The handler returned to where the original was interrupted: the C goes on,
-        with the registers the machine holds now (the handler restored them)."""
-        context = continuations.pop(pc)
-        core.nmd_decomp_continuation(M68K, pc, 0)
+    def continue_call(cpu, pc):
+        """The handler returned to where the original was interrupted (or the Z80's
+        next run slice reached where its last ended): the C goes on, with the
+        registers the machine holds now (the handler restored them)."""
+        context = continuations.pop((cpu, pc))
+        core.nmd_decomp_continuation(cpu, pc, 0)
+        if cpu == Z80:
+            state = runner.Z80State()
+            core.nmd_decomp_z80_live_state(c.byref(state))
+            for field, value in check_calls.z80_registers(runner._state_dict(state), pc).items():
+                setattr(z80_state, field, value)
+            if context["at_end"]:
+                z80_state.sp = (z80_state.sp + 2) & 0xFFFF     # the C had already returned
+                z80_state.pc = context["return_pc"]
+            return after_run(context, library.nmd_live_continue(context["handle"].value))
         state = runner.M68KState()
         core.nmd_decomp_m68k_live_state(c.byref(state))
         registers = check_calls.m68k_registers(runner._state_dict(state), pc)
@@ -532,6 +575,18 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         cpu, pc, key, name = context["cpu"], context["pc"], context["key"], context["name"]
         index, record, handle = context["index"], context["record"], context["handle"].value
         result = library.nmd_live_result_of(handle).contents
+        if status == 1 and cpu == Z80:  # paused where the original's run slice ended
+            pause = record["pauses"][library.nmd_live_pauses_made(handle) - 1]
+            context["at_end"] = library.nmd_live_at_end(handle)
+            context["return_pc"] = z80_state.pc
+            resume_z80(context, pause["pc"], pause["clock"], pause["r"], pause["wz"],
+                       (z80_state.sp - 2) & 0xFFFF if context["at_end"] else z80_state.sp)
+            if (cpu, pause["pc"]) in continuations or \
+                    core.nmd_decomp_continuation(Z80, pause["pc"], 1):
+                raise LockstepError("cannot continue a paused Z80 call at $%04X" % pause["pc"])
+            continuations[(cpu, pause["pc"])] = context
+            paused_counts[key] = paused_counts.get(key, 0) + 1
+            return 1
         if status == 1:             # paused where the original took an interrupt
             pause = record["pauses"][library.nmd_live_pauses_made(handle) - 1]
             context["at_end"] = library.nmd_live_at_end(handle)
@@ -545,9 +600,9 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             # the machine goes on at the paused instruction; the C, where the handler
             # returns: the same instruction after an interrupt, the one after a TRAP
             back = pause["pc"] + 2 if pause["kind"] == "exception" else pause["pc"]
-            if back in continuations or core.nmd_decomp_continuation(M68K, back, 1):
+            if (cpu, back) in continuations or core.nmd_decomp_continuation(M68K, back, 1):
                 raise LockstepError("cannot continue a paused call at $%06X" % back)
-            continuations[back] = context
+            continuations[(cpu, back)] = context
             paused_counts[key] = paused_counts.get(key, 0) + 1
             return 1
         totals["accesses"] += result.accesses
@@ -586,23 +641,27 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                                              cpu_state.pc, record["exit_clock"],
                                              *record["exit_refresh"], *record["exit_schedule"])
         else:
-            state = context["state"]
-            flags = z80_state.f
-            state.main[:] = [z80_state.b, z80_state.c, z80_state.d, z80_state.e, z80_state.h,
-                             z80_state.l, flags, z80_state.a]
-            state.alt[:] = [z80_state.b2, z80_state.c2, z80_state.d2, z80_state.e2,
-                            z80_state.h2, z80_state.l2, z80_state.f2, z80_state.a2]
-            state.ix, state.iy, state.sp, state.i = (z80_state.ix, z80_state.iy, z80_state.sp,
-                                                     z80_state.i)
-            state.iff1, state.iff2, state.imode = z80_state.iff1, z80_state.iff2, z80_state.im
-            state.last_flag_result = flags & 0xA8
-            state.zflag, state.pvflag, state.nflag = (bool(flags & 0x40), bool(flags & 0x04),
-                                                      bool(flags & 0x02))
-            state.chflags = (0x08 if flags & 0x10 else 0) | (0x80 if flags & 0x01 else 0)
-            state.r, state.wz = record["r"], record["wz"]
-            core.nmd_decomp_z80_live_resume(c.byref(state), z80_state.pc, record["exit_clock"])
+            resume_z80(context, z80_state.pc, record["exit_clock"], record["r"], record["wz"],
+                       z80_state.sp)
         substituted[key] += 1
         return 1
+
+    def resume_z80(context, pc, clock, r, wz, sp):
+        """The Z80 goes on at `pc` and `clock` with the C's registers."""
+        state = context["state"]
+        flags = z80_state.f
+        state.main[:] = [z80_state.b, z80_state.c, z80_state.d, z80_state.e, z80_state.h,
+                         z80_state.l, flags, z80_state.a]
+        state.alt[:] = [z80_state.b2, z80_state.c2, z80_state.d2, z80_state.e2,
+                        z80_state.h2, z80_state.l2, z80_state.f2, z80_state.a2]
+        state.ix, state.iy, state.sp, state.i = z80_state.ix, z80_state.iy, sp, z80_state.i
+        state.iff1, state.iff2, state.imode = z80_state.iff1, z80_state.iff2, z80_state.im
+        state.last_flag_result = flags & 0xA8
+        state.zflag, state.pvflag, state.nflag = (bool(flags & 0x40), bool(flags & 0x04),
+                                                  bool(flags & 0x02))
+        state.chflags = (0x08 if flags & 0x10 else 0) | (0x80 if flags & 0x01 else 0)
+        state.r, state.wz = r, wz
+        core.nmd_decomp_z80_live_resume(c.byref(state), pc, clock)
 
     def guarded(cpu, pc, clock):
         try:

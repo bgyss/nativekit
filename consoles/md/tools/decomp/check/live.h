@@ -70,6 +70,7 @@ typedef struct nmd_live_pause {
     uint32_t ccr;
     uint32_t kind;
     uint32_t syncs_before;
+    uint32_t index[3];      /* Z80: IX, IY, SP (d: A F B C D E H L, a: the alternates) */
 } nmd_live_pause;
 
 /* Run a call's C on its own stack. At each interrupt pause the C stops: where

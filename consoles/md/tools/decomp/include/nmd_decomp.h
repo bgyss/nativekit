@@ -371,14 +371,18 @@ static inline void nmd_z80_ret(void)
 
 /* ---- instruction boundaries (lockstep) ---- */
 
-/* A draft marks each original instruction it starts. In the lockstep's live
- * hybrid (NMD_LIVE_AT) that lets the C pause exactly where the original was
- * interrupted; everywhere else it is nothing. */
+/* A draft marks each original instruction it starts (NMD_ZAT on the Z80). In
+ * the lockstep's live hybrid (NMD_LIVE_AT) that lets the C pause exactly where
+ * the original was interrupted, or (Z80) where its run slice ended;
+ * everywhere else it is nothing. */
 #ifdef NMD_LIVE_AT
 void nmd_live_at(uint32_t address);
+void nmd_live_zat(uint16_t address);
 #define NMD_AT(address) nmd_live_at(address)
+#define NMD_ZAT(address) nmd_live_zat(address)
 #else
 #define NMD_AT(address) ((void)0)
+#define NMD_ZAT(address) ((void)0)
 #endif
 
 /* An exception the original takes inside a call (TRAP #n at `address`). In the

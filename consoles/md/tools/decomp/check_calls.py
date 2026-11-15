@@ -307,19 +307,23 @@ def segmenter(routines, frame_number=lambda: 0):
             following[cpu] = event["next_pc"]
         return closed
 
-    def frame_end():
-        """The frame ended: each open 68000 call was paused where it stood."""
-        if state[M68K] is None:
+    def run_end(cpu, kind):
+        """The CPU stopped running where it stood (the 68000 at a frame's end, the
+        Z80 at the end of a run slice): each of its open calls paused there."""
+        if state[cpu] is None:
             return
-        pause = {"kind": "frame", "sequence": None, "pc": following[M68K],
-                 "state": state[M68K], "clock": clock[M68K], "end_sequence": None,
+        pause = {"kind": kind, "sequence": None, "pc": following[cpu],
+                 "state": state[cpu], "clock": clock[cpu], "end_sequence": None,
                  "boundary": last_sequence[0]}
-        depth = len(handlers[M68K])
-        for frame in stack[M68K]:
-            if frame.depth == depth:
+        depth = len(handlers[cpu])
+        for frame in stack[cpu]:
+            if frame.depth == depth and not (frame.pauses and
+                                             frame.pauses[-1]["clock"] == clock[cpu] and
+                                             frame.pauses[-1]["kind"] == kind):
                 frame.pauses.append(pause)
 
-    feed.frame_end = frame_end
+    feed.frame_end = lambda: run_end(M68K, "frame")
+    feed.slice_end = lambda: run_end(Z80, "slice")
     return feed
 
 

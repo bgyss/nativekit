@@ -81,8 +81,10 @@ def correct(temp, rom, scenario):
     require(vbwait["substituted"] == 1 and not vbwait["left_to_original"],
             "a polling call that spans a frame was not substituted: %r" % vbwait)
     fetch = rows[("z80", "z_fetch")]
-    require(fetch["substituted"] > 1000 and report["totals"]["hardware_accesses"] > 2000,
-            "the Z80 routine was not substituted with real accesses: %r" % fetch)
+    # the Z80's calls across its run slices: the C paused where each slice ended
+    require(fetch["substituted"] > 2000 and report["totals"]["hardware_accesses"] > 2000 and
+            fetch["left_to_original"].get("spans_slice", 0) < fetch["calls"] // 10,
+            "the Z80 routine was not substituted across its run slices: %r" % fetch)
     # left to the original, by reason; such a run is not certified
     # runs past the end of a frame: the C paused where the original stood when the
     # frame ended and went on in the next
