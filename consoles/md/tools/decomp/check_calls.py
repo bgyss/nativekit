@@ -212,9 +212,12 @@ def segmenter(routines, frame_number=lambda: 0):
     handlers = {M68K: [], Z80: []}      # stack depth at each open interrupt or exception
     open_pauses = {M68K: [], Z80: []}   # the pause record of each open handler
     following = {M68K: 0, Z80: 0}       # the next PC after the last instruction
+    last_sequence = [0]                 # the last event read
+
     def feed(event):
         closed = []
         cpu, kind, payload = event["cpu"], event["kind"], event["payload"]
+        last_sequence[0] = event["sequence"]
         if kind == 3:
             if payload["provenance"] != FETCH:
                 write = payload["operation"] == 2
@@ -304,6 +307,19 @@ def segmenter(routines, frame_number=lambda: 0):
             following[cpu] = event["next_pc"]
         return closed
 
+    def frame_end():
+        """The frame ended: each open 68000 call was paused where it stood."""
+        if state[M68K] is None:
+            return
+        pause = {"kind": "frame", "sequence": None, "pc": following[M68K],
+                 "state": state[M68K], "clock": clock[M68K], "end_sequence": None,
+                 "boundary": last_sequence[0]}
+        depth = len(handlers[M68K])
+        for frame in stack[M68K]:
+            if frame.depth == depth:
+                frame.pauses.append(pause)
+
+    feed.frame_end = frame_end
     return feed
 
 

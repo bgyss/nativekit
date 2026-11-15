@@ -120,18 +120,24 @@ static void send(void)
     nmd_rts();
 }
 
-/* $510 spin: count 8,000 times at $FF0050 (long enough for an interrupt). */
+/* $510 spin: count 8,000 times at $FF0050 (long enough for an interrupt, and
+ * to run past the end of a frame). NMD_AT marks each original instruction, so
+ * the lockstep can pause it where the original was interrupted or the frame
+ * ended. */
 static void spin(void)
 {
+    NMD_AT(0x510);
     nmd_set16(&D[1], nmd_tst16(7999));
     do {
+        NMD_AT(0x514);
 #ifdef PLANT_SPIN
         wr16(0xFF0050, nmd_add16(rd16(0xFF0050), 2));
 #else
         wr16(0xFF0050, nmd_add16(rd16(0xFF0050), 1));
 #endif
-        nmd_set16(&D[1], (uint16_t)(D[1] - 1));
-    } while ((uint16_t)D[1] != 0xFFFF);
+        NMD_AT(0x51A);
+    } while (nmd_dbf(&D[1]));
+    NMD_AT(0x51E);
     nmd_rts();
 }
 
@@ -246,6 +252,52 @@ static void dma(void)
     nmd_rts();
 }
 
+/* $620 trapper: d2 = 3, TRAP #0 (its handler at $640, which has no C, adds 5
+ * to d2 and stores it), then add d2 to $FF00A0. In the lockstep the machine
+ * takes the TRAP and runs the handler; in a replay the record stands in. */
+#ifdef NMD_HYBRID
+static void trapper(void)
+{
+    NMD_AT(0x620);
+    D[2] = nmd_tst32(3);
+    NMD_AT(0x622);
+    if (!NMD_EXCEPTION_TAKEN(0x622))
+        nmd_check_call_fallback(1, 0x640);
+    NMD_AT(0x624);
+#ifdef PLANT_TRAP
+    wr16(0xFF00A0, nmd_add16(rd16(0xFF00A0), 3));      /* d2 as it was before the TRAP */
+#else
+    wr16(0xFF00A0, nmd_add16(rd16(0xFF00A0), (uint16_t)D[2]));
+#endif
+    NMD_AT(0x62A);
+    nmd_rts();
+}
+#endif
+
+/* $660 vbwait: poll the VDP status until the vertical blank flag is set,
+ * then until it clears (the frame ends in the blank). Every pass of a loop
+ * has the same registers, so a pause point is the right pass only once the
+ * polls before it were made. */
+static void vbwait(void)
+{
+    do {
+        NMD_AT(0x660);
+        nmd_set16(&D[0], nmd_tst16(rd16(0xC00004)));
+        NMD_AT(0x666);
+        nmd_btst(D[0], 3);
+        NMD_AT(0x66A);
+    } while (nmd_cpu.sr & NMD_Z);
+    do {
+        NMD_AT(0x66C);
+        nmd_set16(&D[0], nmd_tst16(rd16(0xC00004)));
+        NMD_AT(0x672);
+        nmd_btst(D[0], 3);
+        NMD_AT(0x676);
+    } while (!(nmd_cpu.sr & NMD_Z));
+    NMD_AT(0x678);
+    nmd_rts();
+}
+
 /* $550 relay: calls a routine that has no C here (the record stands in). */
 #ifdef NMD_HYBRID
 static void relay(void)
@@ -291,8 +343,10 @@ const nmd_routine nmd_game_routines[] = {
     {0x720, busy, "busy"},
     {0x7E2, below, "below"},
     {0x7F0, tailc, "tailc"},
+    {0x660, vbwait, "vbwait"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
+    {0x620, trapper, "trapper"},
 #endif
 };
 const size_t nmd_game_routine_count = sizeof nmd_game_routines / sizeof nmd_game_routines[0];

@@ -584,8 +584,8 @@ const nmd_routine *md_find(uint32_t address)
 
 void trap_call(unsigned number, uint32_t return_pc)
 {
-    (void)return_pc;
-    nmd_check_call_fallback(1, rd32(4u * (32u + number)));
+    if (!NMD_EXCEPTION_TAKEN(return_pc - 2))
+        nmd_check_call_fallback(1, rd32(4u * (32u + number)));
 }
 
 const nmd_z80_routine nmd_game_z80_routines[] = {{0, 0, 0}};

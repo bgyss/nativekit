@@ -9,7 +9,8 @@ enum {
     NMD_LIVE_ORDER = 1,         /* hardware access differs from the original's next one */
     NMD_LIVE_PAST_RECORD = 2,   /* hardware access after the original's last */
     NMD_LIVE_ODD = 3,
-    NMD_LIVE_UNSUPPORTED = 4
+    NMD_LIVE_UNSUPPORTED = 4,
+    NMD_LIVE_EXCEPTION = 5      /* the original took an exception here; the C did not */
 };
 
 /* One hardware access of the original's call: what it was, when it began,
@@ -56,20 +57,28 @@ typedef struct nmd_live_sync_point {
 void nmd_live_bind(nmd_live_m68k_bus m68k, nmd_live_z80_bus z80, nmd_live_sync sync,
                    uint32_t image_size);
 
-/* Where the original took an interrupt: after the instruction ending at
- * `clock`, before the one at `pc`, with these registers. */
+enum { NMD_LIVE_PAUSE_INTERRUPT = 0, NMD_LIVE_PAUSE_EXCEPTION = 1 };
+
+/* Where the original took an interrupt or the frame ended (kind INTERRUPT),
+ * or took an exception (EXCEPTION: TRAP at `pc`): after the instruction
+ * ending at `clock`, before the one at `pc`, with these registers, once the
+ * first `syncs_before` of the call's syncs were made. */
 typedef struct nmd_live_pause {
     uint64_t clock;
     uint32_t pc;
     uint32_t d[8], a[8];
     uint32_t ccr;
+    uint32_t kind;
+    uint32_t syncs_before;
 } nmd_live_pause;
 
-/* Run a call's C on its own stack. At each of `pauses` the C stops: where a
- * draft reaches the interrupted instruction with the original's registers
- * (exact), or else before its first hardware access after the clock, or at
- * its end; nmd_live_continue goes on once the machine has taken it. The syncs are made at their clocks, in time order with the
- * pauses (68000 only). Returns 0 finished, 1 paused, 2 a difference (see the
+/* Run a call's C on its own stack. At each interrupt pause the C stops: where
+ * a draft reaches the interrupted instruction with the original's registers
+ * once it has made every hardware access the original made before (exact), or else before its first hardware access after the clock, or at
+ * its end. At an exception pause it stops where it takes the exception
+ * (nmd_live_exception); reaching past it without is NMD_LIVE_EXCEPTION.
+ * nmd_live_continue goes on once the machine has taken it. The syncs are
+ * made at their clocks, in time order with the pauses (68000 only). Returns 0 finished, 1 paused, 2 a difference (see the
  * result), -1 no room for another call. */
 int nmd_live_start(int cpu, const nmd_live_slot *slots, uint32_t slot_count,
                    const nmd_live_sync_point *syncs, uint32_t sync_count,

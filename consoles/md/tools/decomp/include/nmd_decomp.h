@@ -381,6 +381,18 @@ void nmd_live_at(uint32_t address);
 #define NMD_AT(address) ((void)0)
 #endif
 
+/* An exception the original takes inside a call (TRAP #n at `address`). In the
+ * lockstep's live hybrid the C stops there, the machine takes the exception
+ * and runs its handler as the original, and the C goes on with the registers
+ * the handler left: NMD_EXCEPTION_TAKEN is then 1. Everywhere else it is 0
+ * and the C must stand in for the handler itself. */
+#ifdef NMD_LIVE_AT
+int nmd_live_exception(uint32_t address);
+#define NMD_EXCEPTION_TAKEN(address) nmd_live_exception(address)
+#else
+#define NMD_EXCEPTION_TAKEN(address) ((void)(address), 0)
+#endif
+
 /* ---- a routine that has no C yet ---- */
 
 #ifdef NMD_HYBRID

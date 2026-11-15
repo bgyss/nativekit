@@ -48,6 +48,8 @@ CHECKS = (
      "consoles/md/tests/decomp/calls_check.py"),
     ("draft C from the original's instructions against the hand C's verdicts",
      "consoles/md/tests/decomp/draft_check.py"),
+    ("the live runtime's pause points on a fake machine",
+     "consoles/md/tests/decomp/live_check.py"),
     ("all C routines substituted at once on the live machine, frame by frame",
      "consoles/md/tests/decomp/lockstep_check.py"),
 )

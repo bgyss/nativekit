@@ -21,9 +21,12 @@ after the other, each in its own process:
              the reference's.
 
 Nothing is played back into the C: what it reads is what the hybrid machine
-holds. Only the schedule is the reference's. A call is left to the original
-(and counted, by reason) when an interrupt or exception was taken in it,
-when it spans a frame boundary, when the 68000 wrote Z80 RAM during a Z80
+holds. Only the schedule is the reference's. A 68000 call the original was
+interrupted in, took a TRAP in or ran past a frame's end in is substituted:
+its C pauses there, the machine takes the interrupt or TRAP (or ends the
+frame), and the C goes on where the handler returns. A call is left to the
+original (and counted, by reason) when it took an exception other than a
+TRAP, when the 68000 wrote Z80 RAM during a Z80
 call, when it did not return by its own rts/ret, when the run ended before it
 returned, when it calls a routine that has no C, or when it is a Z80 call
 the original paused inside at the end of a Z80 run slice. A run with such calls is not certified.
@@ -52,7 +55,8 @@ UNTIMED = (1 << 64) - 1
 LIVE_STATUS = {1: "a hardware access out of the original's order",
                2: "a hardware access after the original's last",
                3: "a word access at an odd address",
-               4: "a wait, restart or call the live machine cannot serve"}
+               4: "a wait, restart or call the live machine cannot serve",
+               5: "the original took an exception the C did not"}
 
 
 class LockstepError(RuntimeError):
@@ -61,7 +65,8 @@ class LockstepError(RuntimeError):
 
 class PausePoint(c.Structure):
     _fields_ = [("clock", c.c_uint64), ("pc", c.c_uint32), ("d", c.c_uint32 * 8),
-                ("a", c.c_uint32 * 8), ("ccr", c.c_uint32)]
+                ("a", c.c_uint32 * 8), ("ccr", c.c_uint32), ("kind", c.c_uint32),
+                ("syncs_before", c.c_uint32)]
 
 
 class SyncPoint(c.Structure):
@@ -293,7 +298,10 @@ def _reference(args, scenario, routines, rom_size):
                             "registers": check_calls.m68k_registers(pause["state"], pause["pc"]),
                             "refresh": pause["state"].get("refresh", (0, 0)),
                             "schedule": _schedule_after(pause["state"]),
-                            "span": (pause["sequence"], pause["end_sequence"])}
+                            "span": (pause["sequence"], pause["end_sequence"])
+                            if pause["kind"] != "frame" else None,
+                            # the events up to the pause: a frame's last, or the interrupt
+                            "boundary": pause.get("boundary") or pause["sequence"]}
                            for pause in call.pauses] if call.cpu == M68K else [],
                 "exit_sequence": call.exit_sequence,
                 "exit_schedule": _schedule_after(call.exit_state) if call.cpu == M68K else None,
@@ -319,6 +327,7 @@ def _reference(args, scenario, routines, rom_size):
     for number in range(1, args.frames + 1):
         frame[0] = number
         frames.append(machine.frame(inputs.get(number, {})))
+        feed.frame_end()
         if machine.errors:
             raise LockstepError("reference: " + "; ".join(machine.errors))
     # The core reports every arrival at an entry address, a loop back to the entry
@@ -353,11 +362,17 @@ def _reference(args, scenario, routines, rom_size):
             last = row.pop("exit_sequence")
             low = bisect.bisect_right(sync_sequences, row["sequence"])
             high = bisect.bisect_right(sync_sequences, last)
-            spans = [pause["span"] for pause in row["pauses"]]
+            spans = [pause["span"] for pause in row["pauses"] if pause["span"]]
             # a handler's syncs happen on their own when the machine runs it
-            row["syncs"] = [clock for sequence, clock in syncs[low:high]
-                            if not any(first < sequence <= (end or last) for first, end in spans)
-                            ] if key[0] == M68K else []
+            inside = [(sequence, clock) for sequence, clock in syncs[low:high]
+                      if not any(first < sequence <= (end or last) for first, end in spans)
+                      ] if key[0] == M68K else []
+            row["syncs"] = [clock for _, clock in inside]
+            # the syncs the original made before each pause, in event order: a sync at
+            # a frame's last clock can belong to the next frame
+            for pause in row["pauses"]:
+                pause["syncs_before"] = sum(1 for sequence, _ in inside
+                                            if sequence <= pause["boundary"])
         leftover = arrivals[position:]
         loops[key].update(leftover[1:])
         entered[key] = len(rows) + (1 if leftover else 0)
@@ -374,8 +389,13 @@ def _register(core, handler, routines):
         raise LockstepError("the core refused the routine addresses")
 
 
+def _is_trap(image, pc):
+    return pc + 2 <= len(image) and image[pc] == 0x4E and image[pc + 1] & 0xF0 == 0x40
+
+
 def _hybrid(args, scenario, routines, rom_size, reference):
     """The same run with the C substituted; the result's body."""
+    image = pathlib.Path(args.rom).read_bytes()
     library = c.CDLL(str(pathlib.Path(args.library).resolve()))
     library.nmd_live_start.argtypes = [c.c_int, c.c_void_p, c.c_uint32, c.c_void_p, c.c_uint32,
                                        c.c_void_p, c.c_uint32, c.c_void_p, c.POINTER(c.c_int)]
@@ -444,10 +464,15 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             # the original Z80 paused inside this call while the 68000 ran: run all at
             # once, its accesses would come before the 68000's that the original's followed
             reason = "spans_slice"
-        if reason == "interrupt" and cpu == M68K and set(record["reasons"]) == {"interrupt"} and \
-                all(pause["kind"] == "interrupt" for pause in record["pauses"]) and \
+        if reason in ("interrupt", "spans_frames", "exception") and cpu == M68K and \
+                set(record["reasons"]) <= {"interrupt", "spans_frames", "exception"} and \
+                all(pause["kind"] in ("interrupt", "frame") or
+                    pause["kind"] == "exception" and _is_trap(image, pause["pc"])
+                    for pause in record["pauses"]) and \
                 not any((cpu, address) not in routines for address in record["tree"]):
-            reason = None               # the C pauses where the original was interrupted
+            # the C pauses where the original was interrupted, the frame ended or it
+            # took a TRAP
+            reason = None
         if reason:
             skipped[key][reason] = skipped[key].get(reason, 0) + 1
             return 0
@@ -474,7 +499,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                 *[PausePoint(pause["clock"], pause["pc"],
                              (c.c_uint32 * 8)(*[pause["registers"]["d%d" % i] for i in range(8)]),
                              (c.c_uint32 * 8)(*[pause["registers"]["a%d" % i] for i in range(8)]),
-                             pause["registers"]["sr"] & 0x1F)
+                             pause["registers"]["sr"] & 0x1F,
+                             1 if pause["kind"] == "exception" else 0, pause["syncs_before"])
                   for pause in record["pauses"]]),
             "handle": c.c_int(-1),
         }
@@ -516,9 +542,12 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             core.nmd_decomp_m68k_live_resume(cpu_state.d, address_registers, other, cpu_state.sr,
                                              pause["pc"], pause["clock"], *pause["refresh"],
                                              *pause["schedule"])
-            if pause["pc"] in continuations or core.nmd_decomp_continuation(M68K, pause["pc"], 1):
-                raise LockstepError("cannot continue a paused call at $%06X" % pause["pc"])
-            continuations[pause["pc"]] = context
+            # the machine goes on at the paused instruction; the C, where the handler
+            # returns: the same instruction after an interrupt, the one after a TRAP
+            back = pause["pc"] + 2 if pause["kind"] == "exception" else pause["pc"]
+            if back in continuations or core.nmd_decomp_continuation(M68K, back, 1):
+                raise LockstepError("cannot continue a paused call at $%06X" % back)
+            continuations[back] = context
             paused_counts[key] = paused_counts.get(key, 0) + 1
             return 1
         totals["accesses"] += result.accesses

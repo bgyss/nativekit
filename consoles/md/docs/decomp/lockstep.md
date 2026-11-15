@@ -60,7 +60,7 @@ internal FIFO and DMA progress, I/O port state, the 68000's pending-interrupt
 fields. A defect that shows only there is found when it reaches one of the
 compared regions, or not at all.
 
-## Calls an interrupt lands in
+## Calls an interrupt lands in, that take a TRAP or span a frame
 
 Each call's C runs on its own stack (a coroutine, `check/live.c`). Where the
 original took an interrupt inside the call, the C pauses: a draft (and hand
@@ -73,15 +73,42 @@ machine takes the interrupt and runs the handler, and when the handler
 returns to that PC the core calls the runner again, which continues the C
 with the registers the handler left. The original's syncs inside the
 handler happen on their own; those in the call are made in time order with
-the pauses. A call with an exception (TRAP) in it, or that spans a frame, is
-still left to the original.
+the pauses.
+
+A frame that ends inside a call is a pause of the same kind: the C stops
+where the original stood when the frame ended, the run returns from the
+frame (whose hashes are compared there), and the next frame continues the C.
+Where the original stopped twice before one instruction (the frame ended,
+then an interrupt was taken), a mark pauses for both.
+
+Two rules make a pause land where the original's did:
+
+- A mark pauses only once the C has made every hardware access the original
+  made before the pause. In a polling loop every pass has the same
+  registers; without the rule the C paused at an earlier pass, before VDP
+  status reads whose syncs had run the Z80 on (first title, frame 67: the
+  Z80 stood 16 T-states short when the frame ended). `live_check.py` pins it
+  on a fake machine.
+- The syncs made before a pause are those the original made before it in
+  event order, not every sync up to its clock: the sync the core counts at a
+  frame's last clock belongs to the next frame (first title, frame 59: made
+  early, it moved the Z80's clock under a bus request).
+
+A TRAP is an exception pause. The C reaches it through
+`NMD_EXCEPTION_TAKEN(address)` (a draft's `trap_call` makes it): it stops,
+the machine resumes at the TRAP itself, executes it and runs the handler as
+the original, and the C continues at the instruction after the TRAP with the
+registers the handler left. C that runs past the original's TRAP without
+taking it is DIVERGENT (`the original took an exception the C did not`).
+Other exceptions are still left to the original.
 
 ## What is left to the original
 
 A call is not substituted, and is counted by reason, when:
 
-- `interrupt`, `exception`: an interrupt with another reason in the same call, or a TRAP or other exception.
-- `spans_frames`: it returned in a later frame than it began.
+- `interrupt`, `exception`, `spans_frames`: an interrupt, a frame end or a
+  TRAP in a call that also has another reason (below), or that calls a routine
+  with no C; an exception other than a TRAP.
 - `foreign_write`: the 68000 wrote Z80 RAM during a Z80 call.
 - `irregular_return`: it, or a call inside it, did not return by its own `rts`/`ret`.
 - `fallback`: it calls a routine that has no C.
@@ -115,20 +142,25 @@ how many were left to the original by reason.
 `lockstep_check.py`, on the per-call control cartridge (4 frames, B held on
 pad 1) and its authored C:
 
-- All 4 frames equal with 1,702 calls substituted on both CPUs and 3,386
+- All 4 frames equal with 1,478 calls substituted on both CPUs and 5,117
   hardware accesses made at the original's clocks, among them the 68000
   passing a byte to the Z80 through Z80 RAM under a bus request, a pad read,
-  a PSG tone, a RAM-to-VRAM DMA and a routine that enables the vertical
-  interrupt.
-- 966 calls left to the original: one that the vertical interrupt overlaps and
-  that spans frames, six that call a routine with no C, Z80 calls the 68000
-  wrote into or that were still open at the end, and Z80 calls that span a Z80
-  run slice (most of them). The run is not certified.
-- Six planted defects DIVERGENT where planted: a hardware access out of order
+  a PSG tone, a RAM-to-VRAM DMA, a routine that enables the vertical
+  interrupt, one that horizontal interrupts land in, one that runs past the
+  end of a frame (interrupted too), one that polls the VDP status through a
+  vertical blank across a frame's end, and one that takes a TRAP whose
+  handler has no C.
+- 1,196 calls left to the original: six that call a routine with no C, Z80
+  calls the 68000 wrote into or that were still open at the end, and Z80
+  calls that span a Z80 run slice (most of them). The run is not certified.
+- Nine planted defects DIVERGENT where planted: a hardware access out of order
   (in the call), a store to the wrong address (`work_ram`), an interrupt mask
   left up (SR at the C's return), half a DMA length (`vdp_registers`), a
-  silent PSG volume (`audio` only), and the hybrid run fed another pad state
-  (D0 at the pad routine's return).
+  silent PSG volume (`audio` only), a wrong store inside the interrupted
+  call, inside the frame-spanning call and after the TRAP (`work_ram`), and
+  the hybrid run fed another pad state.
+- Without the frame-end pauses the frame-spanning call's C runs ahead of the
+  original and the first frame differs.
 - A run given 0.3 s is INCONCLUSIVE and leaves no worker running.
 - Breaking the frame comparison in `lockstep.py` makes the check fail.
 
@@ -151,12 +183,15 @@ read's 56 clocks were charged at another sync (frame 485).
 
 ### First title
 
-All 301 routines of the first title with C (23 hand-written, 278 drafts;
-kept in its private repository), with interrupted calls substituted: over
-the 600-frame boot scenario IDENTICAL on all 600 frames, 50,010 calls
-substituted and 533 interrupt pauses; 1,637 calls left to the original
-(spanning frames, or with a TRAP), so not certified. Before interrupted calls
-were substituted: IDENTICAL on all 600 boot frames (57,245 calls, counting
+All 303 routines of the first title with C (23 hand-written 68000, 278
+drafts, 2 hand-written Z80; kept in its private repository), with
+interrupted, frame-spanning and TRAP calls substituted: over the 600-frame
+boot scenario IDENTICAL on all 600 frames with 1,607 pauses. Every 68000 call
+that returned was substituted; left to the original are 3 calls still open
+at the end and the Z80 calls the original paused inside at the end of a Z80
+run slice (72,982), so not certified. With interrupted calls only: 50,010
+calls substituted and 533 interrupt pauses. Before interrupted calls were
+substituted: IDENTICAL on all 600 boot frames (57,245 calls, counting
 nested ones differently) and all 3,000 gameplay frames (176,640 calls), the
 last difference on the way being open bus (the VDP status word's upper bits
 are the 68000's prefetch register, which the C's read did not carry until
@@ -180,8 +215,8 @@ of that length.
 - Authored synthetic controls only; no routine of a title has been checked.
 - The reference is the candidate core, not hardware. Equality is with its
   scheduling; native timing is D10's.
-- Calls that interrupts overlap, that span frames or that need a routine
-  without C run as the original: the gate does not judge them. Nor does it
+- Calls that need a routine without C, or take an exception other than a
+  TRAP, run as the original: the gate does not judge them. Nor does it
   judge Z80 calls that span a Z80 run slice, which on this core is most Z80
   calls: judging them needs the C suspended at the slice end, as the
   original is. A title's

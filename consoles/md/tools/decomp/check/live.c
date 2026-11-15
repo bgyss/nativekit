@@ -10,8 +10,9 @@
  * played back: values read and written are the live machine's and the C's.
  *
  * Each call's C runs on its own stack (a coroutine), so it can pause where
- * the original was interrupted: before its first hardware access after an
- * interrupt point, or at its end. The runner lets the machine take the
+ * the original was interrupted or the frame ended: where a draft reaches that
+ * instruction with the original's registers, else before its first hardware
+ * access after the point, or at its end. The runner lets the machine take the
  * interrupt and continues the C when the handler returns. The original's
  * syncs between instructions are made at their clocks, in time order with
  * the pauses.
@@ -84,8 +85,26 @@ static void fail(call *c, int status, uint32_t address, uint32_t width, int writ
     abort();
 }
 
+/* The C is where the original paused only once it has made every hardware
+ * access the original made before the pause: in a polling loop the registers
+ * repeat, and an earlier pass would match them. */
+static int accesses_done(const call *c, const nmd_live_pause *pause)
+{
+    return c->slot_next >= c->slot_count || c->slots[c->slot_next].clock >= pause->clock;
+}
+
+/* Make the syncs the original made before the next pause. */
+static void syncs_to(call *c, const nmd_live_pause *pause)
+{
+    while (c->sync_next < c->sync_count && c->sync_next < pause->syncs_before) {
+        const nmd_live_sync_point *point = &c->syncs[c->sync_next++];
+
+        sync_fn(point->clock, point->refresh_counter, point->refresh_sync);
+    }
+}
+
 /* Make the syncs at or before `clock` and pause at the interrupts before it
- * (all remaining ones with `all`), in time order. */
+ * (all remaining ones with `all`), in the original's order. */
 static void reach(call *c, uint64_t clock, int all)
 {
     for (;;) {
@@ -94,10 +113,12 @@ static void reach(call *c, uint64_t clock, int all)
                          (all || c->pauses[c->pause_next].clock < clock);
 
         if (have_sync && (!have_pause ||
-                          c->syncs[c->sync_next].clock <= c->pauses[c->pause_next].clock)) {
+                          c->sync_next < c->pauses[c->pause_next].syncs_before)) {
             const nmd_live_sync_point *point = &c->syncs[c->sync_next++];
 
             sync_fn(point->clock, point->refresh_counter, point->refresh_sync);
+        } else if (have_pause && c->pauses[c->pause_next].kind == NMD_LIVE_PAUSE_EXCEPTION) {
+            fail(c, NMD_LIVE_EXCEPTION, c->pauses[c->pause_next].pc, 0, 0);
         } else if (have_pause) {
             c->pause_next++;
             leave(c, PAUSED);
@@ -116,21 +137,41 @@ void nmd_live_at(uint32_t address)
     const nmd_live_pause *pause;
     int index;
 
-    if (!c || c->pause_next >= c->pause_count)
-        return;
-    pause = &c->pauses[c->pause_next];
-    if (pause->pc != address || (nmd_cpu.sr & 0x1F) != pause->ccr)
-        return;
-    for (index = 0; index < 8; index++)
-        if (nmd_cpu.d[index] != pause->d[index] || nmd_cpu.a[index] != pause->a[index])
+    /* the original can stop twice before one instruction: the frame ends, then an
+     * interrupt is taken as the next frame begins */
+    while (c && c->pause_next < c->pause_count) {
+        pause = &c->pauses[c->pause_next];
+        if (pause->kind != NMD_LIVE_PAUSE_INTERRUPT || pause->pc != address ||
+            (nmd_cpu.sr & 0x1F) != pause->ccr || !accesses_done(c, pause))
             return;
-    while (c->sync_next < c->sync_count && c->syncs[c->sync_next].clock <= pause->clock) {
-        const nmd_live_sync_point *point = &c->syncs[c->sync_next++];
-
-        sync_fn(point->clock, point->refresh_counter, point->refresh_sync);
+        for (index = 0; index < 8; index++)
+            if (nmd_cpu.d[index] != pause->d[index] || nmd_cpu.a[index] != pause->a[index])
+                return;
+        syncs_to(c, pause);
+        c->pause_next++;
+        leave(c, PAUSED);
     }
+}
+
+/* The C takes the exception at `address` (a TRAP): when the original took it
+ * there, stop (the syncs before it first); the machine runs the instruction
+ * and its handler, and the C goes on after it. 0 when the original took none
+ * here. */
+int nmd_live_exception(uint32_t address)
+{
+    call *c = current[0];
+    const nmd_live_pause *pause;
+
+    if (!c || c->pause_next >= c->pause_count)
+        return 0;
+    pause = &c->pauses[c->pause_next];
+    if (pause->kind != NMD_LIVE_PAUSE_EXCEPTION || pause->pc != address ||
+        !accesses_done(c, pause))
+        return 0;
+    syncs_to(c, pause);
     c->pause_next++;
     leave(c, PAUSED);
+    return 1;
 }
 
 static void trampoline(void)

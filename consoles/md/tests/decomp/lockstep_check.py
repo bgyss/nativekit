@@ -7,12 +7,15 @@ CPUs, each hardware access made at the clock the original's began. After
 every frame the picture, the sound and each region of the comparison
 snapshot must be equal. The controls hold that correct C is IDENTICAL with
 real frames, calls and accesses; that calls an interrupt overlapped, calls
-that span a frame and calls that need a routine with no C are left to the
-original and keep the run from being certified; that a call horizontal
-interrupts land in is substituted, pausing where the original was
-interrupted; that seven planted defects
-(access order, memory, interrupt mask, DMA length, a sound sample, another
-frame's input, caught at the pad routine's return) are each DIVERGENT where planted; and that a run that
+calls that need a routine with no C are left to the original and keep the run
+from being certified; that a call horizontal interrupts land in, one that
+runs past the end of a frame, and one that polls the VDP through a vertical
+blank across a frame's end, are substituted, pausing where the original was
+interrupted or the frame ended; that a call with a TRAP in it is substituted,
+the machine taking the TRAP and running its handler; that nine planted
+defects (access order, memory, interrupt mask, DMA length, a sound sample,
+inside an interrupted call, inside a frame-spanning call, after a TRAP,
+another frame's input) are each DIVERGENT where planted; and that a run that
 overruns its time stops with no worker left behind.
 """
 import pathlib
@@ -67,14 +70,27 @@ def correct(temp, rom, scenario):
             report["totals"]["pauses"] >= 3,
             "an interrupted call was not substituted with its pauses: %r %r"
             % (busy, report["totals"]))
+    # a TRAP inside: the C paused at it, the machine took it and ran the handler (which
+    # has no C), and the C went on with the registers the handler left
+    trapper = rows[("m68k", "trapper")]
+    require(trapper["substituted"] == 1 and not trapper["left_to_original"],
+            "a call with a TRAP in it was not substituted: %r" % trapper)
+    # polls the VDP across a frame's end with horizontal interrupts landing in it: the
+    # same registers on every pass
+    vbwait = rows[("m68k", "vbwait")]
+    require(vbwait["substituted"] == 1 and not vbwait["left_to_original"],
+            "a polling call that spans a frame was not substituted: %r" % vbwait)
     fetch = rows[("z80", "z_fetch")]
     require(fetch["substituted"] > 1000 and report["totals"]["hardware_accesses"] > 2000,
             "the Z80 routine was not substituted with real accesses: %r" % fetch)
     # left to the original, by reason; such a run is not certified
+    # runs past the end of a frame: the C paused where the original stood when the
+    # frame ended and went on in the next
     spin, relay = rows[("m68k", "spin")], rows[("m68k", "relay")]
-    require(spin["substituted"] == 0 and set(spin["left_to_original"]) <= {"interrupt", "spans_frames"}
-            and sum(spin["left_to_original"].values()) == 1,
-            "a call that an interrupt overlapped and that spans frames was substituted: %r" % spin)
+    require(spin["substituted"] == 1 and not spin["left_to_original"] and
+            report["totals"]["pauses"] >= 5,
+            "a call that spans frames was not substituted with its pauses: %r %r"
+            % (spin, report["totals"]))
     require(relay["left_to_original"] == {"fallback": loops},
             "a call that needs a routine with no C was substituted: %r" % relay)
     require(report["calls_left_to_original"] > loops and report["certified"] is False,
@@ -96,6 +112,8 @@ def planted(temp, rom, scenario):
         ("PLANT_DMA", "frame", None, "vdp_registers"),
         ("PLANT_SAMPLE", "frame", None, "audio"),
         ("PLANT_BUSY", "frame", None, "work_ram"),             # inside an interrupted call
+        ("PLANT_SPIN", "frame", None, "work_ram"),             # inside a frame-spanning call
+        ("PLANT_TRAP", "frame", None, "work_ram"),             # after a TRAP
     )
     for define, kind, what, region in cases:
         report = lock(temp, define, rom, scenario, defines=[define])

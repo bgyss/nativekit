@@ -4,9 +4,10 @@ The 68000 uploads a Z80 program, then six times: sums words, writes a VDP
 register and reads the status, calls one of four handlers through a pointer
 table, runs a routine that calls another twice, sends a byte to the Z80
 through its RAM, and calls a routine that calls one with no C. It then
-reads the pad, sets a PSG tone, copies RAM to VRAM by DMA, enables the
-vertical interrupt in a routine and runs a routine long enough to be
-interrupted. The Z80 loops calling a routine that adds the byte the 68000
+reads the pad, sets a PSG tone, copies RAM to VRAM by DMA, runs a routine
+that takes a TRAP, enables the vertical interrupt in a routine and runs a
+routine long enough to be interrupted, and one that polls the VDP status
+through a vertical blank, across the end of a frame. The Z80 loops calling a routine that adds the byte the 68000
 sent to a total, writes the YM address port and reads the status. One
 routine with C is never called. Nothing here comes from a game.
 """
@@ -81,6 +82,7 @@ skip:   move.l  #$12345678,($FF0100).l
         bsr.w   tailc
         bsr.w   tone
         bsr.w   dma
+        bsr.w   trapper
         move.w  #$8A20,($C00004).l      ; a horizontal interrupt every 33 lines
         move.w  #$8014,($C00004).l
         bsr.w   irqon
@@ -89,6 +91,7 @@ vwait:  cmp.w   ($FF0040).l,d0          ; ones start in the next frame
         beq.s   vwait
         bsr.w   busy
         bsr.w   spin
+        bsr.w   vbwait
         move.w  #$2700,sr
 forever:
         bra.s   forever
@@ -210,6 +213,26 @@ dma:    lea     ($C00004).l,a5
         move.w  #$0080,(a5)
         rts
 
+        org     $620
+trapper:
+        moveq   #3,d2
+        trap    #0
+        add.w   d2,($FF00A0).l          ; d2 as the TRAP handler left it
+        rts
+        org     $640
+tvec:   addq.w  #5,d2
+        move.w  d2,($FF00A2).l
+        rte
+
+        org     $660
+vbwait: move.w  ($C00004).l,d0          ; wait for the vertical blank flag to be set,
+        btst    #3,d0                   ; then to clear: the frame ends in the blank
+        beq.s   vbwait
+vbclr:  move.w  ($C00004).l,d0
+        btst    #3,d0
+        bne.s   vbclr
+        rts
+
         org     $700
 hint:   addq.w  #1,($FF0080).l
         rte
@@ -240,7 +263,8 @@ ROUTINES = {"sum": 0x400, "poke": 0x420, "dispatch": 0x440, "handler0": 0x480,
             "handler1": 0x48A, "handler2": 0x494, "handler3": 0x49E, "outer": 0x4C0,
             "send": 0x4E0, "spin": 0x510, "unused": 0x530, "relay": 0x550,
             "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0, "count": 0x5D0,
-            "below": 0x7E2, "tailc": 0x7F0, "busy": 0x720}
+            "below": 0x7E2, "tailc": 0x7F0, "busy": 0x720, "trapper": 0x620,
+            "vbwait": 0x660}
 NOCODE = 0x560
 Z_FETCH = 0x20
 LOOPS = 6
@@ -264,6 +288,7 @@ def build(directory, capabilities=None, pressed=("B",)):
         rom[offset:offset + 4] = (0x548).to_bytes(4, "big")
     rom[0x78:0x7C] = (0x540).to_bytes(4, "big")         # level 6: the vertical interrupt
     rom[0x70:0x74] = (0x700).to_bytes(4, "big")         # level 4: the horizontal interrupt
+    rom[0x80:0x84] = (0x640).to_bytes(4, "big")         # TRAP #0
     rom[0x100:0x110] = b"SEGA GENESIS    "
     rom[0x120:0x150] = b"NATIVEKIT CALL CONTROL".ljust(48, b" ")
     rom[0x150:0x180] = b"NATIVEKIT CALL CONTROL".ljust(48, b" ")
