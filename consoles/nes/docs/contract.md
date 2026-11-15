@@ -91,6 +91,22 @@ The game-specific adapter describes the exact SAROM board and image. It does
 not replace hardware behavior with title-specific fake register values,
 prerecorded audio/video, or snapshots. Unsupported hardware fails explicitly.
 
+## Controller poll provider
+
+The standard-pad snapshots in the `nnes` instance may come from static
+`nnes_set_buttons` calls or from the optional `nnes_set_input_poll` host
+provider. On each high-to-low `$4016` strobe transition, the provider receives
+its one-based poll number and fills both eight-button snapshots. The console
+latches them before the game reads serial bits. Registering or replacing the
+provider resets its poll number to one; clearing it returns to the static
+snapshots. Provider user data is borrowed and must remain valid while installed.
+
+The provider runs during the `$4016` write after its base bus cycle. Its
+callback must not re-enter `nnes`. On an error, the write returns that result,
+the strobe remains high, snapshots and poll number remain unchanged, and the
+host may retry. Installing or replacing the provider during an open RMW pair or
+another console callback returns `NNES_INVALID_SEQUENCE`.
+
 ## Register and flag rules
 
 The CPU state contains A, X, Y, S, P, and PC. P stores N/V/D/I/Z/C with U set

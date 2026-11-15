@@ -13,6 +13,10 @@ struct nnes {
     nnes_apu apu;
     nnes_ppu ppu;
     uint8_t buttons[2], latched[2], position[2], strobe;
+    nnes_input_poll_fn input_poll;
+    void *input_poll_user;
+    uint64_t input_poll_number;
+    uint8_t input_poll_callback_depth;
     uint16_t rmw_address;
     uint8_t rmw_value, rmw_open, rmw_phase;
     uint8_t oam_dma_pending, oam_dma_page, oam_dma_needs_alignment;
@@ -327,7 +331,20 @@ nnes_result nnes_charge_cpu_cycles(nnes *n, uint64_t cycles)
 nnes_result nnes_set_buttons(nnes *n, unsigned port, uint8_t buttons)
 {
     if (!n || port > 1) return NNES_INVALID_ARGUMENT;
+    if (n->input_poll_callback_depth) return NNES_INVALID_SEQUENCE;
     n->buttons[port] = buttons;
+    return NNES_OK;
+}
+
+nnes_result nnes_set_input_poll(nnes *n, nnes_input_poll_fn poll, void *user)
+{
+    if (!n) return NNES_INVALID_ARGUMENT;
+    if (n->rmw_open || n->cartridge_callback_depth ||
+        n->bus_trace_callback_depth || n->input_poll_callback_depth)
+        return NNES_INVALID_SEQUENCE;
+    n->input_poll = poll;
+    n->input_poll_user = poll ? user : NULL;
+    n->input_poll_number = 0;
     return NNES_OK;
 }
 
@@ -342,7 +359,8 @@ static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
                             uint8_t flags)
 {
     if (!n || !value) return NNES_INVALID_ARGUMENT;
-    if (n->bus_trace_callback_depth) return NNES_INVALID_SEQUENCE;
+    if (n->bus_trace_callback_depth || n->input_poll_callback_depth)
+        return NNES_INVALID_SEQUENCE;
     if (n->rmw_open) return NNES_INVALID_SEQUENCE;
     uint8_t open_bus_before = n->open_bus;
     uint64_t profile_tenths = 0;
@@ -439,6 +457,8 @@ static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
                              int native_access, nnes_bus_operation operation,
                              uint8_t flags)
 {
+    if (!n) return NNES_INVALID_ARGUMENT;
+    if (n->input_poll_callback_depth) return NNES_INVALID_SEQUENCE;
     uint8_t open_bus_before = n->open_bus;
     uint64_t profile_tenths = 0;
     nnes_result cycle_result = count_bus_cycle(n, address, 1, native_access,
@@ -460,13 +480,32 @@ static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
     } else if (address == 0x4016) {
         uint8_t strobe = value & 1;
         if (n->strobe && !strobe) {
-            for (unsigned i = 0; i < 2; ++i) {
-                n->latched[i] = n->buttons[i];
-                n->position[i] = 0;
+            uint8_t buttons[2] = {n->buttons[0], n->buttons[1]};
+            result = NNES_OK;
+            if (n->input_poll) {
+                if (n->input_poll_number == UINT64_MAX) {
+                    result = NNES_CYCLE_OVERFLOW;
+                } else {
+                    ++n->input_poll_callback_depth;
+                    result = n->input_poll(n->input_poll_user,
+                                           n->input_poll_number + 1, buttons);
+                    --n->input_poll_callback_depth;
+                    if (result == NNES_OK) ++n->input_poll_number;
+                }
             }
+            if (result == NNES_OK) {
+                n->buttons[0] = buttons[0];
+                n->buttons[1] = buttons[1];
+                for (unsigned i = 0; i < 2; ++i) {
+                    n->latched[i] = n->buttons[i];
+                    n->position[i] = 0;
+                }
+                n->strobe = strobe;
+            }
+        } else {
+            n->strobe = strobe;
+            result = NNES_OK;
         }
-        n->strobe = strobe;
-        result = NNES_OK;
     } else if (address == 0x4017) {
         result = nnes_apu_write_frame_counter(&n->apu, value);
     } else if (address == 0x4014) {

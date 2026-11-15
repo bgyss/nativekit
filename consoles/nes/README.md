@@ -64,6 +64,9 @@ register state, explicit bus accesses, and address-based C dispatch while
 allowing separate console instances. See the runnable
 [synthetic cartridge](examples/native_cart.c).
 
+The game-facing bus, timing, bank identity, controller-input, and failure
+guarantees are recorded in the [NES game contract](docs/contract.md).
+
 The versioned CPU work profile and reference trace format are described in
 [NES CPU cost profiles](docs/cost-profile.md). The repository includes a fitter and
 an optional Mesen collector that requires a source patch to preserve CPU
@@ -84,6 +87,9 @@ assets are included. The public API is provisional while hardware support grows.
   Standard-pad reads preserve CPU open-bus bits 7–5 and drive the lower pad
   lines; Famicom expansion devices, microphone/Zapper lines, and analog bus
   decay are not implemented.
+- Optional `nnes_set_input_poll` callback supplies both controller snapshots at
+  each high-to-low `$4016` strobe; static `nnes_set_buttons` snapshots remain
+  available when no host callback is installed.
 - Cartridge read/write callbacks for $4020–$FFFF; errors propagate to the caller.
 - CPU-visible PPU registers with $2000-$3FFF mirroring, the shared $2005/$2006
   latch, buffered PPUDATA reads, address increments, CHR mapper callbacks,
