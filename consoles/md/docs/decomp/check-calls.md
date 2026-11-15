@@ -131,6 +131,23 @@ compared (registers, hardware accesses, memory bytes, calls) and the first
 difference. The checker refuses a stream made from another ROM and a stream
 whose capabilities lack bus accesses or interrupt events.
 
+## Coverage writes
+
+A live run's scenario may carry work RAM writes made before a frame runs:
+
+```json
+"coverage_writes": {"320": [{"address": 16713408, "width": 2, "value": 8}]}
+```
+
+(`address` in work RAM, `width` 1 or 2, a word at an even address.) They
+put the machine in a state no recorded input reached (a later stage), so
+routines only that state runs get calls to check. The verdicts are sound
+for those calls: the original and the C start each from the same registers
+and memory. What they do not show is that play reaches the state, so the
+report says `"coverage_only": true`, and nothing else takes such a
+scenario: captures and the lockstep refuse it. Use them after scenarios
+that play to the state have been tried.
+
 ## Evidence
 
 `calls_check.py`, on an authored cartridge captured on the pinned reference
