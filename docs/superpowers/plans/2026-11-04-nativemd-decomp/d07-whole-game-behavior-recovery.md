@@ -1,8 +1,6 @@
 # D07: Recover and certify the complete game's C behavior
 
-**Status:** Started, 2026-11-15. First title (C kept privately): 270 of 303 routines with C reached across six scenarios (boot, gameplay, options, game over, attract, 27,000 frames of generated play through stage 3 and back to the title), none DIVERGENT per call; the long run found computed jumps into unrolled copy runs, which draft68k now drafts ([drafts](../../../../consoles/md/docs/decomp/drafts.md)). Unreached: 33 routines, 16 of them the multi-nibble analog controller's report (needs that device), the rest later events. Open: the rest of the census, lockstep certification (D05), behavior certification.
-
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Started, 2026-11-15. First title (C kept privately): 270 of 303 routines with C reached across six scenarios (boot, gameplay, options, game over, attract, 27,000 frames of generated play through stage 3 and back to the title), none DIVERGENT per call; the long run found computed jumps into unrolled copy runs, which draft68k now drafts ([drafts](../../../../consoles/md/docs/decomp/drafts.md)). Unreached: 33 routines, 16 of them the multi-nibble analog controller's report (needs that device), the rest later events. Open: the rest of the census, lockstep certification (D05), behavior certification. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
