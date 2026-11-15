@@ -154,6 +154,9 @@ build_blastem() {
     fi
     logged "$tc/blastem-build.log" make -C "$buildsrc" "libblastem.$ext" NOLTO=1 -j "$jobs"
     mkdir -p "$tc/blastem"
+    # a new file, not one rewritten in place: macOS kills a process that maps
+    # a library whose signed pages changed under the same inode
+    rm -f "$tc/blastem/libblastem.$ext"
     cp "$buildsrc/libblastem.$ext" "$tc/blastem/"
     echo "candidate reference core: $tc/blastem/libblastem.$ext"
 }

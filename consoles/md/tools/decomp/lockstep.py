@@ -264,6 +264,7 @@ def _reference(args, scenario, routines, rom_size):
     core = [None]
     counter, last_sync = c.c_uint32(), c.c_uint64()
     last_slice = [None]                         # the Z80 run slice the last instruction ran in
+    stop_at = [None]                            # where the Z80's last run stopped
     syncs, last_syncs = [], [0]                 # (instruction sequence, clock) per sync
 
     def refresh(at_access_start):
@@ -288,12 +289,14 @@ def _reference(args, scenario, routines, rom_size):
         z80_slice = None
         if event["cpu"] == Z80 and event["kind"] == 1:
             z80_slice = core[0].nmd_decomp_z80_slice_end()
+            if z80_slice != last_slice[0]:
+                stop_at[0] = core[0].nmd_decomp_z80_run_end()   # where the last run stopped
         closed = feed(event)
         if z80_slice is not None:
             # an instruction's event comes at the next opcode fetch: the first one in a
             # new run is of the instruction that ended the last run
             if last_slice[0] is not None and z80_slice != last_slice[0]:
-                feed.slice_end()
+                feed.slice_end(stop_at[0])
             last_slice[0] = z80_slice
         for call in closed:
             schedule[(call.cpu, call.address)].append({
@@ -313,6 +316,7 @@ def _reference(args, scenario, routines, rom_size):
                             "schedule": (_schedule_after(pause["state"])
                                          if call.cpu == M68K else None),
                             "r": pause["state"].get("r", 0), "wz": pause["state"].get("wz", 0),
+                            "stop": pause.get("stop") or pause["clock"],
                             "span": (pause["sequence"], pause["end_sequence"])
                             if pause["kind"] in ("interrupt", "exception") else None,
                             # the events up to the pause: a frame's last, or the interrupt
@@ -330,6 +334,7 @@ def _reference(args, scenario, routines, rom_size):
     machine.core.nmd_decomp_m68k_loop_syncs.restype = c.c_uint64
     machine.core.nmd_decomp_m68k_loop_sync_clock.restype = c.c_uint64
     machine.core.nmd_decomp_z80_slice_end.restype = c.c_uint64
+    machine.core.nmd_decomp_z80_run_end.restype = c.c_uint64
 
     # the original is never replaced here: the handler only notes when each entry is reached
     def note(cpu, pc, clock):
