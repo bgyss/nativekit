@@ -36,7 +36,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 | [D04](d04-per-routine-c-verification.md) | Verify C routines against original execution on both CPUs | D01 hooks, D03 shared catalog/decoder controls | gates met (synthetic) |
 | [D05](d05-whole-image-lockstep.md) | Verify combined C substitution under concurrent hardware execution | D01, D04 | partial |
 | [D06](d06-first-native-playable-slice.md) | Deliver the first game slice through the actual native launch path | D00 selected title, D02 execution path, D03 title skeleton, D04 and D05 verified checking infrastructure. | in progress |
-| [D07](d07-whole-game-behavior-recovery.md) | Recover and certify the complete game's C behavior | D06 first playable and stable A5/A7 infrastructure. | unstarted |
+| [D07](d07-whole-game-behavior-recovery.md) | Recover and certify the complete game's C behavior | D06 first playable and stable A5/A7 infrastructure. | started |
 | [D08](d08-symbolic-assembly-completion.md) | Finish the symbolic, byte-exact assembly record | D03 lossless skeleton and D07 behavior/census closure | unstarted |
 | [D09](d09-plain-typed-c.md) | Turn certified translations into maintainable plain C | D07 certified behavior | unstarted |
 | [D10](d10-full-native-game-and-timing.md) | Qualify complete native gameplay and measured timing | D02, D07 and D09 | unstarted |
