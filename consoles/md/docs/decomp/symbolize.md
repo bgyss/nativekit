@@ -32,26 +32,30 @@ and an instruction line must be the code map's instruction at the running
 address and advances by its length. A line that does not line up stops the
 tool.
 
-With `--baserom` the copy is rebuilt (`skeleton.rebuild`) and must be the
-image byte for byte. The assembler runs with `-no-opt`, so a named branch
+With `--baserom`, each accepted pointer table of the code map
+([jump tables](intake.md)) that lies in a raw span is written as its rows,
+`dc.l label` (or the raw value where a row is not assembled code), and the
+copy is rebuilt (`skeleton.rebuild`) and must be the image byte for byte. The assembler runs with `-no-opt`, so a named branch
 keeps its written size.
 
 ## Evidence
 
 `symbolize_check.py`, on the per-call control cartridge: 47 labels and 47
-operands named, routines called by name, two data labels, the rebuild
+operands named, routines called by name, two data labels, the dispatch
+table as four `dc.l` rows naming its handlers, the rebuild
 identical, no transfer to code left with a raw address; two planted errors (each label two bytes
 late; an operand naming the instruction after its target) break the
 rebuild.
 
 First title: 1,089 labels (76 of them data) and 2,702 operands (57 of them
-hardware addresses, 982 uses of 202 RAM variables) in the 68000 listing (23 routines by their names), 14 labels and 17 operands in the Z80
+hardware addresses, 982 uses of 202 RAM variables, 41 pointer-table rows)
+in the 68000 listing (23 routines by their names), 14 labels and 17 operands in the Z80
 programs;
 the copy rebuilds the image byte for byte.
 
 ## Limits
 
 Control flow, PC-relative data, hardware addresses and absolute RAM
-variables only. Absolute data references, RAM reached through address
-registers, jump-table rows and comments are D08's remaining steps; code the
+variables and pointer-table rows only. Absolute data references, RAM
+reached through address registers, branch and offset tables and comments are D08's remaining steps; code the
 census has not decoded stays a raw span.

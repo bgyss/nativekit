@@ -14,8 +14,9 @@ cut there. An absolute operand is left as written (it may be a number),
 except the console's own hardware addresses and work RAM variables
 (`($FF13AA).l`), which get equates (`VDP_CTRL equ $C00004`,
 `ram_13AA equ $FF13AA`, or the name `--names` gives the address).
-With --baserom the copy is rebuilt (skeleton.rebuild) and must be the image
-byte for byte; -no-opt keeps every branch at its written size.
+With --baserom, the rows of the code map's pointer tables are written as
+`dc.l label` in place of their raw bytes, and the copy is rebuilt
+(skeleton.rebuild) and must be the image byte for byte; -no-opt keeps every branch at its written size.
 
 The listing's addresses are recovered by walking it: `org` sets the address,
 an incbin or byte line advances it by its length, and an instruction line
@@ -103,26 +104,31 @@ def _walk(lines, instructions, program_sizes):
     return out
 
 
-def _split(line, start, cuts, label):
-    """An incbin of the image's own bytes, cut at each address in `cuts` with
-    that address's label between the pieces; None when the line is not one."""
+def _split(line, start, cuts, label, labelled, rows):
+    """An incbin of the image's own bytes, cut at each address in `cuts`: a
+    label where `labelled` has the address, and a pointer-table row (`rows`:
+    address -> operand text) as dc.l in place of its four bytes. None when the
+    line is not such an incbin."""
     match = INCBIN.match(line)
     if not match or match.group(2) is None:
         return None
     name, offset, length = match.group(1), int(match.group(2)), int(match.group(3))
     rest = line[match.end():]
-    pieces, at = [], start
-    for cut in list(cuts) + [start + length]:
-        if cut > at:
-            pieces.append('\tincbin\t"%s",%d,%d%s' % (name, offset + at - start, cut - at, rest))
-        if cut < start + length:
-            pieces.append(label(cut) + ":")
-        at = cut
+    pieces = []
+    bounds = [start] + [cut for cut in cuts if start < cut < start + length] + [start + length]
+    for at, end in zip(bounds, bounds[1:]):
+        if at in labelled:
+            pieces.append(label(at) + ":")
+        if at in rows and end - at == 4:
+            pieces.append("\tdc.l\t" + rows[at])
+        else:
+            pieces.append('\tincbin\t"%s",%d,%d%s' % (name, offset + at - start, end - at, rest))
     return pieces
 
 
-def symbolize_text(text, space, names=None):
-    """(new text, labels placed, operands rewritten) for one listing."""
+def symbolize_text(text, space, names=None, image=None):
+    """(new text, labels placed, operands rewritten) for one listing. With the
+    image's bytes, accepted pointer tables in raw spans are written as rows."""
     names = names or {}
     instructions = {i["at"]: i for i in space["instructions"]}
     entries = {e["at"] for e in space.get("entries", ())}
@@ -150,6 +156,20 @@ def symbolize_text(text, space, names=None):
                 targets.add(target)
             elif in_raw(target):
                 data.add(target)
+
+    # pointer-table rows inside raw spans: their values, from the image
+    row_values = {}
+    if image is not None:
+        for table in space.get("tables", ()):
+            if table["status"] != "accepted" or table["kind"] != "pointer" or table["at"] & 1:
+                continue
+            for row in range(table["rows"]):
+                at = table["at"] + 4 * row
+                if in_raw(at) and in_raw(at + 3):
+                    value = int.from_bytes(image[at - space["base"]:at - space["base"] + 4], "big")
+                    row_values[at] = value
+                    if value in coded:
+                        targets.add(value)
 
     def label(address):
         if address in names:
@@ -180,11 +200,15 @@ def symbolize_text(text, space, names=None):
             out.append(label(address) + ":")
             placed += 1
         if kind == "raw":
-            cuts = sorted(t for t in data if address <= t < address + length)
-            pieces = _split(line, address, cuts, label) if cuts else None
+            inside = {t for t in data if address <= t < address + length}
+            here = {at: (label(value) if value in coded else "$%X" % value)
+                    for at, value in row_values.items() if address <= at < address + length}
+            cuts = sorted(inside | set(here) | {at + 4 for at in here})
+            pieces = _split(line, address, cuts, label, inside, here) if cuts else None
             if pieces:
                 out.extend(pieces)
-                placed += len(cuts)
+                placed += len(inside)
+                rewritten += sum(1 for value in here.values() if not value.startswith("$"))
                 continue
         if kind == "code":
             record = instructions[address]
@@ -215,8 +239,9 @@ def symbolize_text(text, space, names=None):
     return "\n".join(out), placed, rewritten
 
 
-def symbolize(skeleton_dir, codemap, out_dir, names=None):
-    """Write the symbolic copy; return {listing: (labels, operands)}."""
+def symbolize(skeleton_dir, codemap, out_dir, names=None, image=None):
+    """Write the symbolic copy; return {listing: (labels, operands)}. `image`
+    (the ROM's bytes) lets pointer tables be written as rows."""
     skeleton_dir, out_dir = pathlib.Path(skeleton_dir), pathlib.Path(out_dir)
     manifest = json.loads((skeleton_dir / skeleton.MANIFEST).read_text())
     spaces = {space["id"]: space for space in codemap["spaces"]}
@@ -231,7 +256,8 @@ def symbolize(skeleton_dir, codemap, out_dir, names=None):
         space = dict(rom_space if space_id == "rom" else spaces[space_id])
         space["_program_sizes"] = sizes
         text = (skeleton_dir / "asm" / source).read_text()
-        new, placed, rewritten = symbolize_text(text, space, names if space_id == "rom" else None)
+        new, placed, rewritten = symbolize_text(text, space, names if space_id == "rom" else None,
+                                                image if space_id == "rom" else None)
         (out_dir / "asm" / source).write_text(new)
         report[source] = {"labels": placed, "operands": rewritten}
     for path in (skeleton_dir / "asm").iterdir():   # anything else the listings include
@@ -256,8 +282,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         codemap = json.loads(pathlib.Path(args.codemap).read_text())
+        image = pathlib.Path(args.baserom).read_bytes() if args.baserom else None
         report = symbolize(args.skeleton, codemap, args.out,
-                           load_names(args.names) if args.names else None)
+                           load_names(args.names) if args.names else None, image)
         for source, counts in report.items():
             print("symbolize: %s: %d labels, %d operands named"
                   % (source, counts["labels"], counts["operands"]))

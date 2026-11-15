@@ -5,7 +5,7 @@ The per-call control cartridge is taken in, its skeleton symbolized with the
 routines' names, and the copy rebuilt: it must be the image byte for byte,
 name every routine it calls, and leave no branch, call or jump to code with
 a raw address; a PC-relative reference into a raw span names a label that
-cuts the span; the console's hardware addresses and the work RAM variables are equates. Two planted errors (each label one instruction late, and an
+cuts the span; a pointer table's rows are `dc.l` with their handlers' names; the console's hardware addresses and the work RAM variables are equates. Two planted errors (each label one instruction late, and an
 operand naming the instruction after its target) must break the rebuild.
 """
 import importlib
@@ -34,7 +34,7 @@ def require(condition, message):
 
 
 def run(module, skeleton_dir, codemap, out, rom_path, names):
-    report = module.symbolize(skeleton_dir, codemap, out, names)
+    report = module.symbolize(skeleton_dir, codemap, out, names, rom_path.read_bytes())
     return report, skeleton.rebuild(out, rom_path)
 
 
@@ -59,6 +59,10 @@ def main():
         data = re.findall(r"\((dat_[0-9A-F]{6}),pc", text)
         require(data and all(re.search(r"^%s:$" % name, text, re.M) for name in data),
                 "PC-relative data references are not labelled: %r" % data)
+        # the dispatch table's rows are its handlers, by name
+        rows = re.findall(r"^\tdc\.l\t(\w+)$", text, re.M)
+        require(rows == ["handler0", "handler1", "handler2", "handler3"],
+                "the pointer table is not written as its rows: %r" % rows)
         # the console's addresses by name, with their equates
         require(re.search(r"^VDP_CTRL\tequ\t\$C00004$", text, re.M) and "(VDP_CTRL).l" in text and
                 "(Z80_BUSREQ).l" in text and "($C00004).l" not in text,
