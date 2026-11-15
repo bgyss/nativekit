@@ -19,7 +19,10 @@ A PC-relative operand (`lea ($454,pc),a0`) that addresses a raw span of the
 image names a `dat_XXXXXX` label, and the span's incbin is cut at it. An
 absolute operand is left as written: `lea ($B000).l,a0` can be a VRAM
 address as well as a pointer into the image, and only a title's own notes
-can say which.
+can say which. The console's own addresses are the exception: `$C00004` is
+the VDP control port on every cartridge, so absolute operands and
+immediates with those values name equates (`VDP_CTRL equ $C00004`) written
+before the listing's `org`.
 
 The listing carries no addresses, so they are recovered by walking it:
 `org` sets the address, an incbin or byte line advances it by its length,
@@ -39,13 +42,13 @@ identical, no transfer to code left with a raw address; two planted errors (each
 late; an operand naming the instruction after its target) break the
 rebuild.
 
-First title: 1,089 labels (76 of them data) and 1,663 operands in the 68000
-listing (23 routines by their names), 14 labels and 17 operands in the Z80
+First title: 1,089 labels (76 of them data) and 1,720 operands (57 of them
+hardware addresses) in the 68000 listing (23 routines by their names), 14 labels and 17 operands in the Z80
 programs;
 the copy rebuilds the image byte for byte.
 
 ## Limits
 
-Control flow and PC-relative data only. Absolute data references, RAM and
-hardware addresses, jump-table rows and comments are D08's remaining steps; code the
+Control flow, PC-relative data and hardware addresses only. Absolute data
+references, RAM variables, jump-table rows and comments are D08's remaining steps; code the
 census has not decoded stays a raw span.

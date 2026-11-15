@@ -1,6 +1,6 @@
 # D08: Finish the symbolic, byte-exact assembly record
 
-**Status:** Started, 2026-11-15: [symbolize.py](../../../../consoles/md/docs/decomp/symbolize.md) names every direct branch, call and jump to assembled code and rebuilds byte for byte and PC-relative data reference (first title: 1,089 labels, 76 of them data, and 1,663 operands in the 68000 listing, the Z80 programs too). Open: absolute data references, RAM and hardware symbols, jump-table rows, comments, undecoded code, the final census reconciliation. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Started, 2026-11-15: [symbolize.py](../../../../consoles/md/docs/decomp/symbolize.md) names every direct branch, call and jump to assembled code and rebuilds byte for byte and PC-relative data reference, and the console's hardware addresses by equates (first title: 1,089 labels, 76 of them data, and 1,720 operands in the 68000 listing, the Z80 programs too). Open: absolute data references, RAM symbols, jump-table rows, comments, undecoded code, the final census reconciliation. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 

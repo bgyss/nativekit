@@ -10,7 +10,9 @@ target by a label, and every such target carries one: `sub_XXXXXX` at a
 routine entry, `loc_XXXXXX` elsewhere, or the name `--names` gives the
 address ({"$5D2A": "draw_text"}). A PC-relative operand that addresses a
 raw span of the image names a `dat_XXXXXX` label, and the span's incbin is
-cut there. An absolute operand is left as written: it may be a number.
+cut there. An absolute operand is left as written (it may be a number),
+except the console's own hardware addresses, which get equates
+(`VDP_CTRL equ $C00004`).
 With --baserom the copy is rebuilt (skeleton.rebuild) and must be the image
 byte for byte; -no-opt keeps every branch at its written size.
 
@@ -39,6 +41,17 @@ MEMORY = re.compile(r"\(\$([0-9A-F]+)(?=,pc)")
 BYTES_LINE = re.compile(r"^\t(?:dc\.b|db)\t([^\t;]*)")
 INCBIN = re.compile(r'^\tincbin\t"([^"]+)"(?:,(\d+),(\d+))?')
 DIRECT = ("jump", "cond", "call")
+# the console's own addresses: the same on every cartridge
+HARDWARE = {
+    0xA00000: "Z80_RAM", 0xA04000: "YM_ADDR0", 0xA04001: "YM_DATA0", 0xA04002: "YM_ADDR1",
+    0xA04003: "YM_DATA1", 0xA10001: "IO_VERSION", 0xA10003: "IO_DATA1", 0xA10005: "IO_DATA2",
+    0xA10007: "IO_DATA3", 0xA10009: "IO_CTRL1", 0xA1000B: "IO_CTRL2", 0xA1000D: "IO_CTRL3",
+    0xA11100: "Z80_BUSREQ", 0xA11200: "Z80_RESET", 0xA14000: "TMSS",
+    0xC00000: "VDP_DATA", 0xC00004: "VDP_CTRL", 0xC00008: "VDP_HV", 0xC00011: "PSG",
+}
+# a hardware address as an absolute long operand or an immediate
+HARDWARE_USE = re.compile(r"(?:(?<=\()|(?<=#))\$(%s)(?=\)\.l|\b)"
+                          % "|".join("%X" % address for address in HARDWARE))
 
 
 class SymbolizeError(RuntimeError):
@@ -143,6 +156,12 @@ def symbolize_text(text, space, names=None):
         return ("sub_%06X" if address in entries else "loc_%06X") % address
 
     out, placed, rewritten = [], 0, 0
+    hardware = set()
+
+    def hardware_name(match):
+        hardware.add(int(match.group(1), 16))
+        return HARDWARE[int(match.group(1), 16)]
+
     for index, address, kind, length in walked:
         line = lines[index]
         if kind == "label":
@@ -170,8 +189,15 @@ def symbolize_text(text, space, names=None):
                 if new != body:
                     body = new
                     rewritten += 1
+            if space.get("cpu") == "m68k":
+                body, count = HARDWARE_USE.subn(hardware_name, body)
+                rewritten += count
             line = body + sep + rest
         out.append(line)
+    if hardware:                        # their equates, before the first org
+        at = next(index for index, line in enumerate(out) if line.startswith("\torg\t"))
+        out[at:at] = ["%s\tequ\t$%X" % (HARDWARE[address], address)
+                      for address in sorted(hardware)]
     return "\n".join(out), placed, rewritten
 
 
