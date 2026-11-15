@@ -64,19 +64,24 @@ background/sprite overlap while rendering remains unimplemented.
 
 A fresh 40-frame two-Start run still matches all 1,550 typed bus operations
 from the second `$BDB4` entry through fixed-bank `$C9F5`; the `$FCDB` SP and
-12-byte `$C9F5` stack window match Mesen. The extended native path now reaches
-missing `$CA08`, and its `$CA08` stack matches. The 9,897-operation reference
-route matches the native route after aligning two additional `$FF78` poll
-pairs before NMI; NMI entry is 3 CPU cycles later natively. Timed checkpoints
-at `$C9F5`, `$FC98`, and `$FCAD` are within 5, 2, and 1 CPU cycles of Mesen.
-The second Start controller read remains 96.7 cycles later natively, although
-the input sample frame and route match. `$81B8` is an internal branch in
-bank-1 `$81A0`, not a missing routine. The tested `$BD36` branch clears OAM
-while `$93 == $FF`; its active animation stream remains uncompared. Continue
-from the current private ledger and code, preserving bank-aware routine
-identities and the SAROM adapter. Recover the missing `$CA08` continuation,
-then exercise the active animation branch. Alternate `$FD00`, rendering,
-audio and gameplay remain open.
+12-byte `$C9F5` stack window match Mesen. The 9,897-operation route through
+`$CA08` matches after one extra native `$FF78` poll pair before NMI; NMI entry
+is 2.4 cycles later. The `$C9F5`, `$FC98`, and `$FCAD` phases are within 0.5,
+1.9, and 0.4 cycles of Mesen, and the `$CA08` stack matches. The native route
+continues through `$F678/$F842/$FC4D`, `$C17A`, and `$C1B9`. The `$C17A` entry
+stack/registers match, and the first fill continuation matches 12,111 typed
+bus events through the `$C1C8` return after aligning one reference poll pair.
+The standalone `$C1B9` call matches 2,910 bus events and 8,824 cycles; its
+entry is 3.3 cycles from Mesen. F842's final wait and BRK signature `$01`
+dispatch through `$FD3A/$FCBD/$FCEC` to missing bank-0 `$AA7E`. The second
+C17A wait and full F842 dispatch span remain unpaired. The second Start read
+is 102.1 cycles later natively within its 128-cycle bound. `$81B8` is an
+internal branch in bank-1 `$81A0`, not a missing routine. The tested `$BD36`
+branch clears OAM while `$93 == $FF`; its active animation stream remains
+uncompared. Continue from the private ledger, preserving bank-aware routine
+identities and the SAROM adapter. Recover bank-0 `$AA7E`, then qualify the
+remaining C17A route and active animation branch. Alternate `$FD00`, rendering,
+audio, and gameplay remain open.
 
 The pinned MesenCE 120-frame no-input profile has 139.44-cycle gap RMSE,
 +1.04% mean bias, and 2.80% p95 absolute relative error. A 40-frame Start
