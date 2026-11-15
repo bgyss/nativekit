@@ -136,9 +136,34 @@ def _required_capability_mask(scenario):
     return mask
 
 
-def _validate_scenario(scenario, frames):
+def _validate_scenario(scenario, frames, coverage=False):
+    """`coverage`: the caller applies `coverage_writes` (a live per-call run).
+    Such a scenario puts the machine in a state play did not reach, so no
+    other run accepts it."""
     if not isinstance(scenario, dict) or scenario.get("version") != 1:
         raise RunnerError("unsupported scenario version")
+    writes = scenario.get("coverage_writes")
+    if writes is not None:
+        if not coverage:
+            raise RunnerError("a scenario with coverage_writes is for a live per-call run only")
+        if not isinstance(writes, dict):
+            raise RunnerError("coverage_writes must map frames to work RAM writes")
+        for frame_text, items in writes.items():
+            if (not isinstance(frame_text, str) or not frame_text.isdecimal() or
+                    str(int(frame_text)) != frame_text or not 1 <= int(frame_text) <= frames):
+                raise RunnerError("coverage_writes frame is not canonical or in range")
+            if not isinstance(items, list) or not items:
+                raise RunnerError("coverage_writes frame must list its writes")
+            for item in items:
+                if not isinstance(item, dict) or set(item) != {"address", "width", "value"}:
+                    raise RunnerError("a coverage write is {address, width, value}")
+                address, width, value = item["address"], item["width"], item["value"]
+                if type(address) is not int or type(value) is not int or width not in (1, 2):
+                    raise RunnerError("a coverage write is {address, width, value}")
+                if not 0xFF0000 <= address <= 0xFFFFFF - (width - 1) or (width == 2 and address & 1):
+                    raise RunnerError("a coverage write must lie in work RAM, a word at an even address")
+                if not 0 <= value < 1 << (8 * width):
+                    raise RunnerError("a coverage write's value does not fit its width")
     if scenario.get("region") not in ("J", "U", "E"):
         raise RunnerError("invalid scenario region")
     if scenario.get("model") not in ("md1va3", "md1va6"):

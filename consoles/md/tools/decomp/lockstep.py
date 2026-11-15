@@ -98,6 +98,10 @@ class Machine:
         self.inputs = {}
         self.keep_picture = False       # keep the last frame's pixels in self.picture
         self.picture = None
+        self.frames_run = 0
+        # coverage_writes (run.py): work RAM writes before a frame runs
+        self.coverage = {int(frame): items
+                         for frame, items in scenario.get("coverage_writes", {}).items()}
         self.video = hashlib.sha256()
         self.audio = hashlib.sha256()
         options = {
@@ -218,10 +222,26 @@ class Machine:
         self.core.retro_unload_game()
         self.core.retro_deinit()
 
+    def _write_ram(self, address, width, value):
+        """A coverage write: the core keeps work RAM as host-endian words."""
+        self.core.retro_get_memory_data.restype = c.c_void_p
+        base = self.core.retro_get_memory_data(2)       # RETRO_MEMORY_SYSTEM_RAM
+        if not base:
+            raise LockstepError("the core does not expose work RAM")
+        ram = (c.c_uint8 * 0x10000).from_address(base)
+        offset = address & 0xFFFF
+        if width == 2:
+            ram[offset], ram[offset + 1] = value & 0xFF, value >> 8
+        else:
+            ram[offset ^ 1] = value
+
     def frame(self, inputs):
         """Run one frame; the hashes of its picture, sound and snapshot regions."""
         self.inputs = inputs
         self.video, self.audio = hashlib.sha256(), hashlib.sha256()
+        self.frames_run += 1
+        for item in self.coverage.get(self.frames_run, ()):
+            self._write_ram(item["address"], item["width"], item["value"])
         self.core.retro_run()
         if self.core.nmd_decomp_error():
             self.errors.append("the core reported an NMDH error")

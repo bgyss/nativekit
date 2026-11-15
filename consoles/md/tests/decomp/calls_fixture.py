@@ -10,7 +10,8 @@ enables the vertical interrupt in a routine and runs a
 routine long enough to be interrupted, and one that polls the VDP status
 through a vertical blank, across the end of a frame. The Z80 loops calling a routine that adds the byte the 68000
 sent to a total, writes the YM address port and reads the status. One
-routine with C is never called. Nothing here comes from a game.
+routine with C is called only when work RAM $FF00F0 is set, which no input
+does (a coverage write can). Nothing here comes from a game.
 """
 import json
 import pathlib
@@ -70,7 +71,10 @@ main:   lea     (words,pc),a0
         cmp.w   #7,d6
         bne.s   skip
         bsr.w   unused
-skip:   move.l  #$12345678,($FF0100).l
+skip:   tst.w   ($FF00F0).l             ; set only by a coverage write
+        beq.s   nocov
+        bsr.w   unused
+nocov:  move.l  #$12345678,($FF0100).l
         move.l  #$9ABCDEF0,($FF0104).l
         bsr.w   pad
         moveq   #5,d5

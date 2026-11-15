@@ -194,6 +194,40 @@ def live(temp, rom_path, scenario_path, library, stream_report):
                                   temp / "live-plant.json")
     row = next(r for r in report["routines"] if r["name"] == "sum")
     require(row["verdict"] == "DIVERGENT", "a planted error passed a live run: %r" % row)
+    require(report["coverage_only"] is False, "a plain run is marked coverage-only")
+    coverage(temp, rom_path, scenario_path, library)
+
+
+def coverage(temp, rom_path, scenario_path, library):
+    """A coverage write reaches a routine no input does; its report says so, and no
+    other run takes such a scenario."""
+    scenario = json.loads(scenario_path.read_text())
+    scenario["coverage_writes"] = {"1": [{"address": 0xFF00F0, "width": 2, "value": 1}]}
+    path = temp / "coverage.json"
+    path.write_text(json.dumps(scenario))
+    report = check_calls.run_live(census_fixture.CORE, rom_path, path, 4, library,
+                                  temp / "coverage-report.json")
+    row = next(r for r in report["routines"] if r["name"] == "unused")
+    require(report["coverage_only"] is True and row["verdict"] == "IDENTICAL" and
+            row["calls"] == 1, "a coverage write did not reach the routine: %r" % row)
+    for bad in ({"address": 0xA00000, "width": 1, "value": 1},      # not work RAM
+                {"address": 0xFF00F1, "width": 2, "value": 1},      # a word at an odd address
+                {"address": 0xFF00F0, "width": 1, "value": 256}):   # does not fit
+        scenario["coverage_writes"] = {"1": [bad]}
+        path.write_text(json.dumps(scenario))
+        try:
+            check_calls.run_live(census_fixture.CORE, rom_path, path, 4, library)
+        except RuntimeError:
+            continue
+        raise AssertionError("a bad coverage write was accepted: %r" % bad)
+    scenario["coverage_writes"] = {"1": [{"address": 0xFF00F0, "width": 2, "value": 1}]}
+    path.write_text(json.dumps(scenario))
+    import lockstep
+    live_library = hybrid.build([calls_fixture.SOURCE], temp / "hybrid-coverage", runtime="live")
+    refused = lockstep.run(census_fixture.CORE, rom_path, path, 4, live_library,
+                           temp / "coverage-lockstep")
+    require(refused["verdict"] == "INCONCLUSIVE" and refused["certified"] is False,
+            "the lockstep took a coverage scenario: %r" % refused.get("verdict"))
 
 
 def native_source(temp):
@@ -223,6 +257,7 @@ def main():
           "the byte sent between them IDENTICAL; %d planted errors DIVERGENT for their reason; "
           "an interrupted call judged apart from its handler, UNVERIFIED when it differs; fallback and uncalled routines never IDENTICAL; 3 refusals; "
           "%d calls IDENTICAL from a frame window; the same verdicts from a live run; "
+          "a coverage write reaches the uncalled routine, marked coverage-only, and is refused elsewhere; "
           "the C compiles for a native cart)"
           % (calls, z80_calls, errors, windowed))
 

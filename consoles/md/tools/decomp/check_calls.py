@@ -602,7 +602,7 @@ def run_live(core, rom_path, scenario_path, frames, library_path, out=None, cont
     import run as runner
     rom = pathlib.Path(rom_path).read_bytes()
     scenario = runner._validate_scenario(json.loads(pathlib.Path(scenario_path).read_text()),
-                                         frames)
+                                         frames, coverage=True)
     checker = Checker(rom, library_path, contracts)
     rows = _rows(checker)
     frame = [0]
@@ -632,6 +632,9 @@ def run_live(core, rom_path, scenario_path, frames, library_path, out=None, cont
                        "core_sha256": sha(core), "scenario_sha256": sha(scenario_path),
                        "library_sha256": sha(library_path)},
         "window": {"first_frame": first_frame, "last_frame": frames, "live": True},
+        # work RAM was written from outside: the verdicts hold for the calls made, but
+        # the states are not ones play was shown to reach
+        "coverage_only": bool(scenario.get("coverage_writes")),
         "contracts": contracts or {},
         "routines": _finish(rows),
     }
