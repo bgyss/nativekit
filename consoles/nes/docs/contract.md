@@ -91,21 +91,22 @@ The game-specific adapter describes the exact SAROM board and image. It does
 not replace hardware behavior with title-specific fake register values,
 prerecorded audio/video, or snapshots. Unsupported hardware fails explicitly.
 
-## Controller poll provider
+## Frame-sampled controller input
 
 The standard-pad snapshots in the `nnes` instance may come from static
-`nnes_set_buttons` calls or from the optional `nnes_set_input_poll` host
-provider. On each high-to-low `$4016` strobe transition, the provider receives
-its one-based poll number and fills both eight-button snapshots. The console
-latches them before the game reads serial bits. Registering or replacing the
-provider resets its poll number to one; clearing it returns to the static
-snapshots. Provider user data is borrowed and must remain valid while installed.
+`nnes_set_buttons` calls or from the optional `nnes_set_input_frame` host
+provider. Registration samples frame 1 immediately. The callback receives a
+one-based frame number and fills both eight-button snapshots at each NTSC PPU
+frame boundary, before the next frame's CPU operations. With no provider, the
+values supplied by `nnes_set_buttons` remain in effect. Provider user data is
+borrowed and must remain valid while installed.
 
-The provider runs during the `$4016` write after its base bus cycle. Its
-callback must not re-enter `nnes`. On an error, the write returns that result,
-the strobe remains high, snapshots and poll number remain unchanged, and the
-host may retry. Installing or replacing the provider during an open RMW pair or
-another console callback returns `NNES_INVALID_SEQUENCE`.
+The `$4016` high-to-low strobe still latches the current snapshots; it does not
+poll the host. The frame callback receives no console pointer and must not
+re-enter `nnes`. Installing or replacing the provider after CPU time has begun,
+during an open RMW pair, or from another console callback returns
+`NNES_INVALID_SEQUENCE`. This frame seam follows the deterministic controller
+schedule used by headless reference captures and future interactive hosts.
 
 ## Register and flag rules
 

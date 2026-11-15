@@ -87,9 +87,10 @@ assets are included. The public API is provisional while hardware support grows.
   Standard-pad reads preserve CPU open-bus bits 7–5 and drive the lower pad
   lines; Famicom expansion devices, microphone/Zapper lines, and analog bus
   decay are not implemented.
-- Optional `nnes_set_input_poll` callback supplies both controller snapshots at
-  each high-to-low `$4016` strobe; static `nnes_set_buttons` snapshots remain
-  available when no host callback is installed.
+- Optional `nnes_set_input_frame` callback supplies both controller snapshots
+  at each NTSC PPU frame boundary; the standard `$4016` strobe latches those
+  snapshots. Static `nnes_set_buttons` values remain available without a host
+  callback.
 - Cartridge read/write callbacks for $4020–$FFFF; errors propagate to the caller.
 - CPU-visible PPU registers with $2000-$3FFF mirroring, the shared $2005/$2006
   latch, buffered PPUDATA reads, address increments, CHR mapper callbacks,

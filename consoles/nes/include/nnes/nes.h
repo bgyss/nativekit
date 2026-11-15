@@ -57,11 +57,10 @@ enum {
     NNES_LEFT = 1u << 6, NNES_RIGHT = 1u << 7
 };
 
-/* Optional host input source. The callback receives a one-based controller
- * poll number and fills both standard-pad snapshots. It runs on a $4016
- * high-to-low strobe transition, before the console latches the snapshots. */
-typedef nnes_result (*nnes_input_poll_fn)(void *user, uint64_t poll_number,
-                                          uint8_t buttons[2]);
+/* Optional host input source. The callback receives a one-based PPU frame
+ * number and fills both standard-pad snapshots before that frame's CPU work. */
+typedef void (*nnes_input_frame_fn)(void *user, uint64_t frame_number,
+                                    uint8_t buttons[2]);
 
 typedef nnes_result (*nnes_read_fn)(void *user, uint16_t address, uint8_t *value);
 typedef nnes_result (*nnes_write_fn)(void *user, uint16_t address, uint8_t value);
@@ -170,11 +169,11 @@ nnes_result nnes_write(nnes *console, uint16_t address, uint8_t value);
 nnes_result nnes_ppu_take_nmi(nnes *console, int *pending);
 /* Port is 0 or 1. Standard joypads only; read results expose bit 0 only. */
 nnes_result nnes_set_buttons(nnes *console, unsigned port, uint8_t buttons);
-/* Install or clear the optional controller poll provider. Registration resets
- * its one-based poll number. A callback error leaves the strobe high and the
- * previous snapshots latched, so the host may retry the same poll. Cannot be
- * changed during an RMW pair or another console callback. */
-nnes_result nnes_set_input_poll(nnes *console, nnes_input_poll_fn poll,
+/* Install or clear the optional per-frame controller provider. Registration
+ * samples frame 1 immediately; subsequent frames are sampled at PPU frame
+ * boundaries. It must be installed before the first bus cycle and may not
+ * reenter the console. */
+nnes_result nnes_set_input_frame(nnes *console, nnes_input_frame_fn input,
                                 void *user);
 /* Invokes the registered routine whose (mapped code identity, CPU address)
  * matches the cartridge's current mapping; never executes machine code. */

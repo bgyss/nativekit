@@ -14,7 +14,7 @@ evidence. A plan or additional convenience helpers alone do not achieve it.
 
 ## Restart baseline and first actions
 
-**Current execution goal, updated 2026-11-14.** Resume the existing Dragon
+**Current execution goal, updated 2026-11-15.** Resume the existing Dragon
 Warrior (USA) (Rev A) recovery. Do not restart title selection or treat the
 reference-capture infrastructure as the finished native game.
 
@@ -55,13 +55,14 @@ existing evidence, including values and timestamps. A new 120-frame no-input
 profile recorded 2,620,456 typed callbacks and normalized successfully.
 These are reference capture continuity checks, not native-game parity.
 
-The private ledger currently reports incomplete PPU rendering, APU channels,
-DMC DMA, host/frame execution, battery persistence and later gameplay. Its next
-work starts at the Start route through `$BD17`, the repeated `$BCCF` controller
-poll, measured `$FF78`/`$FF7A` NMI return differences, and alternate `$FD00`.
-Re-read the current ledger and code before choosing the next slice; newer
-committed title work takes precedence over this snapshot. Preserve bank-aware
-routine identities and the existing SAROM adapter.
+The private ledger still reports incomplete PPU rendering, APU channels, DMC
+DMA, host/frame execution, battery persistence and gameplay. A fresh 40-frame
+two-Start capture now matches all 1,506 typed MesenCE bus operations from the
+second `$BDB4` entry through missing fixed-bank `$FCDB`. The tested `$BD36`
+branch clears OAM while `$93 == $FF`; its active animation stream remains
+uncompared. Continue from the current private ledger and code, preserving
+bank-aware routine identities and the SAROM adapter. The measured `$FF78` /
+`$FF7A` NMI return differences and alternate `$FD00` remain open.
 
 Maintain independent platform and game commits. Recovered game source belongs
 only in the private title repository. A thread touching both repositories needs

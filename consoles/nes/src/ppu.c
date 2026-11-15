@@ -14,12 +14,19 @@ void nnes_ppu_init(nnes_ppu *ppu)
     if (ppu) memset(ppu, 0, sizeof(*ppu));
 }
 
-static void ppu_advance_dots(nnes_ppu *ppu, uint64_t dots)
+static void ppu_advance_dots(nnes_ppu *ppu, uint64_t dots,
+                             nnes_ppu_frame_fn frame, void *user)
 {
     if (dots >= PPU_FRAME_DOTS) {
         uint64_t full_frames = dots / PPU_FRAME_DOTS;
         dots %= PPU_FRAME_DOTS;
         if (full_frames) {
+            uint64_t first_completed_frame = ppu->frame_count;
+            ppu->frame_count += full_frames;
+            if (frame) {
+                for (uint64_t index = 0; index < full_frames; ++index)
+                    frame(user, first_completed_frame + index + 2);
+            }
             if (ppu->ctrl & 0x80) ppu->nmi_pending = 1;
             if (ppu->frame_dot >= PPU_VBLANK_START &&
                 ppu->frame_dot < PPU_VBLANK_END)
@@ -47,18 +54,21 @@ static void ppu_advance_dots(nnes_ppu *ppu, uint64_t dots)
             ppu->status &= (uint8_t)~PPU_STATUS_VBLANK;
         } else if (ppu->frame_dot == PPU_FRAME_DOTS) {
             ppu->frame_dot = 0;
+            ++ppu->frame_count;
+            if (frame) frame(user, ppu->frame_count + 1);
         }
     }
 }
 
-void nnes_ppu_advance_tenths(nnes_ppu *ppu, uint64_t tenths)
+void nnes_ppu_advance_tenths(nnes_ppu *ppu, uint64_t tenths,
+                             nnes_ppu_frame_fn frame, void *user)
 {
     if (!ppu) return;
     uint64_t cpu_cycles = tenths / 10;
     unsigned fractional = ppu->time_remainder + (unsigned)(tenths % 10);
     cpu_cycles += fractional / 10;
     ppu->time_remainder = (uint8_t)(fractional % 10);
-    ppu_advance_dots(ppu, cpu_cycles * 3);
+    ppu_advance_dots(ppu, cpu_cycles * 3, frame, user);
 }
 
 static nnes_result ppu_get_mirroring(const nnes_ppu_mapper *mapper,

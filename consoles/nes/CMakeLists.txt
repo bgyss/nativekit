@@ -44,7 +44,7 @@ endfunction()
 if(NNES_TESTS)
   enable_testing()
   foreach(_t contract machine_contract control_contract bus_operation_contract
-             ppu_contract jsr_contract apu_status_contract input_poll_contract)
+             ppu_contract jsr_contract apu_status_contract input_frame_contract)
     nnes_program(nnes_${_t} tests/${_t}.c)
     add_test(NAME nnes_${_t} COMMAND nnes_${_t})
     list(APPEND _nnes_checks COMMAND nnes_${_t})
