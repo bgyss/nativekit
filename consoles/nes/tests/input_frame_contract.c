@@ -55,11 +55,15 @@ static void latch_pads(nnes *console)
     OK(nnes_write(console, 0x4016, 0));
 }
 
-static uint64_t cycles_until_next_frame(nnes *console)
+static uint64_t cycles_until_next_input_poll(nnes *console)
 {
     const uint64_t frame_dots = 341u * 262u;
+    const uint64_t input_poll_dot = 241u * 341u;
     uint64_t dots = (nnes_cpu_cycles(console) * 3) % frame_dots;
-    return (frame_dots - dots + 2) / 3;
+    uint64_t until_poll = dots < input_poll_dot
+        ? input_poll_dot - dots
+        : frame_dots - dots + input_poll_dot;
+    return (until_poll + 2) / 3;
 }
 
 int main(void)
@@ -81,10 +85,10 @@ int main(void)
     latch_pads(console);
     CHECK(state.calls == 1);
 
-    /* The callback fires once as the current frame crosses its dot boundary. */
-    uint64_t to_next_frame = cycles_until_next_frame(console);
-    CHECK(to_next_frame > 1);
-    OK(nnes_charge_cpu_cycles(console, to_next_frame - 1));
+    /* Frame 2 is sampled at the NTSC input poll scanline, before frame wrap. */
+    uint64_t to_next_input_poll = cycles_until_next_input_poll(console);
+    CHECK(to_next_input_poll > 1);
+    OK(nnes_charge_cpu_cycles(console, to_next_input_poll - 1));
     CHECK(state.calls == 1);
     OK(nnes_charge_cpu_cycles(console, 1));
     CHECK(state.calls == 2 && state.frame_numbers[1] == 2);
@@ -97,7 +101,7 @@ int main(void)
     CHECK(read_bit(console, 1) == 1); /* Select */
     CHECK(read_bit(console, 1) == 1); /* Start */
 
-    OK(nnes_charge_cpu_cycles(console, cycles_until_next_frame(console)));
+    OK(nnes_charge_cpu_cycles(console, cycles_until_next_input_poll(console)));
     CHECK(state.calls == 3 && state.frame_numbers[2] == 3);
     latch_pads(console);
     CHECK(read_bit(console, 0) == 0); /* A */

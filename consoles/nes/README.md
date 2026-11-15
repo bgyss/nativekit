@@ -88,23 +88,24 @@ assets are included. The public API is provisional while hardware support grows.
   lines; Famicom expansion devices, microphone/Zapper lines, and analog bus
   decay are not implemented.
 - Optional `nnes_set_input_frame` callback supplies both controller snapshots
-  at each NTSC PPU frame boundary; the standard `$4016` strobe latches those
-  snapshots. Static `nnes_set_buttons` values remain available without a host
-  callback.
+  at the NTSC input sample point (scanline 241, cycle 0) for the upcoming
+  frame; the standard `$4016` strobe latches those snapshots. Static
+  `nnes_set_buttons` values remain available without a host callback.
 - Cartridge read/write callbacks for $4020–$FFFF; errors propagate to the caller.
 - CPU-visible PPU registers with $2000-$3FFF mirroring, the shared $2005/$2006
   latch, buffered PPUDATA reads, address increments, CHR mapper callbacks,
   nametable mirroring, palette aliases, and OAM backing. CPU time advances a
-  basic NTSC vblank clock; pending PPU NMI is dispatched at wait-poll
-  boundaries.
+  basic NTSC vblank clock. The status register includes a partial sprite-0
+  hit calculation from CHR/OAM/nametable pixels; pending PPU NMI is dispatched
+  at wait-poll boundaries and one recovered `$C55B` operation boundary.
 - OAM DMA from implemented CPU bus pages, using tagged DMA reads and PPU OAM
   writes. It copies 256 bytes and accounts for 513/514 CPU cycles. DMC DMA and
   DMA collision behavior remain unsupported.
-- Partial APU hardware: the NTSC frame IRQ flag, `$4015` read/clear and
-  open-bus bit, `$4017` IRQ inhibit/mode state, and CPU open-bus reads for
-  write-only `$4000-$4014` registers. Channel length counters,
-  pulse/triangle/noise/DMC units, sample generation/mixing, and CPU IRQ delivery
-  remain unsupported.
+- Partial APU hardware: the NTSC frame IRQ flag, `$4015` read/clear, pulse,
+  triangle, and noise length-counter status with approximate half-frame clocks,
+  `$4017` IRQ inhibit/mode state, and CPU open-bus reads for write-only
+  `$4000-$4014` registers. Quarter-frame units, pulse/triangle/noise waveform
+  generation, DMC, sample mixing, and CPU IRQ delivery remain unsupported.
 - An optional operation-aware cartridge callback receives read/write/dummy,
   opcode/operand, the previous CPU data-bus latch, and CPU-time metadata. RMW
   old/new writes carry a shared pair flag; legacy read/write callbacks remain
@@ -178,9 +179,9 @@ their serial bit, and open-bus decay/electrical behavior remains incomplete.
 This is a foundation, not a playable or behavior-qualified console. It has CPU-
 visible PPU registers, VRAM/OAM backing, mapper mirroring, a basic NTSC vblank
 clock, wait-boundary NMI delivery, and OAM DMA. It has no PPU renderer, sprite
-evaluation, odd-frame timing, or general NMI scheduler. APU channels, DMC DMA,
-a host frame loop, audio output, persistence, full instruction-level operation
-sequencing, and complete cycle timing remain open. A supplied cost profile
+evaluation, odd-frame timing, or general NMI scheduler. APU waveforms, DMC
+DMA, a host frame loop, audio output, persistence, full instruction-level
+operation sequencing, and complete cycle timing remain open. A supplied cost profile
 adds native-C work around each access to the one-cycle bus cost and advances basic PPU time. `consoles/nes/tools/nnes-profile` fits
 profiles from normalized reference traces. An optional Mesen2 source patch and
 Lua collector are documented in [cost-profile.md](docs/cost-profile.md); that
@@ -188,20 +189,22 @@ collector has not been exercised live. Profiles retain a DMC DMA timing caveat
 until `nnes` models the DMC channel and its DMA interactions.
 `nnes_bus_cycles` counts modeled bus accesses and `nnes_cpu_cycle_tenths` also
 includes profile/explicit charges. Those CPU times advance the basic PPU and
-APU frame-status clocks, but not APU channel or renderer state. PPU NMI is delivered after a
-wait-readiness callback; IRQ/BRK remain explicit, and no general event scheduler
-exists. The restart helper is only available while `nnes_start` is running
+APU frame-status and approximate length-counter clocks, but not channel
+waveforms or renderer state. PPU NMI is delivered after a wait-readiness
+callback; IRQ/BRK remain explicit, and no general event scheduler exists. The restart helper is only available while `nnes_start` is running
 an entry routine and called directly by a native routine, outside a cartridge
 callback; there is no general host frame runner yet.
-`nnes_wait_until` advances CPU, PPU, and APU frame-status time for supplied
+`nnes_wait_until` advances CPU, PPU, APU frame-status, and approximate
+length-counter time for supplied
 poll work and bus reads, applies profile weights to those bus reads, and omits
 poll reads from the access-count snapshot. It delivers a pending PPU NMI after
-each complete poll callback, but does not advance APU channels or schedule
+each complete poll callback, but does not advance channel waveforms or schedule
 other events. A zero poll charge requires the ready callback to perform a bus
 access while unready.
 A poll that never becomes ready can keep waiting indefinitely.
-`$4015` frame status and `$4017` IRQ inhibition have a partial implementation;
-other APU channel registers and DMC DMA still return `NNES_UNSUPPORTED`.
+`$4015` frame status and pulse/triangle/noise length-counter status have a
+partial implementation; register writes are retained, but waveform units,
+DMC DMA, sample generation, and CPU IRQ delivery remain unsupported.
 Unsupported PPU mapper memory also fails explicitly. The caller must check
 errors and stop rather than ignore missing hardware. `nnes_call` dispatches a
 native C entry directly; `nnes_jsr_call` models a translated JSR's stack dummy
@@ -213,9 +216,9 @@ integration check; its live mapper behavior remains unqualified. Bank-aware
 native routine identities are available to board adapters. Famicom expansion
 controllers, expansion audio, and the disk system are deferred.
 
-Next slices should recover the selected reset's `$FD3A` BRK/IRQ handler and
-compare its live mapper/APU state against a longer Mesen trace, then implement
-PPU rendering, APU channels, DMC DMA, and a host frame runner. Games should keep
+Next slices should qualify the recovered `$FD3A` BRK/IRQ handler and compare its
+live mapper/APU state against a longer Mesen trace, then implement PPU rendering,
+APU waveforms, DMC DMA, and a host frame runner. Games should keep
 the same recovery method: original address-tagged C, explicit bus operations
 and waits, cartridge data, and synthetic plus oracle-backed hardware tests.
 Full game compatibility requires evidence beyond these unit tests.

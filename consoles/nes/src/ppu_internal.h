@@ -33,8 +33,10 @@ typedef struct {
 } nnes_ppu_mapper;
 
 void nnes_ppu_init(nnes_ppu *ppu);
-void nnes_ppu_advance_tenths(nnes_ppu *ppu, uint64_t tenths,
-                             nnes_ppu_frame_fn frame, void *user);
+nnes_result nnes_ppu_advance_tenths(nnes_ppu *ppu,
+                                    const nnes_ppu_mapper *mapper,
+                                    uint64_t tenths,
+                                    nnes_ppu_frame_fn frame, void *user);
 nnes_result nnes_ppu_cpu_read(nnes_ppu *ppu, const nnes_ppu_mapper *mapper,
                               uint16_t address, uint8_t *value);
 nnes_result nnes_ppu_cpu_write(nnes_ppu *ppu, const nnes_ppu_mapper *mapper,

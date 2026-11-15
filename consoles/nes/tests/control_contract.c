@@ -20,6 +20,9 @@ typedef struct {
     uint8_t write_values[128];
     size_t read_count;
     size_t write_count;
+    uint16_t bus_addresses[256];
+    nnes_bus_operation bus_operations[256];
+    size_t bus_event_count;
     nnes *console;
     nnes_result nested_interrupt_result;
     int probe_nested_interrupt;
@@ -65,10 +68,22 @@ static nnes_result cart_write(void *user, uint16_t address, uint8_t value)
     return NNES_OK;
 }
 
+static void record_bus_access(void *user, const nnes_bus_access *access)
+{
+    cart_state *state = user;
+    if (state->bus_event_count <
+        sizeof(state->bus_addresses) / sizeof(state->bus_addresses[0])) {
+        size_t index = state->bus_event_count++;
+        state->bus_addresses[index] = access->address;
+        state->bus_operations[index] = access->operation;
+    }
+}
+
 static void clear_trace(cart_state *state)
 {
     state->read_count = 0;
     state->write_count = 0;
+    state->bus_event_count = 0;
 }
 
 static nnes_result interrupt_handler(nnes *console, void *user)
@@ -244,6 +259,8 @@ static void test_interrupt_boundaries(void)
     nnes_routine routines[] = {{0x8000, interrupt_handler},
                                {0x8200, interrupt_handler}};
     nnes_cartridge cart = make_cart(&state, routines, 2);
+    cart.bus_trace_user = &state;
+    cart.bus_trace = record_bus_access;
     nnes *console = NULL;
     set_interrupt_vectors(&state);
     OK(nnes_create(&cart, &console));
@@ -297,6 +314,11 @@ static void test_interrupt_boundaries(void)
     cpu->p = NNES_P_U | NNES_P_C;
     clear_trace(&state);
     OK(nnes_raise_interrupt(console, NNES_INT_BRK));
+    CHECK(state.bus_event_count >= 2);
+    CHECK(state.bus_addresses[0] == 0x8123 &&
+          state.bus_operations[0] == NNES_BUS_OPCODE_FETCH);
+    CHECK(state.bus_addresses[1] == 0x8124 &&
+          state.bus_operations[1] == NNES_BUS_DUMMY_READ);
     CHECK(state.handler_pc == 0x8200);
     CHECK(read_at(console, 0x01ff) == 0x81);
     CHECK(read_at(console, 0x01fe) == 0x25);

@@ -159,9 +159,10 @@ void nnes_destroy(nnes *console);
 nnes_cpu_state *nnes_cpu(nnes *console);
 /* RAM is zero-initialized for deterministic native startup. A bus access costs
  * one CPU cycle, adds its enabled profile weight, advances the NTSC PPU by the
- * corresponding three dots, and advances the APU frame-status clock. APU
- * channels, DMC, sample output, and asynchronous interrupt delivery remain
- * incomplete. Failed reads leave *value unchanged. */
+ * corresponding three dots, and advances APU frame-status and approximate
+ * length-counter clocks. Waveform channels, DMC, sample output, and
+ * asynchronous interrupt delivery remain incomplete. Failed reads leave
+ * *value unchanged. */
 nnes_result nnes_read(nnes *console, uint16_t address, uint8_t *value);
 nnes_result nnes_write(nnes *console, uint16_t address, uint8_t value);
 /* Consume a pending PPU NMI edge manually. nnes_wait_until also dispatches a
@@ -170,9 +171,9 @@ nnes_result nnes_ppu_take_nmi(nnes *console, int *pending);
 /* Port is 0 or 1. Standard joypads only; read results expose bit 0 only. */
 nnes_result nnes_set_buttons(nnes *console, unsigned port, uint8_t buttons);
 /* Install or clear the optional per-frame controller provider. Registration
- * samples frame 1 immediately; subsequent frames are sampled at PPU frame
- * boundaries. It must be installed before the first bus cycle and may not
- * reenter the console. */
+ * samples frame 1 immediately; subsequent frames are sampled at NTSC scanline
+ * 241, cycle 0, before that frame begins. It must be installed before the
+ * first bus cycle and may not reenter the console. */
 nnes_result nnes_set_input_frame(nnes *console, nnes_input_frame_fn input,
                                 void *user);
 /* Invokes the registered routine whose (mapped code identity, CPU address)

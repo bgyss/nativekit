@@ -98,10 +98,12 @@ static void update_input_frame(void *user, uint64_t frame_number)
     n->buttons[1] = buttons[1];
 }
 
-static void advance_ppu(nnes *n, uint64_t tenths)
+static nnes_result advance_ppu(nnes *n, uint64_t tenths)
 {
     nnes_ppu_frame_fn frame = n && n->input_frame ? update_input_frame : NULL;
-    nnes_ppu_advance_tenths(&n->ppu, tenths, frame, n);
+    nnes_ppu_mapper mapper = make_ppu_mapper(n);
+    const nnes_ppu_mapper *mapper_ptr = n->cartridge.ppu_read ? &mapper : NULL;
+    return nnes_ppu_advance_tenths(&n->ppu, mapper_ptr, tenths, frame, n);
 }
 
 static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
@@ -221,7 +223,8 @@ static nnes_result count_bus_cycle(nnes *n, uint16_t address, int write,
     n->cpu_tenths += spent;
     /* The bus device samples during its base CPU cycle. Native-C profile time
      * elapses after that operation, before the next bus access. */
-    advance_ppu(n, 10);
+    nnes_result ppu_result = advance_ppu(n, 10);
+    if (ppu_result != NNES_OK) return ppu_result;
     if (native_access && !n->access_stats_suppressed)
         ++n->access_counts.by_access[write != 0][kind];
     return NNES_OK;
@@ -334,8 +337,7 @@ nnes_result nnes_charge_cpu_tenths(nnes *n, uint64_t tenths)
     nnes_result apu_result = nnes_apu_advance_tenths(&n->apu, tenths);
     if (apu_result != NNES_OK) return apu_result;
     n->cpu_tenths += tenths;
-    advance_ppu(n, tenths);
-    return NNES_OK;
+    return advance_ppu(n, tenths);
 }
 
 nnes_result nnes_charge_cpu_cycles(nnes *n, uint64_t cycles)
@@ -436,7 +438,8 @@ static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
     }
 
     if (result == NNES_OK && address != 0x4015) n->open_bus = *value;
-    advance_ppu(n, profile_tenths);
+    nnes_result ppu_result = advance_ppu(n, profile_tenths);
+    if (ppu_result != NNES_OK) return ppu_result;
     nnes_result apu_profile_result =
         nnes_apu_advance_tenths(&n->apu, profile_tenths);
     if (apu_profile_result != NNES_OK) return apu_profile_result;
@@ -459,6 +462,11 @@ nnes_result nnes_rd8_dummy(nnes *n, uint16_t address)
     if (!n) return NNES_INVALID_ARGUMENT;
     if (n->rmw_open) return NNES_INVALID_SEQUENCE;
     return read_bus(n, address, &ignored, 0, NNES_BUS_DUMMY_READ, 0);
+}
+
+nnes_result nnes_rd8_operand(nnes *n, uint16_t address, uint8_t *value)
+{
+    return read_bus(n, address, value, 0, NNES_BUS_OPERAND_FETCH, 0);
 }
 
 nnes_result nnes_seed_open_bus(nnes *n, uint8_t value)
@@ -544,7 +552,8 @@ static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
     }
 
     if (result == NNES_OK && address != 0x4014) n->open_bus = value;
-    advance_ppu(n, profile_tenths);
+    nnes_result ppu_result = advance_ppu(n, profile_tenths);
+    if (ppu_result != NNES_OK) return ppu_result;
     nnes_result apu_profile_result =
         nnes_apu_advance_tenths(&n->apu, profile_tenths);
     if (apu_profile_result != NNES_OK) return apu_profile_result;
@@ -818,12 +827,13 @@ nnes_result nnes_raise_interrupt(nnes *n, nnes_interrupt_kind kind)
     uint16_t opcode_pc = n->cpu.pc;
     uint8_t discarded;
     nnes_bus_operation opcode_operation = brk ? NNES_BUS_OPCODE_FETCH : NNES_BUS_DUMMY_READ;
-    nnes_bus_operation operand_operation = brk ? NNES_BUS_OPERAND_FETCH : NNES_BUS_DUMMY_READ;
+    /* BRK's second byte is a discarded padding read, not an operand fetch. */
+    nnes_bus_operation second_cycle_operation = NNES_BUS_DUMMY_READ;
     nnes_result result = read_bus(n, opcode_pc, &discarded, 0,
                                   opcode_operation, 0);
     if (result != NNES_OK) return result;
     result = read_bus(n, (uint16_t)(opcode_pc + (brk ? 1 : 0)), &discarded,
-                      0, operand_operation, 0);
+                      0, second_cycle_operation, 0);
     if (result != NNES_OK) return result;
 
     uint16_t vector = kind == NNES_INT_NMI ? 0xfffa : 0xfffe;

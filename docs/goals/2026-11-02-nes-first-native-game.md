@@ -56,15 +56,32 @@ profile recorded 2,620,456 typed callbacks and normalized successfully.
 These are reference capture continuity checks, not native-game parity.
 
 The private ledger still reports incomplete PPU rendering, APU channels, DMC
-DMA, host/frame execution, battery persistence and gameplay. A fresh 40-frame
-two-Start capture now matches all 1,550 typed MesenCE bus operations from the
-second `$BDB4` entry through missing fixed-bank `$C9F5`. Native SP at `$FCDB`
-and the 12-byte stack window at `$C9F5` match the Mesen stack capture. The
-tested `$BD36` branch clears OAM while `$93 == $FF`; its active animation
-stream remains uncompared. Continue from the current private ledger and code,
-preserving bank-aware routine identities and the SAROM adapter. The next route
-target is `$C9F5`, followed by the alternate `$FE55` NMI arm. The measured
-`$FF78` / `$FF7A` NMI return differences and alternate `$FD00` remain open.
+DMA, host/frame execution, battery persistence and gameplay. The native input
+provider now samples upcoming frames at NTSC scanline 241, cycle 0, matching
+MesenCE's default input scanline; a fresh headless capture measured those
+callbacks within six CPU cycles. `nnes` now sets sprite-0 hit from opaque
+background/sprite overlap while rendering remains unimplemented.
+
+A fresh 40-frame two-Start run still matches all 1,550 typed bus operations
+from the second `$BDB4` entry through fixed-bank `$C9F5`; the `$FCDB` SP and
+12-byte `$C9F5` stack window match Mesen. The extended native path now reaches
+missing `$CA08`, and its `$CA08` stack matches. The 9,897-operation reference
+route matches the native route after aligning two additional `$FF78` poll
+pairs before NMI; NMI entry is 3 CPU cycles later natively. Timed checkpoints
+at `$C9F5`, `$FC98`, and `$FCAD` are within 5, 2, and 1 CPU cycles of Mesen.
+The second Start controller read remains 96.7 cycles later natively, although
+the input sample frame and route match. `$81B8` is an internal branch in
+bank-1 `$81A0`, not a missing routine. The tested `$BD36` branch clears OAM
+while `$93 == $FF`; its active animation stream remains uncompared. Continue
+from the current private ledger and code, preserving bank-aware routine
+identities and the SAROM adapter. Recover the missing `$CA08` continuation,
+then exercise the active animation branch. Alternate `$FD00`, rendering,
+audio and gameplay remain open.
+
+The pinned MesenCE 120-frame no-input profile has 139.44-cycle gap RMSE,
++1.04% mean bias, and 2.80% p95 absolute relative error. A 40-frame Start
+profile and a combined 160-window fit remain exploratory and are not promoted;
+their activity mix does not support one title-wide access profile.
 
 Maintain independent platform and game commits. Recovered game source belongs
 only in the private title repository. A thread touching both repositories needs

@@ -24,7 +24,9 @@ static nnes_result cartridge_access(void *user, nnes_bus_access *access)
     if (trace->count >= sizeof(trace->accesses) / sizeof(trace->accesses[0]))
         return NNES_UNSUPPORTED;
     if (access->operation == NNES_BUS_READ ||
-        access->operation == NNES_BUS_DUMMY_READ) {
+        access->operation == NNES_BUS_DUMMY_READ ||
+        access->operation == NNES_BUS_OPCODE_FETCH ||
+        access->operation == NNES_BUS_OPERAND_FETCH) {
         access->value = trace->memory[access->address];
     } else {
         trace->memory[access->address] = access->value;
@@ -52,6 +54,7 @@ int main(void)
     access_trace trace = {0};
     trace.memory[0x8000] = 0x12;
     trace.memory[0x8001] = 0x34;
+    trace.memory[0x8002] = 0x40;
     trace.memory[0xa000] = 0x56;
     nnes_cartridge cartridge = {0};
     cartridge.user = &trace;
@@ -85,9 +88,15 @@ int main(void)
     OK(nnes_read(console, 0x0000, &value));
     CHECK(value == 0xce);
     OK(nnes_read(console, 0x8002, &value));
-    CHECK(value == 0x00);
+    CHECK(value == 0x40);
     CHECK(trace.count == 8);
     CHECK(trace.accesses[7].open_bus_before == 0xce);
+
+    OK(nnes_rd8_operand(console, 0x8002, &value));
+    CHECK(value == 0x40);
+    CHECK(trace.count == 9);
+    check_access(&trace, 8, NNES_BUS_OPERAND_FETCH, 0x8002, 0x40, 110,
+                 0, 0x40);
 
     nnes_destroy(console);
     puts("NES bus operation metadata contract passed");

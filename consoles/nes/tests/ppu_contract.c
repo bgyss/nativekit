@@ -128,6 +128,49 @@ static uint8_t read_ppudata(nnes *console)
     return value;
 }
 
+static uint8_t sprite0_hit_status(uint8_t sprite_x, uint8_t background_row,
+                                  uint8_t mask)
+{
+    ppu_cartridge cart = {.mirroring = NNES_MIRROR_SINGLE_LOWER};
+    cart.chr[0x01] = background_row;
+    cart.chr[0x10] = 0xff;
+    nnes_cartridge descriptor = {0};
+    descriptor.user = &cart;
+    descriptor.ppu_read = ppu_read;
+    descriptor.ppu_write = ppu_write;
+    descriptor.ppu_mirroring = ppu_get_mirroring;
+    nnes *console = NULL;
+    OK(nnes_create(&descriptor, &console));
+
+    OK(nnes_write(console, 0x2000, 0x00));
+    OK(nnes_write(console, 0x2006, 0x20));
+    OK(nnes_write(console, 0x2006, 0x00));
+    OK(nnes_write(console, 0x2007, 0x00));
+    OK(nnes_write(console, 0x2005, 0x00));
+    OK(nnes_write(console, 0x2005, 0x00));
+    OK(nnes_write(console, 0x2003, 0x00));
+    OK(nnes_write(console, 0x2004, 0x01));
+    OK(nnes_write(console, 0x2004, 0x01));
+    OK(nnes_write(console, 0x2004, 0x00));
+    OK(nnes_write(console, 0x2004, sprite_x));
+    OK(nnes_write(console, 0x2003, 0x00));
+    OK(nnes_write(console, 0x2001, mask));
+    OK(nnes_charge_cpu_cycles(console, 120));
+
+    uint8_t status = 0;
+    OK(nnes_read(console, 0x2002, &status));
+    nnes_destroy(console);
+    return status;
+}
+
+static void test_sprite0_hit_requires_visible_opaque_overlap(void)
+{
+    CHECK((sprite0_hit_status(16, 0xff, 0x1e) & 0x40) != 0);
+    CHECK((sprite0_hit_status(16, 0x00, 0x1e) & 0x40) == 0);
+    CHECK((sprite0_hit_status(16, 0xff, 0x16) & 0x40) == 0);
+    CHECK((sprite0_hit_status(255, 0xff, 0x1e) & 0x40) == 0);
+}
+
 static void test_register_mirroring_and_vblank(void)
 {
     ppu_cartridge cart = {.mirroring = NNES_MIRROR_HORIZONTAL};
@@ -374,6 +417,7 @@ static void test_wait_boundary_schedules_ppu_nmi(void)
 
 int main(void)
 {
+    test_sprite0_hit_requires_visible_opaque_overlap();
     test_register_mirroring_and_vblank();
     test_vblank_clear_and_nmi_latch();
     test_profile_work_advances_ppu_after_the_bus_sample();

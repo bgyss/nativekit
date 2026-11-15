@@ -79,10 +79,11 @@ interfaces:
   cartridge PRG/CHR access, controller ports, and save RAM.
 - PPU registers/latches, VRAM and OAM, rendering, vblank, NMI, and NTSC timing.
 - APU channel registers, frame sequencer, DMC, audio samples, and IRQ behavior.
-  The current `nnes` slice only supplies frame IRQ/status behavior at `$4015`
-  and `$4017`, returns CPU open bus for write-only `$4000-$4014` reads, and
-  seeds indexed dummy cycles from omitted address operands. It does not satisfy
-  the channel, DMC, audio, or interrupt gates.
+  The current `nnes` slice supplies frame IRQ/status behavior at `$4015` and
+  `$4017`, pulse/triangle/noise length-counter status with approximate
+  half-frame clocks, CPU open bus for write-only `$4000-$4014` reads, and
+  indexed dummy cycles from omitted address operands. It does not satisfy the
+  waveform, DMC, audio, or CPU IRQ gates.
 - OAM/DMC DMA, CPU stalls, and their ordered bus operations.
 - A deterministic headless frame runner and an interactive host with live
   picture, sound, controller input, reset, and clean shutdown.
@@ -96,17 +97,19 @@ prerecorded audio/video, or snapshots. Unsupported hardware fails explicitly.
 The standard-pad snapshots in the `nnes` instance may come from static
 `nnes_set_buttons` calls or from the optional `nnes_set_input_frame` host
 provider. Registration samples frame 1 immediately. The callback receives a
-one-based frame number and fills both eight-button snapshots at each NTSC PPU
-frame boundary, before the next frame's CPU operations. With no provider, the
-values supplied by `nnes_set_buttons` remain in effect. Provider user data is
-borrowed and must remain valid while installed.
+one-based frame number and fills both eight-button snapshots at the NTSC input
+sample point, scanline 241 cycle 0, before that frame begins. This matches
+MesenCE's default NES input scanline used by the headless capture workflow.
+With no provider, the values supplied by `nnes_set_buttons` remain in effect.
+Provider user data is borrowed and must remain valid while installed.
 
 The `$4016` high-to-low strobe still latches the current snapshots; it does not
 poll the host. The frame callback receives no console pointer and must not
 re-enter `nnes`. Installing or replacing the provider after CPU time has begun,
 during an open RMW pair, or from another console callback returns
-`NNES_INVALID_SEQUENCE`. This frame seam follows the deterministic controller
-schedule used by headless reference captures and future interactive hosts.
+`NNES_INVALID_SEQUENCE`. This per-frame seam follows the deterministic
+controller schedule used by headless reference captures and future interactive
+hosts.
 
 ## Register and flag rules
 
@@ -160,14 +163,18 @@ through the `$BCCF` controller call 855/859 writes match, the no-input
 controller path's 139 ordered read/write events match, and the separate Start
 route's entry prefix matches through `$BCE1`. Nineteen APU/write-only-register bus
 accesses match, and four values differ across two NMI return boundaries. The
-library also has PPU registers, VRAM/OAM storage,
-mapper mirroring, a basic NTSC vblank clock, and partial frame IRQ status at
-`$4015`/`$4017`. An exact replay of the reset trace's pre-NMI PPU-register
-stream matches the native PPU device, and the captured `$FE67` NMI path matches
-its ordered Mesen bus sequence. This does not render frames or cover gameplay.
-Pending PPU NMI is delivered at `nnes_wait_until` poll boundaries; general event
-scheduling, full controller electrical behavior, PPU rendering/sprite evaluation,
-odd-frame timing, APU channels/mixing, DMC DMA, and a host remain incomplete.
+library also has PPU registers, VRAM/OAM storage, mapper mirroring, a basic
+NTSC vblank clock, and partial frame IRQ/length-counter status at
+`$4015`/`$4017`. The PPU
+sets sprite-0 hit from opaque CHR/OAM/nametable overlap and samples host input
+at NTSC scanline 241 cycle 0. An exact replay of the reset trace's pre-NMI
+PPU-register stream matches the native PPU device, and the captured `$FE67`
+NMI path matches its ordered Mesen bus sequence. This does not render frames or
+cover gameplay. Pending PPU NMI is delivered at `nnes_wait_until` poll
+boundaries and the measured `$C55B` controller-arithmetic boundary; general
+event scheduling, full controller electrical behavior, complete PPU rendering
+and sprite evaluation, odd-frame timing, APU channels/mixing, DMC DMA, and a
+host remain incomplete.
 The Mesen comparison does not qualify the complete mapper or game.
 
 The current title's ledger (`docs/nes-games/dragon-warrior-usa-rev-a/qualification.md`)
