@@ -57,12 +57,14 @@ These are reference capture continuity checks, not native-game parity.
 
 The private ledger still reports incomplete PPU rendering, APU channels, DMC
 DMA, host/frame execution, battery persistence and gameplay. A fresh 40-frame
-two-Start capture now matches all 1,506 typed MesenCE bus operations from the
-second `$BDB4` entry through missing fixed-bank `$FCDB`. The tested `$BD36`
-branch clears OAM while `$93 == $FF`; its active animation stream remains
-uncompared. Continue from the current private ledger and code, preserving
-bank-aware routine identities and the SAROM adapter. The measured `$FF78` /
-`$FF7A` NMI return differences and alternate `$FD00` remain open.
+two-Start capture now matches all 1,550 typed MesenCE bus operations from the
+second `$BDB4` entry through missing fixed-bank `$C9F5`. Native SP at `$FCDB`
+and the 12-byte stack window at `$C9F5` match the Mesen stack capture. The
+tested `$BD36` branch clears OAM while `$93 == $FF`; its active animation
+stream remains uncompared. Continue from the current private ledger and code,
+preserving bank-aware routine identities and the SAROM adapter. The next route
+target is `$C9F5`, followed by the alternate `$FE55` NMI arm. The measured
+`$FF78` / `$FF7A` NMI return differences and alternate `$FD00` remain open.
 
 Maintain independent platform and game commits. Recovered game source belongs
 only in the private title repository. A thread touching both repositories needs
