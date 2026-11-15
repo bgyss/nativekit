@@ -109,6 +109,11 @@ static nnes_result advance_ppu(nnes *n, uint64_t tenths)
 static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
                             int native_access, nnes_bus_operation operation,
                             uint8_t flags);
+static nnes_result read_bus_override(nnes *n, uint16_t address,
+                                     uint8_t *value, int native_access,
+                                     nnes_bus_operation operation,
+                                     uint8_t flags, int has_profile_override,
+                                     uint64_t profile_override_tenths);
 static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
                              int native_access, nnes_bus_operation operation,
                              uint8_t flags);
@@ -198,7 +203,10 @@ static nnes_result classify_access(const nnes *n, uint16_t address,
 }
 
 static nnes_result count_bus_cycle(nnes *n, uint16_t address, int write,
-                                   int native_access, uint64_t *profile_tenths)
+                                   int native_access,
+                                   int has_profile_override,
+                                   uint64_t profile_override_tenths,
+                                   uint64_t *profile_tenths)
 {
     if (!n || !profile_tenths) return NNES_INVALID_ARGUMENT;
     *profile_tenths = 0;
@@ -211,8 +219,11 @@ static nnes_result count_bus_cycle(nnes *n, uint16_t address, int write,
         if (!n->access_stats_suppressed &&
             n->access_counts.by_access[write != 0][kind] == UINT64_MAX)
             return NNES_CYCLE_OVERFLOW;
-        if (n->cpu_costs_on && n->has_cost_profile) {
-            *profile_tenths = n->cost_profile.cpu_tenths[write != 0][kind];
+        if (n->cpu_costs_on &&
+            (n->has_cost_profile || has_profile_override)) {
+            *profile_tenths = has_profile_override ?
+                profile_override_tenths :
+                n->cost_profile.cpu_tenths[write != 0][kind];
             spent += *profile_tenths;
         }
     }
@@ -374,9 +385,11 @@ nnes_result nnes_ppu_take_nmi(nnes *n, int *pending)
     return nnes_ppu_take_pending_nmi(&n->ppu, pending);
 }
 
-static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
-                            int native_access, nnes_bus_operation operation,
-                            uint8_t flags)
+static nnes_result read_bus_override(nnes *n, uint16_t address,
+                                     uint8_t *value, int native_access,
+                                     nnes_bus_operation operation,
+                                     uint8_t flags, int has_profile_override,
+                                     uint64_t profile_override_tenths)
 {
     if (!n || !value) return NNES_INVALID_ARGUMENT;
     if (n->bus_trace_callback_depth || n->input_frame_callback_depth)
@@ -384,8 +397,9 @@ static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
     if (n->rmw_open) return NNES_INVALID_SEQUENCE;
     uint8_t open_bus_before = n->open_bus;
     uint64_t profile_tenths = 0;
-    nnes_result cycle_result = count_bus_cycle(n, address, 0, native_access,
-                                               &profile_tenths);
+    nnes_result cycle_result = count_bus_cycle(
+        n, address, 0, native_access, has_profile_override,
+        profile_override_tenths, &profile_tenths);
     if (cycle_result != NNES_OK) return cycle_result;
     nnes_result result = NNES_UNSUPPORTED;
     nnes_bus_access trace_event = {0};
@@ -451,9 +465,25 @@ static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
     return result;
 }
 
+static nnes_result read_bus(nnes *n, uint16_t address, uint8_t *value,
+                            int native_access, nnes_bus_operation operation,
+                            uint8_t flags)
+{
+    return read_bus_override(n, address, value, native_access, operation,
+                             flags, 0, 0);
+}
+
 nnes_result nnes_read(nnes *n, uint16_t address, uint8_t *value)
 {
     return read_bus(n, address, value, 1, NNES_BUS_READ, 0);
+}
+
+nnes_result nnes_read_with_profile_cost(nnes *n, uint16_t address,
+                                        uint8_t *value,
+                                        uint64_t profile_cost_tenths)
+{
+    return read_bus_override(n, address, value, 1, NNES_BUS_READ, 0, 1,
+                             profile_cost_tenths);
 }
 
 nnes_result nnes_rd8_dummy(nnes *n, uint16_t address)
@@ -488,7 +518,7 @@ static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
     uint8_t open_bus_before = n->open_bus;
     uint64_t profile_tenths = 0;
     nnes_result cycle_result = count_bus_cycle(n, address, 1, native_access,
-                                               &profile_tenths);
+                                               0, 0, &profile_tenths);
     if (cycle_result != NNES_OK) return cycle_result;
     nnes_result result = NNES_UNSUPPORTED;
     nnes_bus_access trace_event = {0};
@@ -570,12 +600,14 @@ static nnes_result perform_oam_dma(nnes *n, uint8_t page,
 {
     if (!n || n->rmw_open) return NNES_INVALID_SEQUENCE;
     uint8_t discarded = 0;
+    /* OAM DMA's halt and alignment cycles read the current CPU PC through the
+     * DMA unit, so observers see them as DMA reads rather than CPU dummies. */
     nnes_result result = read_bus(n, n->cpu.pc, &discarded, 0,
-                                   NNES_BUS_DUMMY_READ, 0);
+                                   NNES_BUS_DMA_READ, 0);
     if (result != NNES_OK) return result;
     if (needs_alignment) {
         result = read_bus(n, n->cpu.pc, &discarded, 0,
-                          NNES_BUS_DUMMY_READ, 0);
+                          NNES_BUS_DMA_READ, 0);
         if (result != NNES_OK) return result;
     }
 

@@ -100,7 +100,8 @@ assets are included. The public API is provisional while hardware support grows.
   at wait-poll boundaries and one recovered `$C55B` operation boundary.
 - OAM DMA from implemented CPU bus pages, using tagged DMA reads and PPU OAM
   writes. It copies 256 bytes and accounts for 513/514 CPU cycles. DMC DMA and
-  DMA collision behavior remain unsupported.
+  DMA collision behavior remain unsupported. The DMA halt and optional
+  alignment reads are also tagged as DMA reads and report the current CPU PC.
 - Partial APU hardware: the NTSC frame IRQ flag, `$4015` read/clear, pulse,
   triangle, and noise length-counter status with approximate half-frame clocks,
   `$4017` IRQ inhibit/mode state, and CPU open-bus reads for write-only

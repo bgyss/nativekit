@@ -49,6 +49,52 @@ static void check_access(const access_trace *trace, size_t index,
     CHECK(access->open_bus_before == open_bus_before);
 }
 
+static void test_explicit_profile_cost_override(void)
+{
+    access_trace trace = {0};
+    trace.memory[0x8000] = 0x12;
+    nnes_cost_profile profile = {.version = NNES_COST_PROFILE_VERSION};
+    profile.cpu_tenths[0][NNES_KIND_ROM] = 463;
+    nnes_cartridge cartridge = {0};
+    cartridge.user = &trace;
+    cartridge.bus_access = cartridge_access;
+    cartridge.cost_profile = &profile;
+    nnes *console = NULL;
+    OK(nnes_create(&cartridge, &console));
+
+    uint8_t value = 0;
+    OK(nnes_read_with_profile_cost(console, 0x8000, &value, 110));
+    CHECK(value == 0x12);
+    CHECK(nnes_cpu_cycle_tenths(console) == 120);
+    check_access(&trace, 0, NNES_BUS_READ, 0x8000, 0x12, 120, 0, 0x00);
+
+    OK(nnes_set_cpu_costs(console, 0));
+    OK(nnes_read_with_profile_cost(console, 0x8000, &value, 110));
+    CHECK(nnes_cpu_cycle_tenths(console) == 130);
+    check_access(&trace, 1, NNES_BUS_READ, 0x8000, 0x12, 130, 0, 0x12);
+
+    nnes_destroy(console);
+}
+
+static void test_explicit_profile_cost_override_without_base_profile(void)
+{
+    access_trace trace = {0};
+    trace.memory[0x8000] = 0x34;
+    nnes_cartridge cartridge = {0};
+    cartridge.user = &trace;
+    cartridge.bus_access = cartridge_access;
+    nnes *console = NULL;
+    OK(nnes_create(&cartridge, &console));
+
+    uint8_t value = 0;
+    OK(nnes_read_with_profile_cost(console, 0x8000, &value, 110));
+    CHECK(value == 0x34);
+    CHECK(nnes_cpu_cycle_tenths(console) == 120);
+    check_access(&trace, 0, NNES_BUS_READ, 0x8000, 0x34, 120, 0, 0x00);
+
+    nnes_destroy(console);
+}
+
 int main(void)
 {
     access_trace trace = {0};
@@ -99,6 +145,8 @@ int main(void)
                  0, 0x40);
 
     nnes_destroy(console);
+    test_explicit_profile_cost_override();
+    test_explicit_profile_cost_override_without_base_profile();
     puts("NES bus operation metadata contract passed");
     return 0;
 }

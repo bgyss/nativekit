@@ -64,6 +64,8 @@ typedef void (*nnes_input_frame_fn)(void *user, uint64_t frame_number,
 
 typedef nnes_result (*nnes_read_fn)(void *user, uint16_t address, uint8_t *value);
 typedef nnes_result (*nnes_write_fn)(void *user, uint16_t address, uint8_t value);
+/* OAM DMA halt/alignment and source cycles are DMA reads; destination cycles
+ * are DMA writes. */
 typedef enum {
     NNES_BUS_READ,
     NNES_BUS_WRITE,
@@ -164,6 +166,13 @@ nnes_cpu_state *nnes_cpu(nnes *console);
  * asynchronous interrupt delivery remain incomplete. Failed reads leave
  * *value unchanged. */
 nnes_result nnes_read(nnes *console, uint16_t address, uint8_t *value);
+/* Data read with a per-access native-work weight overriding the memory-kind
+ * profile when CPU costs are enabled. It still pays the base bus cycle and is
+ * recorded/counts as a classified data read. The override is ignored when CPU
+ * costs are disabled. */
+nnes_result nnes_read_with_profile_cost(nnes *console, uint16_t address,
+                                        uint8_t *value,
+                                        uint64_t profile_cost_tenths);
 nnes_result nnes_write(nnes *console, uint16_t address, uint8_t value);
 /* Consume a pending PPU NMI edge manually. nnes_wait_until also dispatches a
  * pending PPU NMI after its readiness callback completes. */

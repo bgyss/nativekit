@@ -335,10 +335,10 @@ static void test_oam_dma_transfer_and_alignment(void)
         CHECK(trace.accesses[0].operation == NNES_BUS_WRITE);
         CHECK(trace.accesses[0].address == 0x4014 &&
               trace.accesses[0].value == 0x02);
-        CHECK(trace.accesses[1].operation == NNES_BUS_DUMMY_READ);
+        CHECK(trace.accesses[1].operation == NNES_BUS_DMA_READ);
         size_t event = 2;
         if ((write_cycle & 1) == 0) {
-            CHECK(trace.accesses[event].operation == NNES_BUS_DUMMY_READ);
+            CHECK(trace.accesses[event].operation == NNES_BUS_DMA_READ);
             ++event;
         }
         for (unsigned i = 0; i < 256; ++i) {
