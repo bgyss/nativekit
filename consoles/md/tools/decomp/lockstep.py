@@ -59,6 +59,11 @@ class LockstepError(RuntimeError):
     """The lockstep run could not be made."""
 
 
+class PausePoint(c.Structure):
+    _fields_ = [("clock", c.c_uint64), ("pc", c.c_uint32), ("d", c.c_uint32 * 8),
+                ("a", c.c_uint32 * 8), ("ccr", c.c_uint32)]
+
+
 class SyncPoint(c.Structure):
     _fields_ = [("clock", c.c_uint64), ("refresh_sync", c.c_uint64),
                 ("refresh_counter", c.c_uint32)]
@@ -284,6 +289,12 @@ def _reference(args, scenario, routines, rom_size):
                 "exit_refresh": call.exit_state.get("refresh", (0, 0)),
                 "exit_registers": (check_calls.m68k_registers(call.exit_state, call.exit["pc"])
                                    if call.cpu == M68K else None),
+                "pauses": [{"kind": pause["kind"], "clock": pause["clock"], "pc": pause["pc"],
+                            "registers": check_calls.m68k_registers(pause["state"], pause["pc"]),
+                            "refresh": pause["state"].get("refresh", (0, 0)),
+                            "schedule": _schedule_after(pause["state"]),
+                            "span": (pause["sequence"], pause["end_sequence"])}
+                           for pause in call.pauses] if call.cpu == M68K else [],
                 "exit_sequence": call.exit_sequence,
                 "exit_schedule": _schedule_after(call.exit_state) if call.cpu == M68K else None,
                 "tree": [address for address, _ in call.tree],
@@ -342,7 +353,11 @@ def _reference(args, scenario, routines, rom_size):
             last = row.pop("exit_sequence")
             low = bisect.bisect_right(sync_sequences, row["sequence"])
             high = bisect.bisect_right(sync_sequences, last)
-            row["syncs"] = [clock for _, clock in syncs[low:high]] if key[0] == M68K else []
+            spans = [pause["span"] for pause in row["pauses"]]
+            # a handler's syncs happen on their own when the machine runs it
+            row["syncs"] = [clock for sequence, clock in syncs[low:high]
+                            if not any(first < sequence <= (end or last) for first, end in spans)
+                            ] if key[0] == M68K else []
         leftover = arrivals[position:]
         loops[key].update(leftover[1:])
         entered[key] = len(rows) + (1 if leftover else 0)
@@ -362,13 +377,17 @@ def _register(core, handler, routines):
 def _hybrid(args, scenario, routines, rom_size, reference):
     """The same run with the C substituted; the result's body."""
     library = c.CDLL(str(pathlib.Path(args.library).resolve()))
-    library.nmd_live_run.restype = c.POINTER(LiveResult)
-    library.nmd_live_run.argtypes = [c.c_int, c.c_void_p]
+    library.nmd_live_start.argtypes = [c.c_int, c.c_void_p, c.c_uint32, c.c_void_p, c.c_uint32,
+                                       c.c_void_p, c.c_uint32, c.c_void_p, c.POINTER(c.c_int)]
+    library.nmd_live_result_of.restype = c.POINTER(LiveResult)
+    library.nmd_live_syncs_made.restype = c.c_uint32
+    library.nmd_live_pauses_made.restype = c.c_uint32
     cpu_state = check_calls.CpuState.in_dll(library, "nmd_cpu")
     z80_state = check_calls.Z80State.in_dll(library, "nmd_z80")
     schedule = reference["schedule"]
     taken = dict.fromkeys(routines, 0)
     substituted = dict.fromkeys(routines, 0)
+    paused_counts = {}
     skipped = {key: {} for key in routines}
     totals = {"accesses": 0, "hardware_accesses": 0}
     divergence = []
@@ -385,10 +404,10 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                                                 c.c_uint64]
     core.nmd_decomp_m68k_live_sync.argtypes = [c.c_uint64, c.c_uint32, c.c_uint64]
     live_sync = c.cast(core.nmd_decomp_m68k_live_sync, c.c_void_p)
-    library.nmd_live_syncs.argtypes = [c.c_void_p, c.c_void_p, c.c_uint32]
-    library.nmd_live_syncs_made.restype = c.c_uint32
     library.nmd_live_bind(c.cast(core.nmd_decomp_m68k_live_access, c.c_void_p),
-                          c.cast(core.nmd_decomp_z80_live_access, c.c_void_p), rom_size)
+                          c.cast(core.nmd_decomp_z80_live_access, c.c_void_p), live_sync, rom_size)
+    core.nmd_decomp_continuation.argtypes = [c.c_uint32, c.c_uint32, c.c_int]
+    continuations = {}          # interrupted PC -> the paused call to continue there
     current = [0]
 
     def diverge(**detail):
@@ -397,6 +416,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
 
     def substitute(cpu, pc, clock):
         key = (cpu, pc)
+        if cpu == M68K and pc in continuations:
+            return continue_call(pc)
         if clock in reference["loops"][key]:
             return 0            # the original's loop back to the entry, inside a call it runs
         index = taken[key]
@@ -423,13 +444,13 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             # the original Z80 paused inside this call while the 68000 ran: run all at
             # once, its accesses would come before the 68000's that the original's followed
             reason = "spans_slice"
+        if reason == "interrupt" and cpu == M68K and set(record["reasons"]) == {"interrupt"} and \
+                all(pause["kind"] == "interrupt" for pause in record["pauses"]) and \
+                not any((cpu, address) not in routines for address in record["tree"]):
+            reason = None               # the C pauses where the original was interrupted
         if reason:
             skipped[key][reason] = skipped[key].get(reason, 0) + 1
             return 0
-        slots = (Slot * max(1, len(record["slots"])))(*record["slots"])
-        library.nmd_live_begin(cpu, slots, len(record["slots"]))
-        sync_points = (SyncPoint * max(1, len(record["syncs"])))(*record["syncs"])
-        library.nmd_live_syncs(live_sync, sync_points, len(record["syncs"]))
         if cpu == M68K:
             state = runner.M68KState()
             core.nmd_decomp_m68k_live_state(c.byref(state))
@@ -444,10 +465,65 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             core.nmd_decomp_z80_live_state(c.byref(state))
             for field, value in check_calls.z80_registers(runner._state_dict(state), pc).items():
                 setattr(z80_state, field, value)
-        result = library.nmd_live_run(cpu, routines[key][0]).contents
+        context = {
+            "cpu": cpu, "pc": pc, "key": key, "name": name, "index": index, "record": record,
+            "state": state,
+            "slots": (Slot * max(1, len(record["slots"])))(*record["slots"]),
+            "syncs": (SyncPoint * max(1, len(record["syncs"])))(*record["syncs"]),
+            "pauses": (PausePoint * max(1, len(record["pauses"])))(
+                *[PausePoint(pause["clock"], pause["pc"],
+                             (c.c_uint32 * 8)(*[pause["registers"]["d%d" % i] for i in range(8)]),
+                             (c.c_uint32 * 8)(*[pause["registers"]["a%d" % i] for i in range(8)]),
+                             pause["registers"]["sr"] & 0x1F)
+                  for pause in record["pauses"]]),
+            "handle": c.c_int(-1),
+        }
+        status = library.nmd_live_start(
+            cpu, context["slots"], len(record["slots"]), context["syncs"], len(record["syncs"]),
+            context["pauses"], len(record["pauses"]), routines[key][0], c.byref(context["handle"]))
+        if status < 0:
+            raise LockstepError("too many substituted calls open at once")
+        return after_run(context, status)
+
+    def continue_call(pc):
+        """The handler returned to where the original was interrupted: the C goes on,
+        with the registers the machine holds now (the handler restored them)."""
+        context = continuations.pop(pc)
+        core.nmd_decomp_continuation(M68K, pc, 0)
+        state = runner.M68KState()
+        core.nmd_decomp_m68k_live_state(c.byref(state))
+        registers = check_calls.m68k_registers(runner._state_dict(state), pc)
+        for position in range(8):
+            cpu_state.d[position] = registers["d%d" % position]
+            cpu_state.a[position] = registers["a%d" % position]
+        cpu_state.sr = registers["sr"]
+        if context["at_end"]:
+            cpu_state.a[7] += 4     # the C had already returned
+            cpu_state.pc = context["return_pc"]
+        return after_run(context, library.nmd_live_continue(context["handle"].value))
+
+    def after_run(context, status):
+        cpu, pc, key, name = context["cpu"], context["pc"], context["key"], context["name"]
+        index, record, handle = context["index"], context["record"], context["handle"].value
+        result = library.nmd_live_result_of(handle).contents
+        if status == 1:             # paused where the original took an interrupt
+            pause = record["pauses"][library.nmd_live_pauses_made(handle) - 1]
+            context["at_end"] = library.nmd_live_at_end(handle)
+            context["return_pc"] = cpu_state.pc
+            a7 = cpu_state.a[7] - (4 if context["at_end"] else 0)
+            address_registers = (c.c_uint32 * 8)(*[cpu_state.a[i] for i in range(7)], a7)
+            other = cpu_state.usp if cpu_state.sr & 0x2000 else cpu_state.ssp
+            core.nmd_decomp_m68k_live_resume(cpu_state.d, address_registers, other, cpu_state.sr,
+                                             pause["pc"], pause["clock"], *pause["refresh"],
+                                             *pause["schedule"])
+            if pause["pc"] in continuations or core.nmd_decomp_continuation(M68K, pause["pc"], 1):
+                raise LockstepError("cannot continue a paused call at $%06X" % pause["pc"])
+            continuations[pause["pc"]] = context
+            paused_counts[key] = paused_counts.get(key, 0) + 1
+            return 1
         totals["accesses"] += result.accesses
         totals["hardware_accesses"] += result.hardware
-        if result.status or result.slots_used != len(record["slots"]):
+        if status == 2 or result.slots_used != len(record["slots"]):
             what = LIVE_STATUS.get(result.status, "a hardware access the original made is missing")
             expected = record["slots"][result.slot] if result.slot < len(record["slots"]) else None
             expected = expected and (expected[0], expected[2], expected[5], expected[6])
@@ -457,8 +533,10 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                             "write": bool(result.write)},
                     expected=expected and {"address": expected[1], "width": expected[2],
                                            "write": bool(expected[3])})
+            library.nmd_live_release(handle)
             core.nmd_decomp_fail()      # the machine holds half a routine: stop the run
             return 0
+        library.nmd_live_release(handle)
         if cpu == M68K:             # the C's registers at its return, against the original's
             got = {"d%d" % i: cpu_state.d[i] for i in range(8)}
             got.update({"a%d" % i: cpu_state.a[i] for i in range(8)})
@@ -471,9 +549,6 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                             register=register, expected=expected, got=value)
                     core.nmd_decomp_fail()
                     return 0
-        for point in record["syncs"][library.nmd_live_syncs_made():]:
-            clock, refresh_sync, refresh_counter = point   # syncs after the C's last access
-            core.nmd_decomp_m68k_live_sync(clock, refresh_counter, refresh_sync)
         for address in record["tree"]:
             taken[(cpu, address)] += 1  # the C ran these inside this call
         if cpu == M68K:
@@ -482,6 +557,7 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                                              cpu_state.pc, record["exit_clock"],
                                              *record["exit_refresh"], *record["exit_schedule"])
         else:
+            state = context["state"]
             flags = z80_state.f
             state.main[:] = [z80_state.b, z80_state.c, z80_state.d, z80_state.e, z80_state.h,
                              z80_state.l, flags, z80_state.a]
@@ -531,7 +607,7 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                     expected=reference["entered"][key], got=taken[key])
     return {
         "frames_compared": compared, "divergence": divergence[0] if divergence else None,
-        "totals": totals,
+        "totals": dict(totals, pauses=sum(paused_counts.values())),
         "routines": [{"cpu": check_calls.CPU_NAMES[key[0]], "address": key[1],
                       "name": routines[key][1], "calls": len(schedule[key]),
                       "substituted": substituted[key], "left_to_original": skipped[key]}

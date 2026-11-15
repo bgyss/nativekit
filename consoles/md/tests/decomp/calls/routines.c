@@ -209,6 +209,26 @@ static void tailc(void)
     nmd_rts();
 }
 
+/* $720 busy: count 2,500 times at $FF0090, long enough for horizontal
+ * interrupts to land in it within a frame. NMD_AT marks each original
+ * instruction, so the lockstep can pause it where the original was interrupted. */
+static void busy(void)
+{
+    NMD_AT(0x720);
+    nmd_set16(&D[1], nmd_tst16(2499));
+    do {
+        NMD_AT(0x724);
+#ifdef PLANT_BUSY
+        wr16(0xFF0090, nmd_add16(rd16(0xFF0090), 2));
+#else
+        wr16(0xFF0090, nmd_add16(rd16(0xFF0090), 1));
+#endif
+        NMD_AT(0x72A);
+    } while (nmd_dbf(&D[1]));
+    NMD_AT(0x72E);
+    nmd_rts();
+}
+
 /* $5E0 dma: copy eight words from $FF0100 to VRAM $0000. */
 static void dma(void)
 {
@@ -268,6 +288,7 @@ const nmd_routine nmd_game_routines[] = {
     {0x5C0, irqon, "irqon"},
     {0x5D0, count, "count"},
     {0x5E0, dma, "dma"},
+    {0x720, busy, "busy"},
     {0x7E2, below, "below"},
     {0x7F0, tailc, "tailc"},
 #ifdef NMD_HYBRID

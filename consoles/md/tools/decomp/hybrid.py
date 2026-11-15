@@ -79,13 +79,16 @@ def build(sources, out, catalog=None, defines=(), runtime="replay"):
     out = pathlib.Path(out)
     out.mkdir(parents=True, exist_ok=True)
     compiler = os.environ.get("CC", "cc")
-    flags = ["-std=c11", "-O1", "-g", "-fPIC", "-Wall", "-Wextra", "-Werror", "-DNMD_HYBRID"]
+    flags = ["-std=c11", "-O1", "-g", "-fPIC", "-Wall", "-Wextra", "-Werror",
+             "-Wno-deprecated-declarations", "-DNMD_HYBRID"]
     flags += ["-I" + str(path) for path in INCLUDES] + ["-D" + name for name in defines]
     objects = []
     for index, source in enumerate(sources):
         target = out / ("game%d.o" % index)
         # every routine entry is reported to the checker: -finstrument-functions
-        _compile([compiler, *flags, "-finstrument-functions", "-c", "-o", str(target), str(source)])
+        live = ["-DNMD_LIVE_AT"] if runtime == "live" else []
+        _compile([compiler, *flags, *live, "-finstrument-functions", "-c", "-o", str(target),
+                  str(source)])
         objects.append(target)
     replay = out / (runtime + ".o")
     _compile([compiler, *flags, "-c", "-o", str(replay), str(RUNTIMES[runtime])])

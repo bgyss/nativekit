@@ -8,7 +8,9 @@ every frame the picture, the sound and each region of the comparison
 snapshot must be equal. The controls hold that correct C is IDENTICAL with
 real frames, calls and accesses; that calls an interrupt overlapped, calls
 that span a frame and calls that need a routine with no C are left to the
-original and keep the run from being certified; that six planted defects
+original and keep the run from being certified; that a call horizontal
+interrupts land in is substituted, pausing where the original was
+interrupted; that seven planted defects
 (access order, memory, interrupt mask, DMA length, a sound sample, another
 frame's input, caught at the pad routine's return) are each DIVERGENT where planted; and that a run that
 overruns its time stops with no worker left behind.
@@ -58,6 +60,13 @@ def correct(temp, rom, scenario):
     require(rows[("m68k", "sum")]["substituted"] == loops and
             rows[("m68k", "handler0")]["substituted"] == 0,
             "nested calls were substituted apart from their callers")
+    # interrupted while it ran: the C paused where the original was, the machine took the
+    # horizontal interrupt, and the C went on
+    busy = rows[("m68k", "busy")]
+    require(busy["substituted"] == 1 and not busy["left_to_original"] and
+            report["totals"]["pauses"] >= 3,
+            "an interrupted call was not substituted with its pauses: %r %r"
+            % (busy, report["totals"]))
     fetch = rows[("z80", "z_fetch")]
     require(fetch["substituted"] > 1000 and report["totals"]["hardware_accesses"] > 2000,
             "the Z80 routine was not substituted with real accesses: %r" % fetch)
@@ -86,6 +95,7 @@ def planted(temp, rom, scenario):
         # the length register left behind shows it
         ("PLANT_DMA", "frame", None, "vdp_registers"),
         ("PLANT_SAMPLE", "frame", None, "audio"),
+        ("PLANT_BUSY", "frame", None, "work_ram"),             # inside an interrupted call
     )
     for define, kind, what, region in cases:
         report = lock(temp, define, rom, scenario, defines=[define])

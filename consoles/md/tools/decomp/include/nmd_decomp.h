@@ -369,6 +369,18 @@ static inline void nmd_z80_ret(void)
     nmd_z80.sp = (uint16_t)(nmd_z80.sp + 2);
 }
 
+/* ---- instruction boundaries (lockstep) ---- */
+
+/* A draft marks each original instruction it starts. In the lockstep's live
+ * hybrid (NMD_LIVE_AT) that lets the C pause exactly where the original was
+ * interrupted; everywhere else it is nothing. */
+#ifdef NMD_LIVE_AT
+void nmd_live_at(uint32_t address);
+#define NMD_AT(address) nmd_live_at(address)
+#else
+#define NMD_AT(address) ((void)0)
+#endif
+
 /* ---- a routine that has no C yet ---- */
 
 #ifdef NMD_HYBRID

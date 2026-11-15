@@ -81,7 +81,13 @@ skip:   move.l  #$12345678,($FF0100).l
         bsr.w   tailc
         bsr.w   tone
         bsr.w   dma
+        move.w  #$8A20,($C00004).l      ; a horizontal interrupt every 33 lines
+        move.w  #$8014,($C00004).l
         bsr.w   irqon
+        move.w  ($FF0040).l,d0          ; wait for a vertical interrupt: the horizontal
+vwait:  cmp.w   ($FF0040).l,d0          ; ones start in the next frame
+        beq.s   vwait
+        bsr.w   busy
         bsr.w   spin
         move.w  #$2700,sr
 forever:
@@ -204,6 +210,16 @@ dma:    lea     ($C00004).l,a5
         move.w  #$0080,(a5)
         rts
 
+        org     $700
+hint:   addq.w  #1,($FF0080).l
+        rte
+
+        org     $720
+busy:   move.w  #2499,d1
+busyl:  addq.w  #1,($FF0090).l
+        dbf     d1,busyl
+        rts
+
         org     $7E0
 back:   rts
 below:  tst.w   d5
@@ -224,7 +240,7 @@ ROUTINES = {"sum": 0x400, "poke": 0x420, "dispatch": 0x440, "handler0": 0x480,
             "handler1": 0x48A, "handler2": 0x494, "handler3": 0x49E, "outer": 0x4C0,
             "send": 0x4E0, "spin": 0x510, "unused": 0x530, "relay": 0x550,
             "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0, "count": 0x5D0,
-            "below": 0x7E2, "tailc": 0x7F0}
+            "below": 0x7E2, "tailc": 0x7F0, "busy": 0x720}
 NOCODE = 0x560
 Z_FETCH = 0x20
 LOOPS = 6
@@ -247,6 +263,7 @@ def build(directory, capabilities=None, pressed=("B",)):
     for offset in range(8, 0x100, 4):
         rom[offset:offset + 4] = (0x548).to_bytes(4, "big")
     rom[0x78:0x7C] = (0x540).to_bytes(4, "big")         # level 6: the vertical interrupt
+    rom[0x70:0x74] = (0x700).to_bytes(4, "big")         # level 4: the horizontal interrupt
     rom[0x100:0x110] = b"SEGA GENESIS    "
     rom[0x120:0x150] = b"NATIVEKIT CALL CONTROL".ljust(48, b" ")
     rom[0x150:0x180] = b"NATIVEKIT CALL CONTROL".ljust(48, b" ")

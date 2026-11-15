@@ -141,12 +141,13 @@ def _is_return(cpu, opcode, fetched):
 class Frame:
     """One open call of the original."""
     __slots__ = ("cpu", "address", "entry_sp", "entry", "start", "children", "tree",
-                 "reasons", "low_sp", "sequence", "entry_clock", "frame", "depth")
+                 "reasons", "low_sp", "sequence", "entry_clock", "frame", "depth", "pauses")
 
     def __init__(self, cpu, address, entry, start, sequence, entry_clock=0, frame=0, depth=0):
         self.cpu, self.address, self.entry, self.start = cpu, address, entry, start
         self.entry_clock, self.frame = entry_clock, frame
         self.depth = depth      # interrupt and exception handlers open when it was entered
+        self.pauses = []        # interrupts taken while it ran at its own depth (lockstep)
         self.entry_sp = self.low_sp = stack_pointer(cpu, entry)
         self.children = []      # direct children: (address, start, end, exit registers)
         self.tree = []          # every descendant in call order: (address, descendants)
@@ -171,6 +172,7 @@ class Call:
         position.append(len(kept))
         self.accesses = kept    # (address, width, value, write, start clock, extra, depth)
         self.handler_accesses = len(accesses) - len(kept)
+        self.pauses = frame.pauses
         self.entry_clock, self.exit_clock = frame.entry_clock, exit_clock
         self.exit_state = exit_state
         self.exit_sequence = exit_sequence
@@ -208,6 +210,8 @@ def segmenter(routines, frame_number=lambda: 0):
     mark = {M68K: 0, Z80: 0}            # accesses[cpu][mark:] belong to the instruction under way
     stack = {M68K: [], Z80: []}
     handlers = {M68K: [], Z80: []}      # stack depth at each open interrupt or exception
+    open_pauses = {M68K: [], Z80: []}   # the pause record of each open handler
+    following = {M68K: 0, Z80: 0}       # the next PC after the last instruction
     def feed(event):
         closed = []
         cpu, kind, payload = event["cpu"], event["kind"], event["payload"]
@@ -222,11 +226,21 @@ def segmenter(routines, frame_number=lambda: 0):
                         frame.reasons.add("foreign_write")
         elif kind in (5, 6):
             if payload["phase"] == 1:
+                depth = len(handlers[cpu])
+                # the handler returns to the instruction after the last one that ran
+                pause = {"kind": "interrupt" if kind == 6 else "exception",
+                         "sequence": event["sequence"], "pc": following[cpu],
+                         "state": state[cpu], "clock": clock[cpu], "end_sequence": None}
                 for frame in stack[cpu]:
-                    frame.reasons.add("interrupt")
+                    frame.reasons.add("interrupt" if kind == 6 else "exception")
+                    if frame.depth == depth:
+                        frame.pauses.append(pause)
                 handlers[cpu].append(len(stack[cpu]))
+                open_pauses[cpu].append(pause)
             elif handlers[cpu]:
                 del stack[cpu][handlers[cpu].pop():]    # calls a handler left open
+                if open_pauses[cpu]:
+                    open_pauses[cpu].pop()["end_sequence"] = event["sequence"]
         elif kind == 4:
             state[cpu], entered_by_call[cpu] = None, False
             stack[cpu].clear()
@@ -287,6 +301,7 @@ def segmenter(routines, frame_number=lambda: 0):
                 (0xFFFFFFFF if cpu == M68K else 0xFFFF))
             state[cpu] = after
             clock[cpu] = event["master_clock"]
+            following[cpu] = event["next_pc"]
         return closed
 
     return feed
@@ -352,8 +367,8 @@ class Checker:
         # frame spans are a lockstep concern (a replay has no time); an interrupted call is
         # judged without its handler's accesses, and a difference in it is not the C's
         # for certain
-        interrupted = "interrupt" in call.reasons
-        reasons = call.reasons - {"spans_frames", "interrupt"}
+        interrupted = bool(call.reasons & {"interrupt", "exception"})
+        reasons = call.reasons - {"spans_frames", "interrupt", "exception"}
         if reasons:
             return dict(outcome, result="UNVERIFIED", reason=sorted(reasons)[0])
         outcome = self._judge(call, compared, outcome)

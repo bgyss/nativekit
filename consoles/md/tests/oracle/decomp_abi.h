@@ -285,6 +285,9 @@ int nmd_decomp_set_substitute(nmd_decomp_substitute handler,
                               const uint32_t *m68k_entries, uint32_t m68k_count,
                               const uint32_t *z80_entries, uint32_t z80_count);
 int nmd_decomp_substitute_at(uint32_t cpu, uint32_t pc, uint64_t master_clock);
+/* Add (add != 0) or remove an address where the handler is also called: a
+ * substituted routine's C paused at an interrupt continues there. */
+int nmd_decomp_continuation(uint32_t cpu, uint32_t pc, int add);
 uint32_t nmd_decomp_local_clock(uint64_t master_clock);
 void nmd_decomp_fail(void);
 /* The RAM refresh counter and the clock it was last brought up to are

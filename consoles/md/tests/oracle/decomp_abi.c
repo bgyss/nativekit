@@ -22,6 +22,12 @@ static uint64_t stop_instruction_count;
 static int stop_metadata_set;
 static uint64_t master_clock_offset;
 static nmd_decomp_substitute substitute;
+/* Addresses where a paused substitution continues (an interrupted C resumes
+ * when the handler returns there), besides the routine entries. */
+#define MAX_CONTINUATIONS 64
+static uint32_t continuations[MAX_CONTINUATIONS][2];
+static uint32_t continuation_count;
+
 static uint8_t m68k_entries[1u << 21];
 static uint8_t z80_entries[1u << 13];
 static uint64_t master_clock_epoch;
@@ -108,6 +114,7 @@ void nmd_decomp_reset(void)
     substitute = NULL;
     memset(m68k_entries, 0, sizeof m68k_entries);
     memset(z80_entries, 0, sizeof z80_entries);
+    continuation_count = 0;
 }
 
 int nmd_decomp_set_substitute(nmd_decomp_substitute handler,
@@ -138,6 +145,44 @@ int nmd_decomp_set_substitute(nmd_decomp_substitute handler,
     return 0;
 }
 
+int nmd_decomp_continuation(uint32_t cpu, uint32_t pc, int add)
+{
+    uint32_t index;
+
+    for (index = 0; index < continuation_count; index++) {
+        if (continuations[index][0] == cpu && continuations[index][1] == pc) {
+            if (!add) {
+                continuations[index][0] = continuations[continuation_count - 1][0];
+                continuations[index][1] = continuations[continuation_count - 1][1];
+                continuation_count--;
+            }
+            return 0;
+        }
+    }
+    if (!add) {
+        return -1;
+    }
+    if (continuation_count == MAX_CONTINUATIONS) {
+        return -1;
+    }
+    continuations[continuation_count][0] = cpu;
+    continuations[continuation_count][1] = pc;
+    continuation_count++;
+    return 0;
+}
+
+static int is_continuation(uint32_t cpu, uint32_t pc)
+{
+    uint32_t index;
+
+    for (index = 0; index < continuation_count; index++) {
+        if (continuations[index][0] == cpu && continuations[index][1] == pc) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int nmd_decomp_substitute_at(uint32_t cpu, uint32_t pc, uint64_t master_clock)
 {
     if (!substitute) {
@@ -145,12 +190,12 @@ int nmd_decomp_substitute_at(uint32_t cpu, uint32_t pc, uint64_t master_clock)
     }
     if (cpu == NMD_DECOMP_M68K) {
         pc &= 0xFFFFFFu;
-        if (!(m68k_entries[pc >> 3] & (1u << (pc & 7)))) {
+        if (!(m68k_entries[pc >> 3] & (1u << (pc & 7))) && !is_continuation(cpu, pc)) {
             return 0;
         }
     } else {
         pc &= 0xFFFFu;
-        if (!(z80_entries[pc >> 3] & (1u << (pc & 7)))) {
+        if (!(z80_entries[pc >> 3] & (1u << (pc & 7))) && !is_continuation(cpu, pc)) {
             return 0;
         }
     }

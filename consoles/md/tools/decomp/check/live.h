@@ -53,13 +53,33 @@ typedef struct nmd_live_sync_point {
     uint32_t refresh_counter;
 } nmd_live_sync_point;
 
-void nmd_live_bind(nmd_live_m68k_bus m68k, nmd_live_z80_bus z80, uint32_t image_size);
-/* The machine syncs the original made between instructions inside the call:
- * each is made before the first hardware access that begins at or after its
- * clock (68000 only); the runner makes those left after the C returns. */
-void nmd_live_syncs(nmd_live_sync sync, const nmd_live_sync_point *points, uint32_t count);
-uint32_t nmd_live_syncs_made(void);
-void nmd_live_begin(int cpu, const nmd_live_slot *list, uint32_t count);
-const nmd_live_result *nmd_live_run(int cpu, void (*routine)(void));
+void nmd_live_bind(nmd_live_m68k_bus m68k, nmd_live_z80_bus z80, nmd_live_sync sync,
+                   uint32_t image_size);
+
+/* Where the original took an interrupt: after the instruction ending at
+ * `clock`, before the one at `pc`, with these registers. */
+typedef struct nmd_live_pause {
+    uint64_t clock;
+    uint32_t pc;
+    uint32_t d[8], a[8];
+    uint32_t ccr;
+} nmd_live_pause;
+
+/* Run a call's C on its own stack. At each of `pauses` the C stops: where a
+ * draft reaches the interrupted instruction with the original's registers
+ * (exact), or else before its first hardware access after the clock, or at
+ * its end; nmd_live_continue goes on once the machine has taken it. The syncs are made at their clocks, in time order with the
+ * pauses (68000 only). Returns 0 finished, 1 paused, 2 a difference (see the
+ * result), -1 no room for another call. */
+int nmd_live_start(int cpu, const nmd_live_slot *slots, uint32_t slot_count,
+                   const nmd_live_sync_point *syncs, uint32_t sync_count,
+                   const nmd_live_pause *pauses, uint32_t pause_count, void (*routine)(void),
+                   int *handle);
+int nmd_live_continue(int handle);
+const nmd_live_result *nmd_live_result_of(int handle);
+uint32_t nmd_live_syncs_made(int handle);
+uint32_t nmd_live_pauses_made(int handle);
+int nmd_live_at_end(int handle);        /* paused after the C's own return */
+void nmd_live_release(int handle);
 
 #endif

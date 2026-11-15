@@ -246,6 +246,7 @@ class Drafter:
             if address in targets:
                 code.append("L_%06X:" % address)
             code.append("    /* $%06X  %s */" % (address, text))
+            code.append("    NMD_AT(0x%06Xu);" % address)
             code.extend("    " + line for line in out)
         return "\n".join(code)
 

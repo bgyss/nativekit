@@ -60,11 +60,27 @@ internal FIFO and DMA progress, I/O port state, the 68000's pending-interrupt
 fields. A defect that shows only there is found when it reaches one of the
 compared regions, or not at all.
 
+## Calls an interrupt lands in
+
+Each call's C runs on its own stack (a coroutine, `check/live.c`). Where the
+original took an interrupt inside the call, the C pauses: a draft (and hand
+C that marks its instructions with `NMD_AT`) pauses on reaching the
+instruction the original was interrupted before, with the original's
+registers there; other C pauses before its first hardware access after that
+point, or at its end. The CPU is resumed at the interrupted PC with the
+original's scheduling state there (its latched interrupt included), the
+machine takes the interrupt and runs the handler, and when the handler
+returns to that PC the core calls the runner again, which continues the C
+with the registers the handler left. The original's syncs inside the
+handler happen on their own; those in the call are made in time order with
+the pauses. A call with an exception (TRAP) in it, or that spans a frame, is
+still left to the original.
+
 ## What is left to the original
 
 A call is not substituted, and is counted by reason, when:
 
-- `interrupt`: an interrupt or exception was taken during it.
+- `interrupt`, `exception`: an interrupt with another reason in the same call, or a TRAP or other exception.
 - `spans_frames`: it returned in a later frame than it began.
 - `foreign_write`: the 68000 wrote Z80 RAM during a Z80 call.
 - `irregular_return`: it, or a call inside it, did not return by its own `rts`/`ret`.
@@ -136,16 +152,19 @@ read's 56 clocks were charged at another sync (frame 485).
 ### First title
 
 All 301 routines of the first title with C (23 hand-written, 278 drafts;
-kept in its private repository) over the 600-frame no-input boot scenario:
-IDENTICAL on all 600 frames, 57,245 calls substituted, 61,945 hardware
-accesses made at the original's clocks; 2,453 calls left to the original
-(interrupted, spanning frames, or Z80), so not certified. Over the 3,000-frame
-gameplay scenario (options screen, carrier take-off, first-stage play):
-IDENTICAL on all 3,000 frames, 176,640 calls substituted, 774,929 hardware
-accesses made at the original's clocks; 11,404 calls left to the original, so
-not certified. The last difference on the way was open bus: the VDP status
-word's upper bits are the 68000's prefetch register, which the C's read did
-not carry until each recorded access did.
+kept in its private repository), with interrupted calls substituted: over
+the 600-frame boot scenario IDENTICAL on all 600 frames, 50,010 calls
+substituted and 533 interrupt pauses; 1,637 calls left to the original
+(spanning frames, or with a TRAP), so not certified. Before interrupted calls
+were substituted: IDENTICAL on all 600 boot frames (57,245 calls, counting
+nested ones differently) and all 3,000 gameplay frames (176,640 calls), the
+last difference on the way being open bus (the VDP status word's upper bits
+are the 68000's prefetch register, which the C's read did not carry until
+each recorded access did).
+
+Hand-written C needs `NMD_AT` marks where interrupts land: without them a
+paused C has run ahead of the original's interrupt point, and the handler
+saw other registers (first title, frames 65 and 333).
 
 Earlier, with the 23 hand-written routines only: 486 frames equal, then a
 routine entered 56 clocks late. Traced back, both runs execute the same 68000
