@@ -4,7 +4,8 @@
 The per-call control cartridge is taken in, its skeleton symbolized with the
 routines' names, and the copy rebuilt: it must be the image byte for byte,
 name every routine it calls, and leave no branch, call or jump to code with
-a raw address. Two planted errors (each label one instruction late, and an
+a raw address; a PC-relative reference into a raw span names a label that
+cuts the span. Two planted errors (each label one instruction late, and an
 operand naming the instruction after its target) must break the rebuild.
 """
 import importlib
@@ -54,6 +55,10 @@ def main():
                     re.search(r"\b(?:bsr|jsr)(?:\.[sw])?\s+%s\b" % name, text),
                     "routine %s is not labelled and called by name" % name)
         # a direct transfer to code keeps no raw address
+        # a PC-relative reference into a raw span names a label that cuts the span
+        data = re.findall(r"\((dat_[0-9A-F]{6}),pc", text)
+        require(data and all(re.search(r"^%s:$" % name, text, re.M) for name in data),
+                "PC-relative data references are not labelled: %r" % data)
         raw = [line for line in text.split("\n") if RAW_FLOW.match(line) and "(" not in line]
         require(not raw, "branches to code left with raw addresses: %r" % raw[:5])
         require(rom["labels"] >= len(calls_fixture.ROUTINES) and rom["operands"] >= 20,
@@ -86,8 +91,8 @@ def main():
             source.write_text(original)
             importlib.reload(symbolize)
     print("symbolize_check: ok (%d labels and %d operands named, routines by name; rebuild "
-          "identical; no transfer to code left raw; %d planted errors break the rebuild)"
-          % (rom["labels"], rom["operands"], len(plants)))
+          "identical; no transfer to code left raw; %d data labels; %d planted errors break "
+          "the rebuild)" % (rom["labels"], rom["operands"], len(set(data)), len(plants)))
 
 
 if __name__ == "__main__":
