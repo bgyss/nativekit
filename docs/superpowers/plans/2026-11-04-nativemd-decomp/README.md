@@ -38,7 +38,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 | [D06](d06-first-native-playable-slice.md) | Deliver the first game slice through the actual native launch path | D00 selected title, D02 execution path, D03 title skeleton, D04 and D05 verified checking infrastructure. | in progress |
 | [D07](d07-whole-game-behavior-recovery.md) | Recover and certify the complete game's C behavior | D06 first playable and stable A5/A7 infrastructure. | started |
 | [D08](d08-symbolic-assembly-completion.md) | Finish the symbolic, byte-exact assembly record | D03 lossless skeleton and D07 behavior/census closure | started |
-| [D09](d09-plain-typed-c.md) | Turn certified translations into maintainable plain C | D07 certified behavior | unstarted |
+| [D09](d09-plain-typed-c.md) | Turn certified translations into maintainable plain C | D07 certified behavior | started |
 | [D10](d10-full-native-game-and-timing.md) | Qualify complete native gameplay and measured timing | D02, D07 and D09 | unstarted |
 | [D11](d11-reproducible-first-game-delivery.md) | Package the first completed decomp and native game | D07-D10 complete at their declared gates | unstarted |
 | [D12](d12-reusable-rom-to-decomp-workflow.md) | Prove reuse on a second ROM and document the operating workflow | D11 full first-title delivery | unstarted |
