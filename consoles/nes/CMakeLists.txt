@@ -64,5 +64,6 @@ if(NNES_TESTS)
   add_custom_target(nes-check
     ${_nnes_checks}
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/profile_check.py
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/capture_check.py
     VERBATIM)
 endif()

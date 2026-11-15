@@ -54,18 +54,31 @@ From a fresh clone:
 ```bash
 nix develop        # or direnv, with the .envrc: the compilers and tools
 mise trust         # once, so mise reads mise.toml
+mise run env:sync  # locked uv environment, using the shell's Python
 mise run tools     # asar and the pinned reference core, into build/
 mise run build     # every macOS configuration
 mise run test      # the checks, and a game built as games build it
 mise run test:kit  # the kit's own checks
 ```
 
-Inside `nix develop` the nix shell's cmake and python3 are the ones used: mise.toml pins
-no tools, and only sets the paths to asar and the reference core. Outside the nix shell,
-install cmake (3.16 or later), python3 and the compilers yourself. `mise run build` is the
+Inside `nix develop` Nix supplies cmake, Python, uv, mise and native build tools.
+Mise defines project tasks; NES reference tasks use the committed `uv.lock`
+with the shell's Python and no automatic interpreter downloads. Outside the nix shell,
+install cmake (3.16 or later), Python 3.11+, uv and the compilers yourself. `mise run build` is the
 macOS set (the headless, macOS, Metal, GL, Vulkan, x86_64, iOS, Windows cross and no-host
 builds); `build:ios` needs Xcode with the iOS SDK, and Linux is untested. The checks are
 in [`consoles/snes/tests/README.md`](consoles/snes/tests/README.md).
+
+### nativenes restart
+
+Continue the selected Dragon Warrior (USA) (Rev A) recovery from the
+[first native NES game execution goal](docs/goals/2026-11-02-nes-first-native-game.md).
+`mise run tools:nes` builds the pinned SDL-free host from Brian's MesenCE
+branch; `mise run capture:nes` performs bounded reference captures without
+desktop automation. The [capture guide](consoles/nes/docs/capture.md) includes
+the existing private title's reset/Start/profile commands, artifact validation
+and tested evidence. The native game remains incomplete; capture success does
+not substitute for native picture, sound, controls and full-game qualification.
 
 ### nativemd
 

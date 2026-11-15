@@ -6,13 +6,16 @@
 
 ## Build, Test, and Development Commands
 
-Run commands from the repository root. `nix develop` enters the compiler and tooling environment; run `mise trust` once to authorize repository tasks.
+Run commands from the repository root. `nix develop` enters the compiler and tooling environment; run `mise trust` once to authorize repository tasks. `mise run env:sync` creates the locked uv environment with the shell's Python and no automatic interpreter downloads.
 
 - `mise run build:null` builds headless targets; `mise run build:macos` builds the macOS Metal host; `mise run build` runs the macOS-oriented build matrix.
 - `mise run tools` builds pinned SNES reference tools; `mise run tools:md` builds candidate Mega Drive tools.
 - `mise run test:kit`, `mise run test:rom`, and `mise run test` run kit checks, SNES reference comparisons, and the full checks with consumer integration.
 - Run focused Mega Drive checks with `mise run` and one of `test:md-console`, `test:md-io`, `test:md-z80`, `test:md-sound`, `test:md-bus`, `test:md-interrupt`, `test:md-vdp`, `test:md-dma`, `test:md-render`, or `test:md-execution`. `mise run test:md-rom` compares synthetic cases with the candidate core.
 - `mise run test:nes` runs the NES contract checks, synthetic cartridge, and profile-tool checks.
+- `mise run tools:nes` builds the pinned native MesenCE capture host; `mise run test:nes-capture` checks its real synthetic captures and failure controls.
+- Use `mise run capture:nes run --rom /path/to/game.nes --frames 120 --out build/captures/name` for NES reference captures. Use the headless command rather than desktop/Computer Use automation; see `consoles/nes/docs/capture.md` for input, profiles, external Lua and the Dragon Warrior handoff.
+- For the restarted NES/Famicom effort, read `docs/goals/2026-11-02-nes-first-native-game.md` and the private `../dragon-warrior-nes` qualification ledger. The selected title is Dragon Warrior (USA) (Rev A); the capture infrastructure is ready, while complete native-game delivery remains the goal.
 - Run exploratory tooling checks with `mise run` and one of `test:md-toolchain`, `test:md-oracle-smoke`, `test:md-trace`, `test:md-features`, or `test:md-survey`.
 
 ## Coding Style & Naming Conventions

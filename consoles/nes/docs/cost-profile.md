@@ -19,6 +19,14 @@ ROM. The example uses illustrative weights, not measurements from a game.
 
 ## Capture and fitting
 
+For automated collection use the SDL-free runner described in
+[headless capture](capture.md): `mise run capture:nes run --rom /path/to/game.nes
+--scenario profile --warmup 120 --frames 600 --out build/captures/profile`.
+It builds on the pinned native MesenCE reference from `mise run tools:nes`,
+enables filesystem access in the isolated process, sets output/provenance, and
+requires explicit successful collector completion. The manual desktop method
+below remains available.
+
 `consoles/nes/tools/nnes-profile-mesen2.lua` captures typed NES CPU operations from Mesen2.
 It requires the optional source changes in
 [`tools/nnes-profile-mesen2-optype.patch`](../tools/nnes-profile-mesen2-optype.patch),

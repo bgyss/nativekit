@@ -1,0 +1,11 @@
+--- a/Core/Debugger/LuaApi.cpp
++++ b/Core/Debugger/LuaApi.cpp
+@@ -981,7 +981,7 @@
+ {
+ 	LuaCallHelper l(lua);
+ 	l.ForceParamCount(3);
+-	lua_settop(lua, 4);
++	lua_settop(lua, 3);
+ 
+ 	int subport = l.ReadInteger(0);
+ 	int port = l.ReadInteger();

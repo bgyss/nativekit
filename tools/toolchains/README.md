@@ -1,5 +1,11 @@
 # Local test toolchains
 
+`mise run tools:nes` separately builds the pinned native MesenCE capture host.
+It excludes SDL and all desktop backends; see
+[NES capture commands](../../consoles/nes/docs/capture.md) for setup, provenance,
+scenarios and the private Dragon Warrior collector workflow. Its source pin is
+in `mesen.json`. The original local MesenCE checkout is never modified.
+
 Run `nix develop`, then `mise run tools` for the existing reference tools.
 `mise run tools:md` separately builds the candidate BlastEm libretro core and
 the 68000 and Z80 vasm assemblers under `build/toolchains/`. These tools are

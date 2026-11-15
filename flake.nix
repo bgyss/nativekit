@@ -21,11 +21,11 @@
           # so the shell must not put a nix cc first. The system cc is used.
           default = pkgs.mkShellNoCC {
             packages = with pkgs; [
-              cmake ninja python3 git gnumake glslang vulkan-headers vulkan-loader mise
+              cmake ninja python3 uv git gnumake gnutar patch glslang vulkan-headers vulkan-loader mise
               pkgsCross.mingwW64.buildPackages.gcc
             ]
             ++ lib.optionals darwin [ moltenvk ]
-            ++ lib.optionals (!darwin) ([ gcc pkg-config ] ++ linuxLibs);
+            ++ lib.optionals (!darwin) ([ gcc clang pkg-config ] ++ linuxLibs);
 
             shellHook =
               if darwin then ''

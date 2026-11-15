@@ -1,11 +1,16 @@
 # No [tools]: cmake, python3 and the rest come from the nix shell (flake.nix;
 # `nix develop`, or direnv with .envrc). Outside it, install cmake (3.16 or
-# later) and python3 yourself.
+# later), Python 3.11+, uv and the native compiler yourself.
 
 [env]
+UV_CACHE_DIR = "{{config_root}}/build/uv-cache"
 NSHVC_ASAR = "{{config_root}}/build/toolchains/asar/asar"
 # dylib on macOS; use bsnes_libretro.so on Linux, .dll on Windows
 NSHVC_ORACLE_CORE = "{{config_root}}/build/oracle-core/bsnes_libretro.dylib"
+
+[tasks."env:sync"]
+description = "Sync the locked uv environment using the shell's Python, without downloads"
+run = "uv sync --locked --no-managed-python --no-python-downloads --python python3"
 
 [tasks.tools]
 description = "Fetch and build asar and the pinned reference core"
@@ -14,6 +19,19 @@ run = "sh tools/toolchains/setup.sh all"
 [tasks."tools:md"]
 description = "Build local candidate BlastEm and vasm test tools"
 run = "sh tools/toolchains/setup.sh vasm && sh tools/toolchains/setup.sh blastem"
+
+[tasks."tools:nes"]
+description = "Build the pinned SDL-free native MesenCE capture reference"
+run = "uv run --locked --no-managed-python --no-python-downloads --python python3 python tools/toolchains/setup_nes.py"
+
+[tasks."capture:nes"]
+description = "Run, inspect, or validate an isolated NES reference capture"
+run = "uv run --locked --no-managed-python --no-python-downloads --python python3 python consoles/nes/tools/nnes-capture"
+
+[tasks."test:nes-capture"]
+description = "Check NES capture contracts and actual-core failure controls"
+depends = ["tools:nes"]
+run = "uv run --locked --no-managed-python --no-python-downloads --python python3 python consoles/nes/tests/capture_check.py && uv run --locked --no-managed-python --no-python-downloads --python python3 python consoles/nes/tests/capture_integration_check.py"
 
 [tasks."test:md-toolchain"]
 run = "python3 consoles/md/tests/toolchain_check.py"

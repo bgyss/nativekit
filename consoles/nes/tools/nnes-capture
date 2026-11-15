@@ -1,0 +1,412 @@
+#!/usr/bin/env python3
+"""Bounded, isolated NES reference capture; no GUI or SDL required."""
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import signal
+import struct
+import subprocess
+import sys
+import time
+import wave
+import zlib
+
+ROOT = Path(__file__).resolve().parents[3]
+SUPPORT = Path(__file__).resolve().parent / "capture"
+DEFAULT_TOOLCHAIN = ROOT / "build/toolchains/mesen"
+BUTTONS = {"A", "B", "SELECT", "START", "UP", "DOWN", "LEFT", "RIGHT"}
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def save_json(path, value):
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+
+
+def positive(value):
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
+
+
+def toolchain(folder):
+    identity = folder / "identity.json"
+    binary = folder / "nnes-mesen"
+    if not identity.is_file() or not binary.is_file():
+        raise ValueError("missing NES capture toolchain; run mise run tools:nes")
+    result = json.loads(identity.read_text())
+    reference = json.loads((ROOT / "tools/toolchains/mesen.json").read_text())
+    inputs = {name: sha256(ROOT / name) for name in reference["patches"] + reference["build_inputs"]}
+    stamp = hashlib.sha256(json.dumps([reference["source_commit"], inputs], sort_keys=True).encode()).hexdigest()
+    if (result.get("format") != "nnes-mesen-toolchain" or result.get("version") != 1
+            or result.get("host_backends") != [] or result.get("operation_types") is not True
+            or result.get("executable_sha256") != sha256(binary)
+            or result.get("source_commit") != reference["source_commit"]
+            or result.get("inputs") != inputs or result.get("build_stamp") != stamp):
+        raise ValueError("toolchain identity/hash mismatch; rebuild with mise run tools:nes")
+    return binary, result
+
+
+def inputs_for(args):
+    inputs = {}
+    if args.input:
+        inputs = json.loads(args.input.read_text())
+        if not isinstance(inputs, dict):
+            raise ValueError("input must be a frame-to-port JSON object")
+        for frame, ports in inputs.items():
+            if (not re.fullmatch(r"[1-9][0-9]*", frame) or int(frame) > args.frames
+                    or not isinstance(ports, dict)):
+                raise ValueError("input frame must be one-based and within --frames")
+            for port, buttons in ports.items():
+                if (port not in ("1", "2") or not isinstance(buttons, list)
+                        or any(not isinstance(b, str) or b not in BUTTONS for b in buttons)):
+                    raise ValueError("input requires ports 1/2 and standard NES button names")
+                if {"UP", "DOWN"} <= set(buttons) or {"LEFT", "RIGHT"} <= set(buttons):
+                    raise ValueError("input cannot hold opposing directions")
+    if args.scenario == "gameplay" and not args.input:
+        raise ValueError("gameplay requires --input")
+    if args.scenario == "start":
+        if args.input:
+            raise ValueError("start scenario uses --start-frame/--start-frames; use gameplay for --input")
+        if args.start_frame + args.start_frames - 1 > args.frames:
+            raise ValueError("Start input exceeds --frames")
+        inputs = {str(frame): {"1": ["START"]} for frame in
+                  range(args.start_frame, args.start_frame + args.start_frames)}
+    return inputs
+
+
+def lua_string(value):
+    # Lua long strings preserve Unicode and literal backslashes safely.
+    equals = ""
+    while "]" + equals + "]" in value:
+        equals += "="
+    return "[" + equals + "[" + value + "]" + equals + "]"
+
+
+def lua_value(value):
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str):
+        return lua_string(value)
+    if isinstance(value, list):
+        return "{" + ",".join(map(lua_value, value)) + "}"
+    return "{" + ",".join("[ " + lua_value(int(k) if str(k).isdigit() else k) + " ]="
+                           + lua_value(v) for k, v in value.items()) + "}"
+
+
+def validate_jsonl(path, rom_sha1):
+    """Stream large bus traces, checking identity, order and completion footer."""
+    header = None
+    footer = None
+    count = 0
+    previous_clock = None
+    with path.open() as source:
+        for line in source:
+            item = json.loads(line)
+            if not isinstance(item, dict):
+                raise ValueError(f"invalid trace record: {path.name}")
+            if header is None:
+                header = item
+                if item.get("type") != "header" or item.get("rom_sha1", "").lower() != rom_sha1:
+                    raise ValueError(f"trace ROM/header mismatch: {path.name}")
+            elif item.get("type") == "access":
+                if footer is not None:
+                    raise ValueError(f"trace data after footer: {path.name}")
+                if item.get("event", count) != count:
+                    raise ValueError(f"trace event order mismatch: {path.name}")
+                clock = item.get("master_clock", item.get("cycle"))
+                if (not isinstance(clock, (int, float)) or isinstance(clock, bool)
+                        or previous_clock is not None and clock < previous_clock):
+                    raise ValueError(f"trace clock moved backwards: {path.name}")
+                if not isinstance(item.get("address"), int) or not 0 <= item["address"] <= 65535:
+                    raise ValueError(f"trace address out of range: {path.name}")
+                previous_clock = clock
+                count += 1
+            elif item.get("type") == "footer" and footer is None:
+                footer = item
+            else:
+                raise ValueError(f"unexpected trace record: {path.name}")
+    if not count:
+        raise ValueError(f"empty trace: {path.name}")
+    # Old reset and profile collectors predate footers; the session completion
+    # record plus a successful explicit emu.stop proves their collection ended.
+    requires_footer = header.get("format") == "nnes-typed-bus-trace"
+    if (requires_footer and footer is None) or (footer and footer.get("access_count") != count):
+        raise ValueError(f"missing/mismatched trace footer: {path.name}")
+    return {"access_count": count, "header": header}
+
+
+def validate_png(path):
+    data = path.read_bytes()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("invalid PNG signature")
+    offset, pixels, header, ended = 8, bytearray(), None, False
+    while offset + 12 <= len(data):
+        size = struct.unpack_from(">I", data, offset)[0]
+        kind = data[offset + 4:offset + 8]
+        end = offset + 12 + size
+        if end > len(data):
+            raise ValueError("truncated PNG chunk")
+        payload = data[offset + 8:offset + 8 + size]
+        crc = struct.unpack_from(">I", data, offset + 8 + size)[0]
+        if zlib.crc32(kind + payload) != crc:
+            raise ValueError("PNG CRC mismatch")
+        if offset == 8:
+            if kind != b"IHDR" or size != 13:
+                raise ValueError("missing PNG header")
+            header = struct.unpack(">IIBBBBB", payload)
+        if kind == b"IDAT":
+            pixels.extend(payload)
+        offset = end
+        if kind == b"IEND":
+            ended = size == 0 and offset == len(data)
+            break
+    if not ended or header not in ((256, 240, 8, 2, 0, 0, 0), (256, 240, 8, 6, 0, 0, 0)):
+        raise ValueError("incomplete or invalid 256x240 PNG")
+    channels = 3 if header[3] == 2 else 4
+    if len(zlib.decompress(pixels)) != 240 * (1 + 256 * channels):
+        raise ValueError("PNG decoded size mismatch")
+
+
+def validate_mss(path):
+    data = path.read_bytes()
+    offset = 3
+    def integer():
+        nonlocal offset
+        if offset + 4 > len(data):
+            raise ValueError("truncated save state")
+        value = struct.unpack_from("<I", data, offset)[0]
+        offset += 4
+        return value
+    if data[:3] != b"MSS":
+        raise ValueError("invalid Mesen save state")
+    integer()  # emulator version
+    if integer() != 4 or integer() != 2:  # pinned format / NES console enum
+        raise ValueError("unsupported Mesen save state format/console")
+    raw_size, width, height = integer(), integer(), integer()
+    integer()  # video scale
+    compressed = integer()
+    if (width, height, raw_size) != (256, 240, 256 * 240 * 2):
+        raise ValueError("invalid save state video size")
+    if len(zlib.decompress(data[offset:offset + compressed])) != raw_size:
+        raise ValueError("save state video is truncated")
+    offset += compressed
+    name_size = integer()
+    offset += name_size
+    if offset >= len(data) or data[offset] != 1:
+        raise ValueError("missing compressed save state payload")
+    offset += 1
+    raw_size, compressed = integer(), integer()
+    if len(data) != offset + compressed or len(zlib.decompress(data[offset:])) != raw_size:
+        raise ValueError("save state payload is truncated")
+
+
+def validate_artifacts(out, rom_sha1, expected):
+    artifacts = out / "artifacts"
+    completion = json.loads((artifacts / "completion.json").read_text())
+    native = json.loads((out / "native-result.json").read_text())
+    if completion.get("code") != 0 or native.get("stop_code") != 0:
+        raise ValueError("capture did not complete successfully")
+    if completion.get("rom_sha1") != rom_sha1:
+        raise ValueError("completion ROM identity mismatch")
+    state = json.loads((artifacts / "state.json").read_text())
+    if not isinstance(state, dict) or not state:
+        raise ValueError("missing final state")
+    validate_png(artifacts / "final.png")
+    validate_mss(artifacts / "final.mss")
+    for name, size in (("ram.bin", 2048), ("oam.bin", 256)):
+        if (artifacts / name).stat().st_size != size:
+            raise ValueError(f"invalid {name} size")
+    if not (artifacts / "vram.bin").stat().st_size or not (artifacts / "final.mss").stat().st_size:
+        raise ValueError("missing VRAM or save state")
+    if completion.get("frames", 0) > 0:
+        with wave.open(str(artifacts / "audio.wav")) as wav:
+            if (wav.getnframes() == 0 or wav.getsampwidth() != 2
+                    or wav.getnchannels() != 2 or wav.getframerate() != 48000):
+                raise ValueError("missing audio samples")
+            remaining = wav.getnframes() * 4
+            while remaining:
+                chunk = wav.readframes(min(16384, remaining // 4))
+                if not chunk:
+                    raise ValueError("truncated WAV samples")
+                remaining -= len(chunk)
+    traces = {}
+    for name in expected:
+        traces[name] = validate_jsonl(artifacts / name, rom_sha1)
+    return {"completion": completion, "native": native, "traces": traces}
+
+
+def run(args):
+    out = args.out.resolve()
+    if out.exists() and (not out.is_dir() or any(out.iterdir())):
+        raise ValueError("--out must name a new or empty directory")
+    inputs = inputs_for(args)
+    rom = args.rom.resolve(strict=True)
+    with rom.open("rb") as source:
+        if source.read(4) != b"NES\x1a":
+            raise ValueError("--rom must be an uncompressed iNES/NES 2.0 image")
+    binary, identity = toolchain(args.toolchain.resolve())
+    scripts = [p.resolve(strict=True) for p in args.lua]
+    if args.scenario == "script" and not scripts:
+        raise ValueError("script scenario requires --lua")
+    if scripts and args.scenario != "script":
+        raise ValueError("--lua requires --scenario script (collector controls its input)")
+    if args.scenario == "profile":
+        scripts = [SUPPORT.parent / "nnes-profile-mesen2.lua"]
+    expected = list(args.expect_jsonl)
+    for name in expected:
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+\.jsonl", name):
+            raise ValueError("--expect-jsonl must be a plain .jsonl filename")
+    environment = {k: v for k, v in os.environ.items()
+                   if not k.startswith(("DW1_", "NNES_PROFILE_", "DCOMP_", "SDL_", "DYLD_", "LD_"))}
+    overrides = {}
+    for entry in args.env:
+        key, separator, value = entry.partition("=")
+        if not separator or not re.fullmatch(r"(?:DW1|NNES_PROFILE)_[A-Z0-9_]+", key):
+            raise ValueError("--env accepts DW1_* or NNES_PROFILE_* NAME=VALUE settings")
+        overrides[key] = value
+    out.mkdir(parents=True, exist_ok=True)
+    artifacts = out / "artifacts"
+    artifacts.mkdir()
+    home = out / "home"
+    home.mkdir()
+    environment.update(overrides)
+    environment.update(HOME=str(home), XDG_CONFIG_HOME=str(home / "config"),
+                       XDG_DATA_HOME=str(home / "data"), DISPLAY="", WAYLAND_DISPLAY="",
+                       DCOMP_ADAPTER_OUTPUTS=str(artifacts),
+                       NNES_PROFILE_STOP_ON_FINISH="1", NNES_PROFILE_OUTPUT_NAME="profile-raw.jsonl",
+                       NNES_PROFILE_WARMUP_FRAMES=str(args.warmup),
+                       NNES_PROFILE_CAPTURE_FRAMES=str(args.frames),
+                       NNES_PROFILE_REFERENCE="MesenCE " + identity["source_commit"] + " nativekit capture")
+    frame_limit = args.frames
+    if args.scenario == "profile":
+        frame_limit += args.warmup + 2
+        expected.append("profile-raw.jsonl")
+    if args.trace:
+        expected.append("bus.jsonl")
+    config = {"output": str(artifacts), "frame_limit": frame_limit,
+              "must_stop": args.scenario in ("script", "profile"),
+              "script_input": args.scenario == "script", "trace": args.trace,
+              "max_events": args.max_events, "input": inputs}
+    save_json(out / "scenario.json", {**config, "scenario": args.scenario,
+                                      "environment": overrides})
+    code = "NNES_CAPTURE=" + lua_value(config) + "\n" + (SUPPORT / "session.lua").read_text()
+    script_hashes = []
+    for index, path in enumerate(scripts):
+        snapshot = out / f"collector-{index}.lua"
+        snapshot.write_bytes(path.read_bytes())
+        script_hashes.append({"path": str(path), "sha256": sha256(snapshot)})
+        code += "\nassert(load(" + lua_string(snapshot.read_text()) + "," + lua_string("@" + str(path)) + "))()\n"
+    combined = out / "session.lua"
+    combined.write_text(code)
+    rom_sha1 = hashlib.sha1(rom.read_bytes()).hexdigest()
+    manifest = {"format": "nnes-capture", "version": 1, "ok": False,
+                "qualification": "capture-only; not emulator or game parity",
+                "rom": {"path": str(rom), "sha1": rom_sha1, "sha256": sha256(rom)},
+                "toolchain": identity, "scripts": script_hashes,
+                "session_sha256": sha256(combined), "scenario": args.scenario,
+                "expected_jsonl": expected, "timeout_seconds": args.timeout}
+    command = [str(binary), str(rom), str(home), str(combined),
+               str(out / "native-result.json"), str(artifacts / "audio.wav")]
+    manifest["command"] = command
+    save_json(out / "manifest.json", manifest)
+    start = time.monotonic()
+    try:
+        with (out / "stdout.log").open("wb") as stdout, (out / "stderr.log").open("wb") as stderr:
+            process = subprocess.Popen(command, cwd=out, env=environment,
+                                       stdout=stdout, stderr=stderr, start_new_session=True)
+            try:
+                result = process.wait(timeout=args.timeout)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+                raise ValueError(f"capture timeout after {args.timeout}s")
+            except KeyboardInterrupt:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+                raise ValueError("capture cancelled")
+        manifest["exit_code"] = result
+        if result != 0:
+            raise ValueError(f"native capture failed (exit {result}); see {out / 'stderr.log'}")
+        manifest["validation"] = validate_artifacts(out, rom_sha1, expected)
+        if args.scenario in ("script", "profile") and manifest["validation"]["completion"]["reason"] != "script_stop":
+            raise ValueError("collector never signaled completion")
+        manifest["ok"] = True
+    except (ValueError, OSError, KeyError, wave.Error, EOFError, zlib.error) as error:
+        manifest["error"] = str(error)
+    finally:
+        manifest["elapsed_seconds"] = round(time.monotonic() - start, 3)
+        files = [p for p in artifacts.rglob("*") if p.is_file()]
+        files += [p for p in out.iterdir() if p.is_file() and p.name != "manifest.json"]
+        manifest["artifacts"] = {str(p.relative_to(out)): {"sha256": sha256(p), "bytes": p.stat().st_size}
+                                 for p in sorted(files)}
+        save_json(out / "manifest.json", manifest)
+    if not manifest["ok"]:
+        raise ValueError(manifest["error"])
+    print(f"NES capture complete: {out / 'manifest.json'}")
+
+
+def validate(out):
+    manifest = json.loads((out / "manifest.json").read_text())
+    if manifest.get("format") != "nnes-capture" or manifest.get("ok") is not True:
+        raise ValueError("capture manifest does not report success")
+    for name, item in manifest["artifacts"].items():
+        path = out / name
+        if not path.resolve().is_relative_to(out) or path.is_symlink() or sha256(path) != item["sha256"]:
+            raise ValueError(f"artifact hash mismatch: {name}")
+    validate_artifacts(out, manifest["rom"]["sha1"], manifest["expected_jsonl"])
+    print(f"NES capture validated: {out / 'manifest.json'}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="action", required=True)
+    doctor = sub.add_parser("doctor", help="verify the pinned native toolchain without launching it")
+    doctor.add_argument("--toolchain", type=Path, default=DEFAULT_TOOLCHAIN)
+    capture = sub.add_parser("run", help="capture a bounded scenario into an empty directory")
+    capture.add_argument("--rom", type=Path, required=True)
+    capture.add_argument("--out", type=Path, required=True)
+    capture.add_argument("--toolchain", type=Path, default=DEFAULT_TOOLCHAIN)
+    capture.add_argument("--scenario", choices=("reset", "start", "gameplay", "profile", "script"), default="reset")
+    capture.add_argument("--frames", type=positive, default=120)
+    capture.add_argument("--timeout", type=positive, default=120)
+    capture.add_argument("--input", type=Path)
+    capture.add_argument("--start-frame", type=positive, default=40)
+    capture.add_argument("--start-frames", type=positive, default=6)
+    capture.add_argument("--warmup", type=int, default=120)
+    capture.add_argument("--trace", action="store_true")
+    capture.add_argument("--max-events", type=positive, default=5000000)
+    capture.add_argument("--lua", type=Path, action="append", default=[])
+    capture.add_argument("--expect-jsonl", action="append", default=[])
+    capture.add_argument("--env", action="append", default=[])
+    check = sub.add_parser("validate", help="recheck a capture's hashes and completion")
+    check.add_argument("out", type=Path)
+    args = parser.parse_args()
+    if args.action == "doctor":
+        binary, identity = toolchain(args.toolchain.resolve())
+        print(json.dumps({"executable": str(binary), **identity}, indent=2))
+    elif args.action == "validate":
+        validate(args.out.resolve())
+    else:
+        if args.warmup < 0:
+            parser.error("--warmup must be non-negative")
+        run(args)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, OSError, KeyError, wave.Error, EOFError, zlib.error) as error:
+        sys.exit(f"nnes-capture: {error}")

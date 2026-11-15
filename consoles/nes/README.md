@@ -34,6 +34,16 @@ Select a working C11 compiler with `-DCMAKE_C_COMPILER=...` if necessary. Tests
 are enabled by default; disable them with `-DNNES_TESTS=OFF` for a library-only
 build. Consumers link the `nnes` target and include `nnes/nes.h`.
 
+## Headless reference captures
+
+`mise run tools:nes` builds a pinned native MesenCE host with no SDL or desktop
+dependencies. `mise run capture:nes run --rom /path/to/game.nes --frames 120
+--out build/captures/reset` captures state, memory, PNG and WAV without Computer
+Use. Reset, Start, gameplay input schedules, typed profiles and external Lua
+collectors are supported. See [capture.md](docs/capture.md) for the command
+contract, failure checks and Dragon Warrior thread handoff. This test oracle
+does not supply the missing native nnes renderer or frame runner.
+
 ## How a decompiled game plugs in
 
 As with SNES, the game supplies native C routines indexed by original addresses,
@@ -203,7 +213,7 @@ the same recovery method: original address-tagged C, explicit bus operations
 and waits, cartridge data, and synthetic plus oracle-backed hardware tests.
 Full game compatibility requires evidence beyond these unit tests.
 
-The [first native NES game goal prompt](../../docs/superpowers/plans/2026-11-02-nes-first-native-game-goal.md)
+The [first native NES game goal prompt](../../docs/goals/2026-11-02-nes-first-native-game.md)
 specifies the missing console work, complete assembly/C recovery, and evidence
 required to qualify a chosen title using the SNES preservation workflow.
 

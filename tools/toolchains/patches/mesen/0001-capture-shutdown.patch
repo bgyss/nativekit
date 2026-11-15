@@ -1,0 +1,47 @@
+--- a/Core/Shared/Emulator.h
++++ b/Core/Shared/Emulator.h
+@@ -257,6 +257,7 @@
+ 	bool IsEmulationThread();
+ 
+ 	int32_t GetStopCode() { return _stopCode; }
++	bool CaptureStopRequested() { return _stopRequested; }
+ 	void SetStopCode(int32_t stopCode);
+ 
+ 	void RegisterMemory(MemoryType type, void* memory, uint32_t size);
+--- a/Core/Shared/Emulator.cpp
++++ b/Core/Shared/Emulator.cpp
+@@ -1176,10 +1176,8 @@
+ 	_stopCode = stopCode;
+ 	if(!_stopFlag && !_stopRequested) {
+ 		_stopRequested = true;
+-		thread stopEmuTask([this]() {
+-			Stop(true);
+-		});
+-		stopEmuTask.detach();
++		// The capture host runs synchronously and owns cleanup.
++		_stopFlag = true;
+ 	}
+ }
+ 
+--- a/Core/Debugger/ScriptingContext.cpp
++++ b/Core/Debugger/ScriptingContext.cpp
+@@ -127,6 +127,8 @@
+ 
+ void ScriptingContext::ProcessLuaError()
+ {
++	// Fail the run instead of silently continuing after a script error.
++	_debugger->GetEmulator()->SetStopCode(65);
+ 	string errorMsg = GetErrorMessage();
+ 	if(StringUtilities::Contains(errorMsg, "attempt to call a nil value (global 'require')") || StringUtilities::Contains(errorMsg, "attempt to index a nil value (global 'os')") || StringUtilities::Contains(errorMsg, "attempt to index a nil value (global 'io')")) {
+ 		Log("I/O and OS libraries are disabled by default for security.\nYou can enable them here:\nScript->Settings->Script Window->Restrictions->Allow access to I/O and OS functions.");
+--- a/Core/NES/NesConsole.cpp
++++ b/Core/NES/NesConsole.cpp
+@@ -305,7 +305,7 @@
+ 		_nextFrameOverclockDisabled = false;
+ 	}
+ 
+-	while(frame == _ppu->GetFrameCount()) {
++	while(frame == _ppu->GetFrameCount() && !_emu->CaptureStopRequested()) {
+ 		_cpu->Exec();
+ 		if constexpr(isDualSystem) {
+ 			RunVsSubConsole();
