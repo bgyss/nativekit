@@ -381,8 +381,8 @@ void nmd_live_zat(uint16_t address);
 #define NMD_AT(address) nmd_live_at(address)
 #define NMD_ZAT(address) nmd_live_zat(address)
 #else
-#define NMD_AT(address) ((void)0)
-#define NMD_ZAT(address) ((void)0)
+#define NMD_AT(address) ((void)(address))
+#define NMD_ZAT(address) ((void)(address))
 #endif
 
 /* An exception the original takes inside a call (TRAP #n at `address`). In the
