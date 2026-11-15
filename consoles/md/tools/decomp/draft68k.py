@@ -193,14 +193,34 @@ class Drafter:
             if table["status"] == "accepted":
                 self.tables.setdefault(table["site"], set()).update(table["targets"])
 
+    def unrolled(self, address):
+        """A computed JMP (base,PC,Dn) into a straight run of instructions (an
+        unrolled loop entered part way, Duff's device): the run's addresses, else
+        None. It lands on any instruction of the run, not only its first."""
+        record = self.instructions[address]
+        targets = self.tables.get(address, ())
+        if not (record["indirect"] and record["flow"] == "jump" and len(targets) == 1 and
+                ",pc," in record["text"].lower()):
+            return None
+        run, at = [], next(iter(targets))
+        while at in self.instructions:
+            step = self.instructions[at]
+            run.append(at)
+            if step["flow"] != "seq" or step["indirect"]:
+                break
+            at += step["length"]
+        if len(run) < 3 or self.instructions[run[-1]]["flow"] == "seq":
+            return None
+        return run
+
     def body(self, entry):
-        seen, work = set(), [entry]
+        seen, work, forced = set(), [entry], set()
         while work:
             address = work.pop()
             if address in seen or address not in self.instructions:
                 continue
             if address != entry and address in self.entries and address not in seen and \
-                    self._tail(address, entry):
+                    address not in forced and self._tail(address, entry):
                 continue
             seen.add(address)
             record = self.instructions[address]
@@ -209,7 +229,13 @@ class Drafter:
             if record["flow"] in ("jump", "cond"):
                 work.extend(t for t in record["targets"] if not self._tail(t, entry))
             if record["indirect"] and record["flow"] == "jump":
-                work.extend(t for t in self.tables.get(address, ()) if not self._tail(t, entry))
+                run = self.unrolled(address)
+                if run:                 # every landing place is this body's own label
+                    forced.update(run)
+                    work.extend(run)
+                else:
+                    work.extend(t for t in self.tables.get(address, ())
+                                if not self._tail(t, entry))
         return sorted(seen)
 
     def _tail(self, target, entry):
@@ -299,7 +325,7 @@ class Drafter:
         if base == "jmp":
             source = operand(0)
             source.compute(out, "ea")
-            known = sorted(self.tables.get(address, ()))
+            known = self.unrolled(address) or sorted(self.tables.get(address, ()))
             out.append("switch (ea) {")
             for target in known:
                 out.append("case 0x%06Xu: %s" % (target, self._goto(target, inside, targets, names, entry)))

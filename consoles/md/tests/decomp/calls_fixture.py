@@ -5,7 +5,8 @@ register and reads the status, calls one of four handlers through a pointer
 table, runs a routine that calls another twice, sends a byte to the Z80
 through its RAM, and calls a routine that calls one with no C. It then
 reads the pad, sets a PSG tone, copies RAM to VRAM by DMA, runs a routine
-that takes a TRAP, enables the vertical interrupt in a routine and runs a
+that takes a TRAP, copies through an unrolled run it enters part way,
+enables the vertical interrupt in a routine and runs a
 routine long enough to be interrupted, and one that polls the VDP status
 through a vertical blank, across the end of a frame. The Z80 loops calling a routine that adds the byte the 68000
 sent to a total, writes the YM address port and reads the status. One
@@ -83,6 +84,11 @@ skip:   move.l  #$12345678,($FF0100).l
         bsr.w   tone
         bsr.w   dma
         bsr.w   trapper
+        lea     (words,pc),a0
+        moveq   #2,d0
+        bsr.w   unroll                  ; enters its unrolled copy part way
+        moveq   #3,d0
+        bsr.w   unroll
         move.w  #$8A20,($C00004).l      ; a horizontal interrupt every 33 lines
         move.w  #$8014,($C00004).l
         bsr.w   irqon
@@ -233,6 +239,18 @@ vbclr:  move.w  ($C00004).l,d0
         bne.s   vbclr
         rts
 
+        org     $680
+unroll: lea     ($FF00B0).l,a1          ; copy the last d0 (0-4) of four words
+        moveq   #4,d1
+        sub.w   d0,d1
+        add.w   d1,d1
+        jmp     ulist(pc,d1.w)
+ulist:  move.w  (a0)+,(a1)+
+        move.w  (a0)+,(a1)+
+        move.w  (a0)+,(a1)+
+        move.w  (a0)+,(a1)+
+        rts
+
         org     $700
 hint:   addq.w  #1,($FF0080).l
         rte
@@ -264,7 +282,7 @@ ROUTINES = {"sum": 0x400, "poke": 0x420, "dispatch": 0x440, "handler0": 0x480,
             "send": 0x4E0, "spin": 0x510, "unused": 0x530, "relay": 0x550,
             "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0, "count": 0x5D0,
             "below": 0x7E2, "tailc": 0x7F0, "busy": 0x720, "trapper": 0x620,
-            "vbwait": 0x660}
+            "vbwait": 0x660, "unroll": 0x680}
 NOCODE = 0x560
 Z_FETCH = 0x20
 LOOPS = 6

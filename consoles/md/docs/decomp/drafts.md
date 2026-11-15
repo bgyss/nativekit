@@ -24,7 +24,13 @@ python3 consoles/md/tools/decomp/draft68k.py --rom ROM --codemap codemap.json \
   call to an address with no C, goes through `jsr_address`. A branch or jump
   into another routine's entry is a tail call: its C runs and its RTS is this
   routine's. A computed JMP inside the routine switches over the code map's
-  jump-table targets; any other address goes through `jmp_address`.
+  jump-table targets; any other address goes through `jmp_address`. A
+  `JMP (base,PC,Dn)` whose one target starts a straight run of instructions
+  ending in a transfer is an unrolled loop entered part way (Duff's device):
+  the run is drafted into the routine itself and the switch has a label for
+  every instruction of it (first title: two copy loops of 160 and 256 moves,
+  entered by count; with only the run's start the C diverged once the count
+  changed, and natively stopped at `nmd_restart`).
 - **TRAP** calls `trap_call(number, return_pc)`: the exception frame pushed,
   the vector's C run, the frame popped.
 - **Bus order** is the 68000's: a long is two word transfers, high word

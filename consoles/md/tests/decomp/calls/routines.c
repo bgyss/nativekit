@@ -298,6 +298,22 @@ static void vbwait(void)
     nmd_rts();
 }
 
+/* $680 unroll: copy the last D0 (0-4) of four words from (A0) to $FF00B0.
+ * The original jumps into an unrolled run of four moves part way. */
+static void unroll(void)
+{
+    A[1] = 0xFF00B0;
+    D[1] = nmd_tst32(4);
+    nmd_set16(&D[1], nmd_sub16((uint16_t)D[1], (uint16_t)D[0]));
+    nmd_set16(&D[1], nmd_add16((uint16_t)D[1], (uint16_t)D[1]));
+    for (unsigned count = (uint16_t)D[0]; count; count--) {
+        wr16(A[1], nmd_tst16(rd16(A[0])));
+        A[0] += 2;
+        A[1] += 2;
+    }
+    nmd_rts();
+}
+
 /* $550 relay: calls a routine that has no C here (the record stands in). */
 #ifdef NMD_HYBRID
 static void relay(void)
@@ -352,6 +368,7 @@ const nmd_routine nmd_game_routines[] = {
     {0x7E2, below, "below"},
     {0x7F0, tailc, "tailc"},
     {0x660, vbwait, "vbwait"},
+    {0x680, unroll, "unroll"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
     {0x620, trapper, "trapper"},

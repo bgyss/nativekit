@@ -6,8 +6,9 @@ drafts are checked per call against the original: each must reach the hand-
 written C's verdict, and the drafts must compile. Generating proves nothing;
 these verdicts are the drafts' only evidence. Three planted generator errors (a
 draft that does not start at its entry when code lies below it, a conditional
-tail call whose return is not inside the condition, and a condition code
-read the wrong way) must make a draft diverge.
+tail call whose return is not inside the condition, a condition code read
+the wrong way, and a computed jump into an unrolled run that knows only the
+run's start) must make a draft diverge.
 """
 import json
 import pathlib
@@ -66,6 +67,9 @@ def main():
             ('return "{ %s(); return; }', 'return "%s(); return;', calls_fixture.ROUTINES["tailc"]),
             ('"if (nmd_cc(%d)) %s" % (CONDITIONS[base[1:]],',
              '"if (!nmd_cc(%d)) %s" % (CONDITIONS[base[1:]],', calls_fixture.ROUTINES["send"]),
+            # a computed jump part way into an unrolled run with only the run's start
+            ("known = self.unrolled(address) or sorted(", "known = None or sorted(",
+             calls_fixture.ROUTINES["unroll"]),
         )
         try:
             for index, (old, new, address) in enumerate(plants):
@@ -80,7 +84,7 @@ def main():
         finally:
             source.write_text(original)
     print("draft_check: ok (%d routines drafted, %d IDENTICAL on %d calls, the same verdicts as "
-          "the hand C; 3 planted generator errors caught)" % (count, identical, calls))
+          "the hand C; %d planted generator errors caught)" % (count, identical, calls, len(plants)))
 
 
 if __name__ == "__main__":
