@@ -60,6 +60,10 @@ errors, and the calls that must never be IDENTICAL.
 `decomp/draft_check.py` holds the draft generator
 ([`decomp/drafts.md`](../docs/decomp/drafts.md)): drafts of every control
 routine reach the hand C's verdicts, and two planted generator errors are caught.
+`decomp/symbolize_check.py` holds the symbolic listing
+([`decomp/symbolize.md`](../docs/decomp/symbolize.md)): the control
+cartridge's skeleton with its transfers named rebuilds byte for byte, and two
+planted errors break the rebuild.
 `decomp/lockstep_check.py` holds the lockstep gate
 ([`decomp/lockstep.md`](../docs/decomp/lockstep.md)): every authored routine
 substituted at once on the live machine for 4 frames, six planted defects,
