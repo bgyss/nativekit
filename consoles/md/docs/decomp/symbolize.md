@@ -22,7 +22,9 @@ address as well as a pointer into the image, and only a title's own notes
 can say which. The console's own addresses are the exception: `$C00004` is
 the VDP control port on every cartridge, so absolute operands and
 immediates with those values name equates (`VDP_CTRL equ $C00004`) written
-before the listing's `org`.
+before the listing's `org`. So are work RAM variables: an absolute long
+operand at `$FF0000` and up (`($FF13AA).l`) names `ram_13AA`, or the name
+`--names` gives it, so naming a variable later is one line.
 
 The listing carries no addresses, so they are recovered by walking it:
 `org` sets the address, an incbin or byte line advances it by its length,
@@ -42,13 +44,14 @@ identical, no transfer to code left with a raw address; two planted errors (each
 late; an operand naming the instruction after its target) break the
 rebuild.
 
-First title: 1,089 labels (76 of them data) and 1,720 operands (57 of them
-hardware addresses) in the 68000 listing (23 routines by their names), 14 labels and 17 operands in the Z80
+First title: 1,089 labels (76 of them data) and 2,702 operands (57 of them
+hardware addresses, 982 uses of 202 RAM variables) in the 68000 listing (23 routines by their names), 14 labels and 17 operands in the Z80
 programs;
 the copy rebuilds the image byte for byte.
 
 ## Limits
 
-Control flow, PC-relative data and hardware addresses only. Absolute data
-references, RAM variables, jump-table rows and comments are D08's remaining steps; code the
+Control flow, PC-relative data, hardware addresses and absolute RAM
+variables only. Absolute data references, RAM reached through address
+registers, jump-table rows and comments are D08's remaining steps; code the
 census has not decoded stays a raw span.

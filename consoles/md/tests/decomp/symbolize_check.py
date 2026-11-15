@@ -5,7 +5,7 @@ The per-call control cartridge is taken in, its skeleton symbolized with the
 routines' names, and the copy rebuilt: it must be the image byte for byte,
 name every routine it calls, and leave no branch, call or jump to code with
 a raw address; a PC-relative reference into a raw span names a label that
-cuts the span; the console's hardware addresses are equates. Two planted errors (each label one instruction late, and an
+cuts the span; the console's hardware addresses and the work RAM variables are equates. Two planted errors (each label one instruction late, and an
 operand naming the instruction after its target) must break the rebuild.
 """
 import importlib
@@ -63,6 +63,9 @@ def main():
         require(re.search(r"^VDP_CTRL\tequ\t\$C00004$", text, re.M) and "(VDP_CTRL).l" in text and
                 "(Z80_BUSREQ).l" in text and "($C00004).l" not in text,
                 "hardware addresses are not named")
+        require(re.search(r"^ram_0010\tequ\t\$FF0010$", text, re.M) and "(ram_0010).l" in text
+                and not re.search(r"\(\$FF[0-9A-F]{4}\)\.l", text),
+                "work RAM variables are not named")
         raw = [line for line in text.split("\n") if RAW_FLOW.match(line) and "(" not in line]
         require(not raw, "branches to code left with raw addresses: %r" % raw[:5])
         require(rom["labels"] >= len(calls_fixture.ROUTINES) and rom["operands"] >= 20,

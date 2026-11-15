@@ -11,8 +11,9 @@ routine entry, `loc_XXXXXX` elsewhere, or the name `--names` gives the
 address ({"$5D2A": "draw_text"}). A PC-relative operand that addresses a
 raw span of the image names a `dat_XXXXXX` label, and the span's incbin is
 cut there. An absolute operand is left as written (it may be a number),
-except the console's own hardware addresses, which get equates
-(`VDP_CTRL equ $C00004`).
+except the console's own hardware addresses and work RAM variables
+(`($FF13AA).l`), which get equates (`VDP_CTRL equ $C00004`,
+`ram_13AA equ $FF13AA`, or the name `--names` gives the address).
 With --baserom the copy is rebuilt (skeleton.rebuild) and must be the image
 byte for byte; -no-opt keeps every branch at its written size.
 
@@ -49,6 +50,8 @@ HARDWARE = {
     0xA11100: "Z80_BUSREQ", 0xA11200: "Z80_RESET", 0xA14000: "TMSS",
     0xC00000: "VDP_DATA", 0xC00004: "VDP_CTRL", 0xC00008: "VDP_HV", 0xC00011: "PSG",
 }
+# a work RAM variable as an absolute long operand: ($FF13AA).l
+RAM_USE = re.compile(r"(?<=\()\$(FF[0-9A-F]{4})(?=\)\.l)")
 # a hardware address as an absolute long operand or an immediate
 HARDWARE_USE = re.compile(r"(?:(?<=\()|(?<=#))\$(%s)(?=\)\.l|\b)"
                           % "|".join("%X" % address for address in HARDWARE))
@@ -162,6 +165,13 @@ def symbolize_text(text, space, names=None):
         hardware.add(int(match.group(1), 16))
         return HARDWARE[int(match.group(1), 16)]
 
+    ram = set()
+
+    def ram_name(match):
+        address = int(match.group(1), 16)
+        ram.add(address)
+        return names.get(address, "ram_%04X" % (address & 0xFFFF))
+
     for index, address, kind, length in walked:
         line = lines[index]
         if kind == "label":
@@ -192,12 +202,16 @@ def symbolize_text(text, space, names=None):
             if space.get("cpu") == "m68k":
                 body, count = HARDWARE_USE.subn(hardware_name, body)
                 rewritten += count
+                body, count = RAM_USE.subn(ram_name, body)
+                rewritten += count
             line = body + sep + rest
         out.append(line)
-    if hardware:                        # their equates, before the first org
+    if hardware or ram:                 # their equates, before the first org
         at = next(index for index, line in enumerate(out) if line.startswith("\torg\t"))
         out[at:at] = ["%s\tequ\t$%X" % (HARDWARE[address], address)
-                      for address in sorted(hardware)]
+                      for address in sorted(hardware)] + [
+            "%s\tequ\t$%X" % (names.get(address, "ram_%04X" % (address & 0xFFFF)), address)
+            for address in sorted(ram)]
     return "\n".join(out), placed, rewritten
 
 
