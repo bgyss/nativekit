@@ -117,6 +117,11 @@ static nnes_result read_bus_override(nnes *n, uint16_t address,
 static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
                              int native_access, nnes_bus_operation operation,
                              uint8_t flags);
+static nnes_result write_bus_override(nnes *n, uint16_t address,
+                                      uint8_t value, int native_access,
+                                      nnes_bus_operation operation,
+                                      uint8_t flags, int has_profile_override,
+                                      uint64_t profile_override_tenths);
 static nnes_result perform_oam_dma(nnes *n, uint8_t page,
                                    int needs_alignment);
 
@@ -509,16 +514,19 @@ nnes_result nnes_seed_open_bus(nnes *n, uint8_t value)
     return NNES_OK;
 }
 
-static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
-                             int native_access, nnes_bus_operation operation,
-                             uint8_t flags)
+static nnes_result write_bus_override(nnes *n, uint16_t address,
+                                      uint8_t value, int native_access,
+                                      nnes_bus_operation operation,
+                                      uint8_t flags, int has_profile_override,
+                                      uint64_t profile_override_tenths)
 {
     if (!n) return NNES_INVALID_ARGUMENT;
     if (n->input_frame_callback_depth) return NNES_INVALID_SEQUENCE;
     uint8_t open_bus_before = n->open_bus;
     uint64_t profile_tenths = 0;
-    nnes_result cycle_result = count_bus_cycle(n, address, 1, native_access,
-                                               0, 0, &profile_tenths);
+    nnes_result cycle_result = count_bus_cycle(
+        n, address, 1, native_access, has_profile_override,
+        profile_override_tenths, &profile_tenths);
     if (cycle_result != NNES_OK) return cycle_result;
     nnes_result result = NNES_UNSUPPORTED;
     nnes_bus_access trace_event = {0};
@@ -593,6 +601,14 @@ static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
                                    open_bus_before);
     }
     return result;
+}
+
+static nnes_result write_bus(nnes *n, uint16_t address, uint8_t value,
+                             int native_access, nnes_bus_operation operation,
+                             uint8_t flags)
+{
+    return write_bus_override(n, address, value, native_access, operation,
+                              flags, 0, 0);
 }
 
 static nnes_result perform_oam_dma(nnes *n, uint8_t page,
@@ -698,6 +714,17 @@ nnes_result nnes_write(nnes *n, uint16_t address, uint8_t value)
         return result;
     }
     return write_bus(n, address, value, 1, NNES_BUS_WRITE, 0);
+}
+
+nnes_result nnes_write_with_profile_cost(nnes *n, uint16_t address,
+                                         uint8_t value,
+                                         uint64_t profile_cost_tenths)
+{
+    if (!n) return NNES_INVALID_ARGUMENT;
+    if (n->bus_trace_callback_depth) return NNES_INVALID_SEQUENCE;
+    if (n->rmw_open) return NNES_INVALID_SEQUENCE;
+    return write_bus_override(n, address, value, 1, NNES_BUS_WRITE, 0, 1,
+                              profile_cost_tenths);
 }
 
 nnes_result nnes_wr8_dummy(nnes *n, uint16_t address, uint8_t value)

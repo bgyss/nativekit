@@ -174,6 +174,13 @@ nnes_result nnes_read_with_profile_cost(nnes *console, uint16_t address,
                                         uint8_t *value,
                                         uint64_t profile_cost_tenths);
 nnes_result nnes_write(nnes *console, uint16_t address, uint8_t value);
+/* Data write with a per-access native-work weight overriding the memory-kind
+ * profile when CPU costs are enabled. It still pays the base bus cycle and is
+ * recorded/counts as a classified data write. The override is ignored when
+ * CPU costs are disabled. */
+nnes_result nnes_write_with_profile_cost(nnes *console, uint16_t address,
+                                         uint8_t value,
+                                         uint64_t profile_cost_tenths);
 /* Consume a pending PPU NMI edge manually. nnes_wait_until also dispatches a
  * pending PPU NMI after its readiness callback completes. */
 nnes_result nnes_ppu_take_nmi(nnes *console, int *pending);

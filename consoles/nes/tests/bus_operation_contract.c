@@ -16,6 +16,7 @@ typedef struct {
     uint8_t memory[65536];
     nnes_bus_access accesses[16];
     size_t count;
+    int record_bus;
 } access_trace;
 
 static nnes_result cartridge_access(void *user, nnes_bus_access *access)
@@ -33,6 +34,15 @@ static nnes_result cartridge_access(void *user, nnes_bus_access *access)
     }
     trace->accesses[trace->count++] = *access;
     return NNES_OK;
+}
+
+static void trace_bus_access(void *user, const nnes_bus_access *access)
+{
+    access_trace *trace = user;
+    if (!trace || !access || !trace->record_bus) return;
+    CHECK(trace->count < sizeof(trace->accesses) /
+                          sizeof(trace->accesses[0]));
+    trace->accesses[trace->count++] = *access;
 }
 
 static void check_access(const access_trace *trace, size_t index,
@@ -95,6 +105,51 @@ static void test_explicit_profile_cost_override_without_base_profile(void)
     nnes_destroy(console);
 }
 
+static void test_explicit_write_profile_cost_override(void)
+{
+    access_trace trace = {0};
+    nnes_cost_profile profile = {.version = NNES_COST_PROFILE_VERSION};
+    profile.cpu_tenths[1][NNES_KIND_WRAM] = 33;
+    nnes_cartridge cartridge = {0};
+    cartridge.user = &trace;
+    cartridge.bus_access = cartridge_access;
+    trace.record_bus = 1;
+    cartridge.bus_trace_user = &trace;
+    cartridge.bus_trace = trace_bus_access;
+    cartridge.cost_profile = &profile;
+    nnes *console = NULL;
+    OK(nnes_create(&cartridge, &console));
+
+    OK(nnes_write_with_profile_cost(console, 0x0001, 0x42, 20));
+    CHECK(nnes_cpu_cycle_tenths(console) == 30);
+    check_access(&trace, 0, NNES_BUS_WRITE, 0x0001, 0x42, 30, 0, 0x00);
+
+    OK(nnes_set_cpu_costs(console, 0));
+    trace.record_bus = 0;
+    uint8_t readback = 0;
+    OK(nnes_read(console, 0x0001, &readback));
+    CHECK(readback == 0x42);
+    trace.record_bus = 1;
+    OK(nnes_write_with_profile_cost(console, 0x0001, 0x43, 20));
+    CHECK(nnes_cpu_cycle_tenths(console) == 50);
+    check_access(&trace, 1, NNES_BUS_WRITE, 0x0001, 0x43, 50, 0, 0x42);
+
+    nnes_destroy(console);
+
+    access_trace no_profile_trace = {0};
+    no_profile_trace.record_bus = 1;
+    nnes_cartridge no_profile_cartridge = {0};
+    no_profile_cartridge.user = &no_profile_trace;
+    no_profile_cartridge.bus_trace_user = &no_profile_trace;
+    no_profile_cartridge.bus_trace = trace_bus_access;
+    OK(nnes_create(&no_profile_cartridge, &console));
+    OK(nnes_write_with_profile_cost(console, 0x0002, 0x44, 20));
+    CHECK(nnes_cpu_cycle_tenths(console) == 30);
+    check_access(&no_profile_trace, 0, NNES_BUS_WRITE, 0x0002, 0x44,
+                 30, 0, 0x00);
+    nnes_destroy(console);
+}
+
 int main(void)
 {
     access_trace trace = {0};
@@ -147,6 +202,7 @@ int main(void)
     nnes_destroy(console);
     test_explicit_profile_cost_override();
     test_explicit_profile_cost_override_without_base_profile();
+    test_explicit_write_profile_cost_override();
     puts("NES bus operation metadata contract passed");
     return 0;
 }

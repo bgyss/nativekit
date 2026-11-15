@@ -73,15 +73,19 @@ stack/registers match, and the first fill continuation matches 12,111 typed
 bus events through the `$C1C8` return after aligning one reference poll pair.
 The standalone `$C1B9` call matches 2,910 bus events and 8,824 cycles; its
 entry is 3.3 cycles from Mesen. F842's final wait and BRK signature `$01`
-dispatch through `$FD3A/$FCBD/$FCEC` to missing bank-0 `$AA7E`. The second
-C17A wait and full F842 dispatch span remain unpaired. The second Start read
-is 102.1 cycles later natively within its 128-cycle bound. `$81B8` is an
+dispatch through `$FD3A/$FCBD/$FCEC` to bank-0 `$AA7E`. The full C17A-to-AA7E
+route matches 29,904 bus events across three aligned NMI boundaries, with one
+reference poll pair at the first wait and two/four native pairs at the later
+waits. `$AA7E`'s nine bus events, 36-cycle duration, and stack/register state
+match; its entry phase is still 124.5 cycles late, outside the ±12-cycle
+bound. The native route stops at missing fixed-bank `$C529`. The second Start
+read is 102.1 cycles later natively within its 128-cycle bound. `$81B8` is an
 internal branch in bank-1 `$81A0`, not a missing routine. The tested `$BD36`
 branch clears OAM while `$93 == $FF`; its active animation stream remains
 uncompared. Continue from the private ledger, preserving bank-aware routine
-identities and the SAROM adapter. Recover bank-0 `$AA7E`, then qualify the
-remaining C17A route and active animation branch. Alternate `$FD00`, rendering,
-audio, and gameplay remain open.
+identities and the SAROM adapter. Recover `$C529` and investigate the `$AA7E`
+entry-phase skew, then exercise the active animation branch. Alternate
+`$FD00`, rendering, audio, and gameplay remain open.
 
 The pinned MesenCE 120-frame no-input profile has 139.44-cycle gap RMSE,
 +1.04% mean bias, and 2.80% p95 absolute relative error. A 40-frame Start
