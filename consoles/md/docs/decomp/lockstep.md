@@ -128,13 +128,15 @@ title, frame 474).
 The core can stop the Z80 inside an instruction: the original's run often
 ends a machine cycle before the boundary the C pauses at, and the next run
 finishes the instruction. The reference records where each run stopped
-(`nmd_decomp_z80_run_end`, patch 0005). The hybrid resumes the Z80 at the
-boundary, which is what the C completed; resuming at the stop clock instead
-made the first frame end differ sooner (first title, frame 61). Over the
-first title's gameplay the remaining offset shows: a Z80 call entered one
-T-state late at frame 241, after the 68000's YM2612 writes under a Z80 bus
-request (a bus request runs the Z80 one machine cycle from where its clock
-stands). Open.
+(`nmd_decomp_z80_run_end`, patch 0005), and the hybrid puts the Z80's clock
+there, at a slice pause and at the return of a call whose RET ended a run.
+The core's resume sets the clock one opcode fetch (4 T-states) before the
+clock it is given, since its run loop fetches the opcode at the PC again, so
+the runner passes the stop clock plus a fetch. Resumed at the boundary, the
+Z80 stood one T-state late; a bus request (which runs the Z80 one machine
+cycle from where its clock stands) carried it into the next call's entry
+(first title, gameplay frame 241). Passed the stop clock itself, it stood a
+fetch early (frame 61).
 
 ## What is left to the original
 

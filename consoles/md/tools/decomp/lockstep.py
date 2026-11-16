@@ -59,6 +59,9 @@ LIVE_STATUS = {1: "a hardware access out of the original's order",
                5: "the original took an exception the C did not"}
 
 
+Z80_FETCH = 4 * 15     # one opcode fetch, in master clocks (patch 0005's live resume)
+
+
 class LockstepError(RuntimeError):
     """The lockstep run could not be made."""
 
@@ -312,17 +315,21 @@ def _reference(args, scenario, routines, rom_size):
             if z80_slice != last_slice[0]:
                 stop_at[0] = core[0].nmd_decomp_z80_run_end()   # where the last run stopped
         closed = feed(event)
+        straddled = None                # this instruction ended the Z80's last run
         if z80_slice is not None:
             # an instruction's event comes at the next opcode fetch: the first one in a
             # new run is of the instruction that ended the last run
             if last_slice[0] is not None and z80_slice != last_slice[0]:
                 feed.slice_end(stop_at[0])
+                straddled = stop_at[0]
             last_slice[0] = z80_slice
         for call in closed:
             schedule[(call.cpu, call.address)].append({
                 "sequence": call.sequence, "entry_clock": call.entry_clock,
                 "frame": call.frame_entered,
                 "exit_clock": call.exit_clock, "reasons": sorted(call.reasons),
+                # a Z80 call whose return ended a run: where that run stopped
+                "exit_stop": straddled if call.cpu == Z80 else None,
                 "hardware": [(clock, address & 0xFFFFFF, width, int(write), extra)
                              for address, width, _, write, clock, extra, _depth in call.accesses
                              if _hardware(call.cpu, address, rom_size)],
@@ -604,7 +611,11 @@ def _hybrid(args, scenario, routines, rom_size, reference):
             pause = record["pauses"][library.nmd_live_pauses_made(handle) - 1]
             context["at_end"] = library.nmd_live_at_end(handle)
             context["return_pc"] = z80_state.pc
-            resume_z80(context, pause["pc"], pause["clock"], pause["r"], pause["wz"],
+            # where the original's run stopped: the core sets the Z80's clock one
+            # opcode fetch (4 T-states) before the clock given, since its run loop
+            # fetches the opcode at pc again
+            resume_z80(context, pause["pc"], min(pause["stop"] + Z80_FETCH, pause["clock"]),
+                       pause["r"], pause["wz"],
                        (z80_state.sp - 2) & 0xFFFF if context["at_end"] else z80_state.sp)
             if (cpu, pause["pc"]) in continuations or \
                     core.nmd_decomp_continuation(Z80, pause["pc"], 1):
@@ -666,7 +677,10 @@ def _hybrid(args, scenario, routines, rom_size, reference):
                                              cpu_state.pc, record["exit_clock"],
                                              *record["exit_refresh"], *record["exit_schedule"])
         else:
-            resume_z80(context, z80_state.pc, record["exit_clock"], record["r"], record["wz"],
+            exit_clock = record["exit_clock"]
+            if record.get("exit_stop") is not None:     # see the slice pauses' resume
+                exit_clock = min(record["exit_stop"] + Z80_FETCH, exit_clock)
+            resume_z80(context, z80_state.pc, exit_clock, record["r"], record["wz"],
                        z80_state.sp)
         substituted[key] += 1
         return 1
