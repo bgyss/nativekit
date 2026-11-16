@@ -1,6 +1,6 @@
 # D09: Turn certified translations into maintainable plain C
 
-**Status:** Started, 2026-11-15. First title (C kept privately): 11 of 303 routines have a typed form (leaves: the logic as a typed function, the by-address entry a wrapper that adapts registers and exit flags), each IDENTICAL per call against the original and used by the native build; the instruction-shaped form stays the lockstep's, which pauses on instruction boundaries. Open: every other routine, RAM layouts, the liveness evidence that lets a wrapper drop registers no caller reads, the completion inventory. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Started, 2026-11-15. First title (C kept privately): 12 of 303 routines have a typed form (leaves: the logic as a typed function, the by-address entry a wrapper that adapts registers and exit flags), each IDENTICAL per call against the original and used by the native build; the instruction-shaped form stays the lockstep's, which pauses on instruction boundaries. Open: every other routine, RAM layouts, the liveness evidence that lets a wrapper drop registers no caller reads, the completion inventory. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
