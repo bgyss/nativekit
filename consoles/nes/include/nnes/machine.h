@@ -501,6 +501,13 @@ nnes_result nnes_interrupt_checkpoint(nnes *console, int *delivered);
  * original value as an unprofiled dummy write, then the modified data write,
  * and closes the pair. */
 nnes_result nnes_rd8_rmw(nnes *console, uint16_t address, uint8_t *value);
+/* Same ordered RMW read, with a per-access cost override for the read half.
+ * The matching nnes_wr8_rmw still emits the original-value dummy write and
+ * modified-value data write. The override applies only while CPU costs are
+ * enabled; the base cycle and RMW-pair metadata are preserved. */
+nnes_result nnes_rd8_rmw_with_profile_cost(
+    nnes *console, uint16_t address, uint8_t *value,
+    uint64_t profile_cost_tenths);
 nnes_result nnes_wr8_rmw(nnes *console, uint16_t address, uint8_t value);
 /* Indexed RMW forms always make the addressing dummy read before the data
  * read, regardless of page crossing. Finish with nnes_wr8_rmw at the resolved

@@ -16,9 +16,12 @@ For an evidence-derived one-access correction, native C may call
 matching memory-kind weight for that data access. It leaves the stored profile
 unchanged, keeps the access classified and traced as a data read or write, and
 still charges the base bus cycle. The override has no effect when CPU costs are
-disabled. Use it only when a measured route shows a residual that a shared
-memory-kind weight cannot represent; it does not establish a generally accurate
-timing profile.
+disabled. `nnes_rd8_rmw_with_profile_cost` applies the same override to the
+read half of an open RMW pair; the matching `nnes_wr8_rmw` still emits the
+original-value dummy write and the modified-value write with their normal
+classification and pairing metadata. Use these overrides only when a measured
+route shows a residual that a shared memory-kind weight cannot represent; they
+do not establish a generally accurate timing profile.
 
 The NES library copies and version-checks a profile when it creates the
 cartridge instance. `nnes_cartridge.access_kind` classifies mapper-dependent

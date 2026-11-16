@@ -749,6 +749,24 @@ nnes_result nnes_rd8_rmw(nnes *n, uint16_t address, uint8_t *value)
     return result;
 }
 
+nnes_result nnes_rd8_rmw_with_profile_cost(
+    nnes *n, uint16_t address, uint8_t *value,
+    uint64_t profile_cost_tenths)
+{
+    if (!n || !value) return NNES_INVALID_ARGUMENT;
+    if (n->rmw_open) return NNES_INVALID_SEQUENCE;
+    nnes_result result = read_bus_override(
+        n, address, value, 1, NNES_BUS_READ, NNES_BUS_ACCESS_RMW_PAIR,
+        1, profile_cost_tenths);
+    if (result == NNES_OK) {
+        n->rmw_address = address;
+        n->rmw_value = *value;
+        n->rmw_open = 1;
+        n->rmw_phase = 0;
+    }
+    return result;
+}
+
 nnes_result nnes_wr8_rmw(nnes *n, uint16_t address, uint8_t value)
 {
     if (!n) return NNES_INVALID_ARGUMENT;

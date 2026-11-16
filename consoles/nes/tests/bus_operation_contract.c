@@ -105,6 +105,51 @@ static void test_explicit_profile_cost_override_without_base_profile(void)
     nnes_destroy(console);
 }
 
+static void test_explicit_rmw_profile_cost_override(void)
+{
+    access_trace trace = {0};
+    trace.memory[0xa000] = 0x56;
+    nnes_cost_profile profile = {.version = NNES_COST_PROFILE_VERSION};
+    profile.cpu_tenths[0][NNES_KIND_ROM] = 463;
+    nnes_cartridge cartridge = {0};
+    cartridge.user = &trace;
+    cartridge.bus_access = cartridge_access;
+    cartridge.cost_profile = &profile;
+    nnes *console = NULL;
+    OK(nnes_create(&cartridge, &console));
+
+    uint8_t value = 0;
+    OK(nnes_rd8_rmw_with_profile_cost(console, 0xa000, &value, 110));
+    CHECK(value == 0x56);
+    OK(nnes_wr8_rmw(console, 0xa000, 0x57));
+    CHECK(trace.count == 3);
+    check_access(&trace, 0, NNES_BUS_READ, 0xa000, 0x56, 120,
+                 NNES_BUS_ACCESS_RMW_PAIR, 0x00);
+    check_access(&trace, 1, NNES_BUS_DUMMY_WRITE, 0xa000, 0x56, 130,
+                 NNES_BUS_ACCESS_RMW_PAIR, 0x56);
+    check_access(&trace, 2, NNES_BUS_WRITE, 0xa000, 0x57, 140,
+                 NNES_BUS_ACCESS_RMW_PAIR, 0x56);
+
+    OK(nnes_set_cpu_costs(console, 0));
+    OK(nnes_rd8_rmw_with_profile_cost(console, 0xa000, &value, 110));
+    CHECK(nnes_cpu_cycle_tenths(console) == 150);
+    CHECK(nnes_wr8_rmw(console, 0xa000, 0x58) == NNES_OK);
+    CHECK(trace.count == 6);
+    check_access(&trace, 3, NNES_BUS_READ, 0xa000, 0x57, 150,
+                 NNES_BUS_ACCESS_RMW_PAIR, 0x57);
+    check_access(&trace, 4, NNES_BUS_DUMMY_WRITE, 0xa000, 0x57, 160,
+                 NNES_BUS_ACCESS_RMW_PAIR, 0x57);
+    check_access(&trace, 5, NNES_BUS_WRITE, 0xa000, 0x58, 170,
+                 NNES_BUS_ACCESS_RMW_PAIR, 0x57);
+
+    OK(nnes_rd8_rmw(console, 0xa000, &value));
+    CHECK(nnes_rd8_rmw_with_profile_cost(console, 0xa001, &value, 20)
+          == NNES_INVALID_SEQUENCE);
+    OK(nnes_wr8_rmw(console, 0xa000, 0x58));
+
+    nnes_destroy(console);
+}
+
 static void test_explicit_write_profile_cost_override(void)
 {
     access_trace trace = {0};
@@ -202,6 +247,7 @@ int main(void)
     nnes_destroy(console);
     test_explicit_profile_cost_override();
     test_explicit_profile_cost_override_without_base_profile();
+    test_explicit_rmw_profile_cost_override();
     test_explicit_write_profile_cost_override();
     puts("NES bus operation metadata contract passed");
     return 0;
