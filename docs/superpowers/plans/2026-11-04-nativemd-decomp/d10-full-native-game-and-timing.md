@@ -1,6 +1,6 @@
 # D10: Qualify complete native gameplay and measured timing
 
-**Status:** Measurement only, 2026-11-15. First title, cold boot with no input: the native game's work RAM at frames 60-340 is closest to the reference core's 52-66 frames later (native 60 matches reference 112 in all but 20 bytes; native 340, reference 400), most of it the reference's first 57 frames of start-up loops, which the native start-up does not spend. Nothing is qualified. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Measurement only, 2026-11-15. First title, cold boot with no input: the native game's work RAM at frames 60-340 is closest to the reference core's 52-66 frames later (native 60 matches reference 112 in all but 20 bytes; native 340, reference 400), most of it the reference's first 57 frames of start-up loops, which the native start-up does not spend. The game had passed no cost profile; with the 68000 profile `nmd-profile` fits from the reference (zero-profile error -56.7%, fitted 0.4% mean, 2.5% worst) the head start is 14-19 frames and the attract demo's picture changes on 6 of 8 consecutive frames as the reference's does (it had changed every second frame). Nothing is qualified. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
