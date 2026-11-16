@@ -97,26 +97,29 @@ ordered bus events match; the 286-cycle Mesen span is 0.4 cycles longer than
 native, and the `$A194` stack/registers match with a 0.1-cycle boundary delta.
 The Mesen opcode `$20` and native mapper both identify physical PRG bank 1.
 Native C recovers the selected `$A194` call to `$AEE1`, then `$A197` through
-`$A19B` to missing physical-bank-1 `$A1B1`. The 32-event `$A194->$A197` route
-and nine-event `$A197->$A1B1` route match; their boundaries are 5.9 and 7.9
-cycles early, with matching stack/register snapshots. The second span is 24
-cycles natively versus 26 in Mesen. `$A1B1` starts with `JSR $A1D0`; that
-helper and alternate `$AEE1` state branches remain unsupported, along with
-F6F4's alternate sound-selection branch. The NES machine interface now has
+`$A19B`, `$A1B1`, `$A1D0`, and `$A823` to missing internal continuation
+`$A1B4`. The 32-event `$A194->$A197` and nine-event `$A197->$A1B1` routes
+match; their boundaries are 5.9 and 7.9 cycles early, with matching stack/
+register snapshots. The 34-event `$A1B1->$A1B4` route and its 70-cycle span
+match exactly; `$A1B4` stack/registers match at a 7.9-cycle early boundary.
+`$A1B4` calls missing `$A1E4`. The selected `$A823` pointer lookup reads
+`$A830/$A831`, producing pointer `$AF6C`; alternate inputs and later menu
+behavior remain unverified. Alternate `$AEE1` state branches and F6F4's
+sound-selection branch also remain open. The NES machine interface now has
 `nnes_rd8_rmw_with_profile_cost`, which overrides the RMW read-half cost while
 preserving the paired dummy/final writes; the bus-operation contract checks
 its timing, classification, disabled-cost, and open-pair behavior. Assembly
-fragments now total 2,144 byte-exact bytes, but the complete bank/image
+fragments now total 2,182 byte-exact bytes, but the complete bank/image
 reconstruction is still open.
 
 The second Start read is 102.1 cycles later natively within its 128-cycle
 bound. `$81B8` is an internal branch in bank-1 `$81A0`, not a missing routine.
 The tested `$BD36` branch clears OAM while `$93 == $FF`; its active animation
 stream remains uncompared. Continue from the private ledger, preserving
-bank-aware routine identities and the SAROM adapter. Recover bank-1 `$A1B1`
-and its `$A1D0` call, then complete alternate `$AEE1` states and exercise the
-active animation branch. Alternate `$FD00`, rendering, audio, and gameplay
-remain open.
+bank-aware routine identities and the SAROM adapter. Recover the bank-1
+`$A1B4->$A1E4` continuation, then expand menu handling, alternate `$AEE1`
+states, and the active animation branch. Alternate `$FD00`, rendering, audio,
+and gameplay remain open.
 
 The pinned MesenCE 120-frame no-input profile has 139.44-cycle gap RMSE,
 +1.04% mean bias, and 2.80% p95 absolute relative error. A 40-frame Start
