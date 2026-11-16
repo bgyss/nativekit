@@ -2,10 +2,14 @@
 
 ## Version and scope
 
-nativemd's public game contract is **1.1.1**, declared by `nmd/version.h`.
+nativemd's public game contract is **1.1.2**, declared by `nmd/version.h`.
 1.1 adds native execution; every 1.0 game builds and runs the same. 1.1.1
 adds the expansion port's registers (below), which 1.1.0 failed on: a fix
-toward the hardware, found by the first title's cold start.
+toward the hardware, found by the first title's cold start. 1.1.2 reads the
+players' devices in a windowed run (controllers and the keyboard onto the
+pads: the face's left, bottom and right are A, B and C; keys A S D, the
+arrows, Return for START), which 1.1.1 never did: every button read as
+released outside a headless script.
 It models the base Sega Mega Drive / Genesis: the 68000-facing bus, a native
 C routine model for interrupt handlers, a native Z80 routine model, Mode 5
 VDP output and DMA, YM2612 and SN76489 sound, two controller ports and the

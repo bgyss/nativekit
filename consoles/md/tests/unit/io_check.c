@@ -8,6 +8,7 @@
 #include "io.h"
 #include "md_internal.h"
 #include "md_console.h"
+#include "nk/input.h"
 
 static nmd_cart pad3_cart(void)
 {
@@ -414,6 +415,41 @@ static void test_io_tmss_vdp_locked(int partial_signature)
     nmd_bus_write16(0xC00004u, 0x8104u);
 }
 
+/* A windowed run passes no masks: the console reads the players' devices.
+ * A controller's positional buttons and the keyboard reach the pads. */
+static void test_nmd_console_live_input(void)
+{
+    host_pad now[NK_PLAYERS];
+    int on[NK_PLAYERS] = {1, 1};
+    nmd_cart cart = pad3_cart();
+
+    nmd_power(&cart);
+    memset(now, 0, sizeof now);
+    now[0].buttons = 1u << 2 | 1u << 7 | 1u << 12;      /* left face, menu, d-pad up */
+    now[1].buttons = 1u << 0 | 1u << 1 | 1u << 15;      /* bottom, right face, d-pad left */
+    nmd_input_frame(now, on);
+    assert(md_io_button_mask(0) == (NMD_BUTTON_A | NMD_BUTTON_START | NMD_BUTTON_UP));
+    assert(md_io_button_mask(1) == (NMD_BUTTON_B | NMD_BUTTON_C | NMD_BUTTON_LEFT));
+
+    /* the keyboard drives player 1: Return is START, the arrows the d-pad */
+    memset(now, 0, sizeof now);
+    on[0] = on[1] = 0;
+    nk_input_keymap(nmd_console.keys, nmd_console.key_count);
+    nk_input_key(0x0D, 1);
+    nk_input_key(0x27, 1);
+    nmd_input_frame(now, on);
+    assert(md_io_button_mask(0) == (NMD_BUTTON_START | NMD_BUTTON_RIGHT));
+    nk_input_key(0x0D, 0);
+    nk_input_key(0x27, 0);
+    nmd_input_frame(now, on);
+    assert(md_io_button_mask(0) == 0);
+
+    /* the console's own entry for a windowed frame: no masks, no crash, and
+     * with nothing held nothing pressed */
+    nmd_console.input(0, NULL);
+    assert(md_io_button_mask(0) == 0 && md_io_button_mask(1) == 0);
+}
+
 int main(int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "tmss-vdp-locked") == 0) {
@@ -442,6 +478,7 @@ int main(int argc, char **argv)
     test_nmd_cart_zero_defaults();
     test_nmd_console_button_map();
     test_nmd_console_input_forwards_players();
+    test_nmd_console_live_input();
     test_io_3button_phase_reads();
     test_io_3button_ctrl_driven_output();
     test_io_port_state_independent();

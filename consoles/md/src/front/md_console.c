@@ -7,6 +7,7 @@
 
 #include "nk/nk.h"
 #include "nk/fatal.h"
+#include "nk/input.h"
 #include "nmd/nmd.h"
 #include "md_internal.h"
 #include "../sound/sound.h"
@@ -29,6 +30,49 @@ static const nk_button buttons[] = {
     { "Z", NMD_BUTTON_Z },
     { "MODE", NMD_BUTTON_MODE },
 };
+/* The keyboard, as a controller's positional bits (nk/input.h): the arrows,
+ * A S D for the pad's A B C, Q W E for X Y Z, Return for START, Tab for MODE. */
+static const nk_key keys[] = {
+    { 0x26, 1u << 12, "Up" }, { 0x28, 1u << 14, "Down" }, { 0x25, 1u << 15, "Left" },
+    { 0x27, 1u << 13, "Right" }, { 'A', 1u << 2, "A" }, { 'S', 1u << 0, "S" }, { 'D', 1u << 1, "D" },
+    { 'Q', 1u << 4, "Q" }, { 'W', 1u << 3, "W" }, { 'E', 1u << 5, "E" }, { 0x0D, 1u << 7, "Return" },
+    { 0x09, 1u << 6, "Tab" },
+};
+
+/* A controller's positional bits as the pad's buttons: the face's left,
+ * bottom and right are A, B and C as the pad lays them out; its top and the
+ * shoulders are Y, X and Z; menu is START and view MODE. */
+static uint32_t pad_of(unsigned bits)
+{
+    uint32_t pad = 0;
+
+    if (bits & 1u << 2) pad |= NMD_BUTTON_A;
+    if (bits & 1u << 0) pad |= NMD_BUTTON_B;
+    if (bits & 1u << 1) pad |= NMD_BUTTON_C;
+    if (bits & 1u << 4) pad |= NMD_BUTTON_X;
+    if (bits & 1u << 3) pad |= NMD_BUTTON_Y;
+    if (bits & 1u << 5) pad |= NMD_BUTTON_Z;
+    if (bits & 1u << 7) pad |= NMD_BUTTON_START;
+    if (bits & 1u << 6) pad |= NMD_BUTTON_MODE;
+    if (bits & 1u << 12) pad |= NMD_BUTTON_UP;
+    if (bits & 1u << 13) pad |= NMD_BUTTON_RIGHT;
+    if (bits & 1u << 14) pad |= NMD_BUTTON_DOWN;
+    if (bits & 1u << 15) pad |= NMD_BUTTON_LEFT;
+    return pad;
+}
+
+void nmd_input_frame(const host_pad *now, const int *on)
+{
+    uint32_t masks[2];
+    int player;
+
+    nk_input_pads(now, on);
+    for (player = 0; player < 2; player++)
+        masks[player] = nk_input_pad(player) ? pad_of(nk_pad_bits(nk_input_pad(player))) : 0;
+    masks[0] |= pad_of(nk_input_keyboard_bits());
+    md_io_input(masks);
+}
+
 static const char *const kind_names[] = {
     "rom", "work ram", "z80 ram", "io", "vdp", "sound", "open bus",
     "z80 ram", "z80 ym2612", "z80 bank register", "z80 psg", "z80 bank window",
@@ -101,10 +145,16 @@ static int audio_queued(void)
     return md_sound_audio_queued();
 }
 
+/* A headless run's script gives the pads' masks; a windowed one gives none
+ * and the players' devices are read. */
 static void input(int headless, const uint32_t *buttons)
 {
-    (void)headless;
-    md_io_input(buttons);
+    if (headless) {
+        md_io_input(buttons);
+        nk_input_script();
+    } else {
+        nmd_input_frame(NULL, NULL);
+    }
 }
 
 static void counts_hooks(void (*rd)(uint32_t addr, uint8_t value),
@@ -153,6 +203,8 @@ const nk_console nmd_console = {
     .audio_take = audio_take,
     .audio_queued = audio_queued,
     .players = 2,
+    .keys = keys,
+    .key_count = (int)(sizeof keys / sizeof keys[0]),
     .buttons = buttons,
     .button_count = (int)(sizeof buttons / sizeof buttons[0]),
     .input = input,
