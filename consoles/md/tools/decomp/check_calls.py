@@ -213,11 +213,26 @@ def segmenter(routines, frame_number=lambda: 0):
     open_pauses = {M68K: [], Z80: []}   # the pause record of each open handler
     following = {M68K: 0, Z80: 0}       # the next PC after the last instruction
     last_sequence = [0]                 # the last event read
+    # the core reports one exception or interrupt at a time: one taken inside
+    # another's handler takes the return event, and the outer RTE comes with
+    # none. The return event follows its RTE's instruction event; an RTE whose
+    # next event is not a return was that return.
+    pending_rte = {M68K: False, Z80: False}
+
+    def handler_return(cpu, sequence):
+        if handlers[cpu]:
+            del stack[cpu][handlers[cpu].pop():]    # calls a handler left open
+            if open_pauses[cpu]:
+                open_pauses[cpu].pop()["end_sequence"] = sequence
 
     def feed(event):
         closed = []
         cpu, kind, payload = event["cpu"], event["kind"], event["payload"]
         last_sequence[0] = event["sequence"]
+        if pending_rte[cpu] and kind != 2 and not (kind in (5, 6) and payload["phase"] != 1):
+            handler_return(cpu, event["sequence"])
+        if kind != 2:                   # a flow edge comes between the two
+            pending_rte[cpu] = False
         if kind == 3:
             if payload["provenance"] != FETCH:
                 write = payload["operation"] == 2
@@ -240,10 +255,8 @@ def segmenter(routines, frame_number=lambda: 0):
                         frame.pauses.append(pause)
                 handlers[cpu].append(len(stack[cpu]))
                 open_pauses[cpu].append(pause)
-            elif handlers[cpu]:
-                del stack[cpu][handlers[cpu].pop():]    # calls a handler left open
-                if open_pauses[cpu]:
-                    open_pauses[cpu].pop()["end_sequence"] = event["sequence"]
+            else:
+                handler_return(cpu, event["sequence"])
         elif kind == 4:
             state[cpu], entered_by_call[cpu] = None, False
             stack[cpu].clear()
@@ -305,6 +318,7 @@ def segmenter(routines, frame_number=lambda: 0):
             state[cpu] = after
             clock[cpu] = event["master_clock"]
             following[cpu] = event["next_pc"]
+            pending_rte[cpu] = cpu == M68K and opcode == 0x4E73
         return closed
 
     def run_end(cpu, kind, stop=None):

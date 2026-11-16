@@ -50,6 +50,8 @@ CHECKS = (
      "consoles/md/tests/decomp/draft_check.py"),
     ("symbolic control flow over the skeleton, rebuilt byte for byte",
      "consoles/md/tests/decomp/symbolize_check.py"),
+    ("the call segmenter over a TRAP handler whose return goes unreported",
+     "consoles/md/tests/decomp/segment_check.py"),
     ("the live runtime's pause points on a fake machine",
      "consoles/md/tests/decomp/live_check.py"),
     ("all C routines substituted at once on the live machine, frame by frame",
