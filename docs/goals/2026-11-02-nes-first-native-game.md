@@ -97,19 +97,20 @@ ordered bus events match; the 286-cycle Mesen span is 0.4 cycles longer than
 native, and the `$A194` stack/registers match with a 0.1-cycle boundary delta.
 The Mesen opcode `$20` and native mapper both identify physical PRG bank 1.
 Native C recovers the selected `$A194` call to `$AEE1`, then `$A197` through
-`$A19B`, `$A1B1`, `$A1D0`, and `$A823` to missing internal continuation
-`$A1B4`. The 32-event `$A194->$A197` and nine-event `$A197->$A1B1` routes
-match; their boundaries are 5.9 and 7.9 cycles early, with matching stack/
-register snapshots. The 34-event `$A1B1->$A1B4` route and its 70-cycle span
-match exactly; `$A1B4` stack/registers match at a 7.9-cycle early boundary.
-`$A1B4` calls missing `$A1E4`. The selected `$A823` pointer lookup reads
-`$A830/$A831`, producing pointer `$AF6C`; alternate inputs and later menu
-behavior remain unverified. Alternate `$AEE1` state branches and F6F4's
-sound-selection branch also remain open. The NES machine interface now has
+`$A19B`, `$A1B1`, `$A1D0`, `$A823`, `$A1B4`, and `$A1E4` to missing internal
+continuation `$A1B7`. The 32-event `$A194->$A197` and nine-event
+`$A197->$A1B1` routes match; their boundaries are 5.9 and 7.9 cycles early,
+with matching stack/register snapshots. The 34-event `$A1B1->$A1B4` route
+matches over 70 cycles exactly; `$A1B4->$A1B7` matches 55 events over 128
+cycles exactly. `$A1B7` stack/registers match at a 7.9-cycle early boundary.
+The selected `$A823` pointer lookup reads `$A830/$A831`, producing pointer
+`$AF6C`. `$A1B7` begins with `JSR $A230`; that routine and alternate
+`$A1E4/$AEE1` state branches remain open. F6F4's alternate sound-selection
+branch also remains open. The NES machine interface now has
 `nnes_rd8_rmw_with_profile_cost`, which overrides the RMW read-half cost while
 preserving the paired dummy/final writes; the bus-operation contract checks
 its timing, classification, disabled-cost, and open-pair behavior. Assembly
-fragments now total 2,182 byte-exact bytes, but the complete bank/image
+fragments now total 2,261 byte-exact bytes, but the complete bank/image
 reconstruction is still open.
 
 The second Start read is 102.1 cycles later natively within its 128-cycle
@@ -117,7 +118,7 @@ bound. `$81B8` is an internal branch in bank-1 `$81A0`, not a missing routine.
 The tested `$BD36` branch clears OAM while `$93 == $FF`; its active animation
 stream remains uncompared. Continue from the private ledger, preserving
 bank-aware routine identities and the SAROM adapter. Recover the bank-1
-`$A1B4->$A1E4` continuation, then expand menu handling, alternate `$AEE1`
+`$A1B7->$A230` continuation, then expand menu handling, alternate `$A1E4/$AEE1`
 states, and the active animation branch. Alternate `$FD00`, rendering, audio,
 and gameplay remain open.
 
