@@ -77,15 +77,26 @@ dispatch through `$FD3A/$FCBD/$FCEC` to bank-0 `$AA7E`. The full C17A-to-AA7E
 route matches 29,904 bus events across three aligned NMI boundaries, with one
 reference poll pair at the first wait and two/four native pairs at the later
 waits. `$AA7E`'s nine bus events, 36-cycle duration, and stack/register state
-match; its entry phase is still 124.5 cycles late, outside the ±12-cycle
-bound. The native route stops at missing fixed-bank `$C529`. The second Start
-read is 102.1 cycles later natively within its 128-cycle bound. `$81B8` is an
-internal branch in bank-1 `$81A0`, not a missing routine. The tested `$BD36`
-branch clears OAM while `$93 == $FF`; its active animation stream remains
+match; four route-local dispatch-table read overrides bring its entry to 4.5
+cycles later, inside the ±12-cycle bound.
+
+Fixed-bank `$C529-$C55A` is now recovered as byte-exact assembly and native C.
+The headless MesenCE route contains 166,341 bus events and sixteen NMI
+boundaries; native execution returns through `$FCDB` and reaches missing
+`$F6F4`. C529 entry and F6F4 exit stack/register snapshots match. The RTS
+dummy-read boundary differs by 0.1 cycles, the full C529-to-F6F4 span by four
+cycles, and the F6F4 boundary by 0.5 cycles. The comparator matches 17,821
+normalized bus events and reports the remaining 179 native wait-poll pairs,
+ten NMI return-PC differences, and five DMA alignment-count differences.
+Assembly fragments now total 1,810 byte-exact bytes, but the complete
+bank/image reconstruction is still open. The second Start read is 102.1
+cycles later natively within its 128-cycle bound. `$81B8` is an internal
+branch in bank-1 `$81A0`, not a missing routine. The tested `$BD36` branch
+clears OAM while `$93 == $FF`; its active animation stream remains
 uncompared. Continue from the private ledger, preserving bank-aware routine
-identities and the SAROM adapter. Recover `$C529` and investigate the `$AA7E`
-entry-phase skew, then exercise the active animation branch. Alternate
-`$FD00`, rendering, audio, and gameplay remain open.
+identities and the SAROM adapter. Recover `$F6F4` and later menu/gameplay
+routines, then exercise the active animation branch. Alternate `$FD00`,
+rendering, audio, and gameplay remain open.
 
 The pinned MesenCE 120-frame no-input profile has 139.44-cycle gap RMSE,
 +1.04% mean bias, and 2.80% p95 absolute relative error. A 40-frame Start
