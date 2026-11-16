@@ -102,6 +102,13 @@ registers the handler left. C that runs past the original's TRAP without
 taking it is DIVERGENT (`the original took an exception the C did not`).
 Other exceptions are still left to the original.
 
+The core reports one exception or interrupt at a time: an interrupt taken
+inside a TRAP handler takes the return event, and the TRAP's RTE comes with
+none. The segmenter closes a handler at an RTE whose next event is not a
+return (`segment_check.py`); without it a call kept its TRAP handler open for
+the rest of its life, recorded no more pauses, and failed at its next TRAP
+(first title, no-input frame 1586).
+
 ## Z80 calls across run slices
 
 The core runs the Z80 in slices up to the 68000's clock, so most Z80 calls
