@@ -214,3 +214,7 @@ depends = ["test:md-decomp", "test:nes", "test:nes-capture"]
 [tasks."qualify:decomp"]
 description = "Run scenario-scoped private MD lockstep or Dragon Warrior Start bus equality"
 run = "python3 tools/qualify_decomp.py"
+
+[tasks."report:decomp"]
+description = "Consolidate saved title verification results for one or more scenarios"
+run = "python3 tools/decomp_report.py"
