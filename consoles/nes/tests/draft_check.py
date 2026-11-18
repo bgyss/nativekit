@@ -19,6 +19,14 @@ class DraftTest(unittest.TestCase):
         self.assertIn("nnes_rd8_zp(console, 0x04", result)
         self.assertIn("0x8008, 0xf8", result)
 
+    def test_indexed_store_loop(self):
+        offset = len(self.image) - 16384
+        self.image[offset:offset + 10] = bytes.fromhex("a9 06 9d 00 02 e8 e0 08 d0 f8")
+        result = draft(self.image, 1, 0x8000)
+        self.assertIn("nnes_wr8_absolute_indexed(console, 0x0200", result)
+        self.assertIn("if (taken) goto block_8002", result)
+        self.assertIn("nnes_dummy_next_pc(console)", result)
+
     def test_unknown_opcode(self):
         with self.assertRaisesRegex(ValueError, "unsupported opcode"):
             draft(self.image, 0, 0x8000)

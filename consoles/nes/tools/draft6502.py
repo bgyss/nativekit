@@ -23,13 +23,32 @@ def draft(image, bank, pc):
              f'nnes_result draft_bank{bank:02x}_{pc:04x}(nnes *console, void *user)',
              '{', '    (void)user;', '    nnes_cpu_state *cpu = nnes_cpu(console);',
              '    if (!cpu) return NNES_INVALID_ARGUMENT;']
-    while offset + 2 <= len(data):
-        opcode, operand = data[offset:offset + 2]
-        pc += 2
-        offset += 2
+    instructions = {}
+    while offset < len(data):
+        opcode = data[offset]
+        size = {0xe8: 1, 0x9d: 3}.get(opcode, 2)
+        if offset + size > len(data):
+            raise ValueError("operand crosses the physical PRG bank boundary")
+        operand = int.from_bytes(data[offset + 1:offset + size], "little")
+        instructions[pc] = len(lines)
+        pc += size
+        offset += size
         if pc > 0xffff:
             raise ValueError("block crosses CPU address boundary")
-        if opcode == 0xa2:
+        if opcode == 0xa9:
+            lines.extend([f'    cpu->a = 0x{operand:02x};', '    cpu->p = nnes_nz8(cpu->p, cpu->a);'])
+        elif opcode == 0x9d:
+            lines.extend([f'    cpu->pc = 0x{pc:04x};', '    {',
+                          f'        nnes_result rc = nnes_wr8_absolute_indexed(console, 0x{operand:04x}, cpu->x, cpu->a);',
+                          '        if (rc != NNES_OK) return rc;', '    }'])
+        elif opcode == 0xe8:
+            lines.extend([f'    cpu->pc = 0x{pc - 1:04x};', '    {',
+                          '        nnes_result rc = nnes_dummy_next_pc(console);',
+                          '        if (rc != NNES_OK) return rc;', '    }',
+                          '    cpu->x++;', '    cpu->p = nnes_nz8(cpu->p, cpu->x);'])
+        elif opcode == 0xe0:
+            lines.append(f'    cpu->p = nnes_cmp8(cpu->p, cpu->x, 0x{operand:02x});')
+        elif opcode == 0xa2:
             lines.extend([f'    cpu->x = 0x{operand:02x};', '    cpu->p = nnes_nz8(cpu->p, cpu->x);'])
         elif opcode == 0xa5:
             lines.extend([f'    cpu->pc = 0x{pc:04x};', '    {',
@@ -43,6 +62,10 @@ def draft(image, bank, pc):
             lines.extend(['    int taken;', f'    nnes_result rc = nnes_branch_relative(console, NNES_BRANCH_{branch},',
                           f'                                          0x{pc:04x}, 0x{operand:02x}, &taken);',
                           '    if (rc != NNES_OK) return rc;', '    return nnes_jump_routine(console, cpu->pc);', '}'])
+            target = (pc + (operand if operand < 128 else operand - 256)) & 0xffff
+            if target in instructions:
+                lines.insert(-2, f'    if (taken) goto block_{target:04x};')
+                lines.insert(instructions[target], f'block_{target:04x}: ;')
             return '\n'.join(lines)
         else:
             raise ValueError(f"unsupported opcode ${opcode:02X} at ${pc - 2:04X}")
