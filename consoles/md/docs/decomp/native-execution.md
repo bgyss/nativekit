@@ -113,7 +113,9 @@ NMI, IM 0 data-bus opcodes) is a D03/D06 finding.
 | Z80 RAM (8,192 bytes) | `nmd_z80_ram()`; `dump NAME` writes `NAME.zram` | No |
 | CPU registers | `nmd_cpu`, `nmd_z80` globals | No |
 | Picture, sound | the kit's `shot NAME` and `--sound FILE` | No |
-| VRAM, CRAM, VSRAM, sprite cache, YM/PSG register state, I/O port state | **not exported**; internal accessors only (`md_vdp_vram_byte` and friends) | D05 gap |
+| VRAM (65,536 bytes), CRAM (64 words), VSRAM (40 words), VDP registers (24 bytes) | `dump NAME` writes `NAME.vram`, `NAME.cram`, `NAME.vsram`, `NAME.vdpreg` (words in host byte order) | No |
+| Every frame's picture and memories as hashes | the kit's `--frame-log FILE` (`--record DIR` in a window) | No |
+| Sprite cache, YM/PSG register state, I/O port state | **not exported**; internal accessors only | D05 gap |
 
 Observation never injects state: the pointers are `const` and the dump runs
 between frames. `rd8`/`wr8` from the host stack still work in native mode but

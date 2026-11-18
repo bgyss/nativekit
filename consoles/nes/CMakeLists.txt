@@ -63,6 +63,7 @@ if(NNES_TESTS)
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
   add_custom_target(nes-check
     ${_nnes_checks}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/draft_check.py
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/profile_check.py
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/capture_check.py
     VERBATIM)

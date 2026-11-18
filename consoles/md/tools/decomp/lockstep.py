@@ -36,10 +36,12 @@ import bisect
 import ctypes as c
 import hashlib
 import json
+import marshal
 import pathlib
 import pickle
 import sys
 import time
+import tempfile
 
 TOOLS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS))
@@ -238,7 +240,7 @@ class Machine:
         else:
             ram[offset ^ 1] = value
 
-    def frame(self, inputs):
+    def frame(self, inputs, snapshots=None):
         """Run one frame; the hashes of its picture, sound and snapshot regions."""
         self.inputs = inputs
         self.video, self.audio = hashlib.sha256(), hashlib.sha256()
@@ -255,7 +257,11 @@ class Machine:
                                                  self._name, len(self._name))
             if not size:
                 break
-            hashes[self._name.value.decode()] = hashlib.sha256(self._buffer.raw[:size]).hexdigest()
+            name = self._name.value.decode()
+            data = self._buffer.raw[:size]
+            hashes[name] = hashlib.sha256(data).hexdigest()
+            if snapshots is not None and name == "work_ram":
+                snapshots[name] = data
             region += 1
         if region == 0:
             self.errors.append("the core gave no comparison snapshot")
@@ -347,6 +353,7 @@ def _reference(args, scenario, routines, rom_size):
                             "span": (pause["sequence"], pause["end_sequence"])
                             if pause["kind"] in ("interrupt", "exception") else None,
                             # the events up to the pause: a frame's last, or the interrupt
+                            "retired": pause["retired"],
                             "boundary": pause.get("boundary") or pause["sequence"]}
                            for pause in call.pauses],
                 "exit_sequence": call.exit_sequence,
@@ -372,9 +379,11 @@ def _reference(args, scenario, routines, rom_size):
     _register(machine.core, handler, routines)
     inputs = runner._load_inputs(scenario, args.frames)
     frames = []
+    snapshots = {}
     for number in range(1, args.frames + 1):
         frame[0] = number
-        frames.append(machine.frame(inputs.get(number, {})))
+        frames.append(machine.frame(inputs.get(number, {}),
+                                    snapshots if number == args.inspect_frame else None))
         feed.frame_end()
         feed.slice_end()                        # the Z80 stopped where the frame ended
         if machine.errors:
@@ -419,13 +428,17 @@ def _reference(args, scenario, routines, rom_size):
             row["syncs"] = [clock for _, clock in inside]
             # the syncs the original made before each pause, in event order: a sync at
             # a frame's last clock can belong to the next frame
+            previous_retired = None
             for pause in row["pauses"]:
+                retired = pause.pop("retired")
+                pause["advanced"] = previous_retired is not None and retired != previous_retired
+                previous_retired = retired
                 pause["syncs_before"] = sum(1 for sequence, _ in inside
                                             if sequence <= pause["boundary"])
         leftover = arrivals[position:]
         loops[key].update(leftover[1:])
         entered[key] = len(rows) + (1 if leftover else 0)
-    return {"frames": frames, "schedule": schedule, "entered": entered, "loops": loops}
+    return {"snapshots": snapshots, "frames": frames, "schedule": schedule, "entered": entered, "loops": loops}
 
 
 def _register(core, handler, routines):
@@ -451,7 +464,7 @@ def _pause_point(cpu, pause):
                       (c.c_uint32 * 8)(*[registers["d%d" % i] for i in range(8)]),
                       (c.c_uint32 * 8)(*[registers["a%d" % i] for i in range(8)]),
                       registers["sr"] & 0x1F, 1 if pause["kind"] == "exception" else 0,
-                      pause["syncs_before"], (c.c_uint32 * 3)())
+                      pause["syncs_before"], (c.c_uint32 * 3)(int(pause["advanced"]), 0, 0))
 
 
 def _is_trap(image, pc):
@@ -716,7 +729,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
     compared = 0
     for number in range(1, args.frames + 1):
         current[0] = number
-        hashes = machine.frame(inputs.get(number, {}))
+        snapshot = {} if number == args.inspect_frame else None
+        hashes = machine.frame(inputs.get(number, {}), snapshot)
         if divergence:
             break
         if machine.errors:
@@ -724,7 +738,18 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         expected = reference["frames"][number - 1]
         regions = sorted(name for name in expected if hashes.get(name) != expected[name])
         if regions:
-            diverge(kind="frame", what="state after the frame differs", regions=regions)
+            detail = {}
+            if snapshot is not None and "work_ram" in regions:
+                expected_ram = reference["snapshots"]["work_ram"]
+                actual_ram = snapshot["work_ram"]
+                for offset in range(0, len(expected_ram), 2):
+                    expected_word = int.from_bytes(expected_ram[offset:offset + 2], sys.byteorder)
+                    actual_word = int.from_bytes(actual_ram[offset:offset + 2], sys.byteorder)
+                    if expected_word != actual_word:
+                        detail.update(word_address=0xff0000 + offset, expected_word=expected_word,
+                                      actual_word=actual_word)
+                        break
+            diverge(kind="frame", what="state after the frame differs", regions=regions, **detail)
             break
         compared += 1
     for key in routines:        # calls the original made that the hybrid never reached
@@ -742,6 +767,39 @@ def _hybrid(args, scenario, routines, rom_size, reference):
     }
 
 
+def _reference_schedule(args, scenario, routines, rom_size):
+    if args.reference_cache is None:
+        return _reference(args, scenario, routines, rom_size)
+    cache = pathlib.Path(args.reference_cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    sources = sorted(TOOLS.glob("*.py"))
+    identity = [sorted(routines), args.frames, args.inspect_frame, sys.version,
+                [_sha256(path) for path in (args.core, args.rom, args.scenario, *sources)]]
+    key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    path = cache / (key + ".schedule")
+    if path.exists():
+        with path.open("rb") as stream:
+            digest = stream.read(32)
+            if hashlib.file_digest(stream, "sha256").digest() == digest:
+                stream.seek(32)
+                return marshal.load(stream)
+    schedule = _reference(args, scenario, routines, rom_size)
+    with tempfile.NamedTemporaryFile(dir=cache, delete=False) as stream:
+        temporary = pathlib.Path(stream.name)
+    try:
+        with temporary.open("w+b") as stream:
+            stream.write(bytes(32))
+            marshal.dump(schedule, stream)
+            stream.seek(32)
+            digest = hashlib.file_digest(stream, "sha256").digest()
+            stream.seek(0)
+            stream.write(digest)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return schedule
+
+
 def _worker(args):
     scenario = runner._validate_scenario(
         json.loads(pathlib.Path(args.scenario).read_text()), args.frames)
@@ -752,7 +810,7 @@ def _worker(args):
     out = pathlib.Path(args.out)
     if args.worker == "reference":
         with (out / "reference.pickle").open("wb") as stream:
-            pickle.dump(_reference(args, scenario, routines, rom_size), stream)
+            pickle.dump(_reference_schedule(args, scenario, routines, rom_size), stream)
     else:
         with (out / "reference.pickle").open("rb") as stream:
             reference = pickle.load(stream)
@@ -764,7 +822,7 @@ def _sha256(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
-def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout=600):
+def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout=600, inspect_frame=None, reference_cache=None):
     """Both runs; return (and write) the lockstep report."""
     out = pathlib.Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -779,6 +837,10 @@ def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout
                 for name in ("lockstep.py", "check_calls.py", "run.py", "check/live.c"))).hexdigest(),
         },
     }
+    if inspect_frame is not None:
+        if not 1 <= inspect_frame <= frames:
+            raise ValueError("inspection frame must be inside the run")
+        report["inspect_frame"] = inspect_frame
     for stale in ("reference.pickle", "hybrid.json", "lockstep.json"):
         (out / stale).unlink(missing_ok=True)
     started = time.monotonic()
@@ -788,6 +850,10 @@ def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout
         command = [sys.executable, str(pathlib.Path(__file__).resolve()), "--worker", worker,
                    "--core", str(core), "--rom", str(rom), "--scenario", str(worker_scenario),
                    "--frames", str(frames), "--library", str(library), "--out", str(out)]
+        if reference_cache is not None:
+            command.extend(["--reference-cache", str(reference_cache)])
+        if inspect_frame is not None:
+            command.extend(["--inspect-frame", str(inspect_frame)])
         child = runner.supervise_child(command, max(remaining, 0.001))
         if child.timed_out:
             report.update(verdict="INCONCLUSIVE", certified=False,
@@ -841,6 +907,8 @@ def main(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--hybrid-scenario", help="another scenario for the hybrid run (a control)")
     parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--reference-cache", help="reuse original schedules in this local directory")
+    parser.add_argument("--inspect-frame", type=int, help="compare RAM words at this frame while preserving the full schedule")
     parser.add_argument("--worker", choices=("reference", "hybrid"), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.worker:
@@ -850,7 +918,7 @@ def main(argv=None):
             sys.exit("lockstep: " + str(exc))
         return
     report = run(args.core, args.rom, args.scenario, args.frames, args.library, args.out,
-                 args.hybrid_scenario, args.timeout)
+                 args.hybrid_scenario, args.timeout, args.inspect_frame, args.reference_cache)
     print(summary(report))
     sys.exit(0 if report["verdict"] == "IDENTICAL" else 1)
 

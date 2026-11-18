@@ -41,7 +41,7 @@ Choose one base-console title within current hardware scope, including its Z80 s
 | [D09](d09-plain-typed-c.md) | Turn certified translations into maintainable plain C | D07 certified behavior | started |
 | [D10](d10-full-native-game-and-timing.md) | Qualify complete native gameplay and measured timing | D02, D07 and D09 | unstarted |
 | [D11](d11-reproducible-first-game-delivery.md) | Package the first completed decomp and native game | D07-D10 complete at their declared gates | unstarted |
-| [D12](d12-reusable-rom-to-decomp-workflow.md) | Prove reuse on a second ROM and document the operating workflow | D11 full first-title delivery | unstarted |
+| [D12](d12-reusable-rom-to-decomp-workflow.md) | Prove reuse on a second ROM and document the operating workflow | D11 full first-title delivery | started (intake of the second ROM) |
 
 D01-D05 shared synthetic tooling can progress independently of title input. D00 has selected an exact first-title revision and defined its scenario inventory; title-dependent D03/D06 work must use that binding and close the remaining code-census and native-playable gates. Mark partially completed milestones partial; do not convert missing retail evidence into synthetic-only completion. D08 symbolic filing and D09 refactoring may proceed in verified batches during D07; full completion still requires their listed gates.
 

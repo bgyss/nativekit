@@ -336,6 +336,43 @@ static void unroll(void)
     nmd_rts();
 }
 
+/* $6A0 absw: A0 = ($8010).w, sign-extended to $FFFF8010; $1234 stored there. */
+static void absw(void)
+{
+    A[0] = 0xFFFF8010u;
+    wr16(A[0], nmd_tst16(0x1234));
+    nmd_rts();
+}
+
+/* $6B0 extend: D4:D2 = 0:$FFFF0001 + 0:1 by ADD and ADDX; then three bytes of
+ * $FF00D9.. ($995599) and $FF00DD.. ($014501) added in BCD into the latter by
+ * ABCD -(a0),-(a1), lowest byte first. */
+static void extend(void)
+{
+    D[1] = nmd_tst32(0xFFFF0001u);
+    D[2] = nmd_tst32(1);
+    D[3] = nmd_tst32(0);
+    D[4] = nmd_tst32(0);
+    D[2] = nmd_add32(D[2], D[1]);
+    D[4] = nmd_addx32(D[4], D[3]);
+    wr32(0xFF00D0, nmd_tst32(D[4]));
+    wr32(0xFF00D4, nmd_tst32(D[2]));
+    wr32(0xFF00D8, nmd_tst32(0x00995599u));
+    wr32(0xFF00DC, nmd_tst32(0x00014501u));
+    A[0] = 0xFF00DC;
+    A[1] = 0xFF00E0;
+    nmd_flags(0x1F, 0x04);
+    for (int index = 0; index < 3; index++) {
+        uint8_t value;
+
+        A[0] -= 1;
+        value = rd8(A[0]);
+        A[1] -= 1;
+        wr8(A[1], nmd_abcd(rd8(A[1]), value));
+    }
+    nmd_rts();
+}
+
 /* $550 relay: calls a routine that has no C here (the record stands in). */
 #ifdef NMD_HYBRID
 static void relay(void)
@@ -392,6 +429,8 @@ const nmd_routine nmd_game_routines[] = {
     {0x660, vbwait, "vbwait"},
     {0x680, unroll, "unroll"},
     {0x694, ulast2, "ulast2"},
+    {0x6A0, absw, "absw"},
+    {0x6B0, extend, "extend"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
     {0x620, trapper, "trapper"},

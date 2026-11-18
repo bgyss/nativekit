@@ -60,6 +60,35 @@ static inline void nmd_flags(unsigned mask, unsigned flags)
     {                                                                                        \
         return nmd_sub_flags##bits(destination, source, NMD_X | NMD_N | NMD_Z | NMD_V | NMD_C); \
     }                                                                                        \
+    /* ADDX: the sum with X; Z is cleared when the result is not zero, else kept */          \
+    static inline type nmd_addx##bits(type destination, type source)                         \
+    {                                                                                        \
+        unsigned x = (nmd_cpu.sr & NMD_X) ? 1u : 0u;                                         \
+        wide sum = (wide)destination + source + x;                                           \
+        type result = (type)sum;                                                             \
+        unsigned carry = (unsigned)(sum >> bits) & 1;                                        \
+        unsigned overflow = (unsigned)(((destination ^ result) & (source ^ result)) >> (bits - 1)) & 1; \
+        nmd_flags(NMD_X | NMD_N | NMD_V | NMD_C,                                             \
+                  (carry ? NMD_X | NMD_C : 0) | (overflow ? NMD_V : 0) |                     \
+                  (result >> (bits - 1) ? NMD_N : 0));                                       \
+        if (result)                                                                          \
+            nmd_flags(NMD_Z, 0);                                                             \
+        return result;                                                                       \
+    }                                                                                        \
+    /* SUBX: the difference less X; Z as ADDX's */                                           \
+    static inline type nmd_subx##bits(type destination, type source)                         \
+    {                                                                                        \
+        unsigned x = (nmd_cpu.sr & NMD_X) ? 1u : 0u;                                         \
+        type result = (type)(destination - source - x);                                      \
+        unsigned borrow = (wide)source + x > (wide)destination;                              \
+        unsigned overflow = (unsigned)(((destination ^ source) & (destination ^ result)) >> (bits - 1)) & 1; \
+        nmd_flags(NMD_X | NMD_N | NMD_V | NMD_C,                                             \
+                  (borrow ? NMD_X | NMD_C : 0) | (overflow ? NMD_V : 0) |                    \
+                  (result >> (bits - 1) ? NMD_N : 0));                                       \
+        if (result)                                                                          \
+            nmd_flags(NMD_Z, 0);                                                             \
+        return result;                                                                       \
+    }                                                                                        \
     /* CMP, CMPI, CMPA (long): X is not changed */                                           \
     static inline void nmd_cmp##bits(type destination, type source)                          \
     {                                                                                        \
@@ -128,6 +157,32 @@ NMD_M68K_OPS(16, uint16_t, uint32_t)
 NMD_M68K_OPS(32, uint32_t, uint64_t)
 
 /* SWAP: the halves exchanged; N Z from the long, V C clear. */
+/* ABCD: destination + source + X in packed BCD. X and C the decimal carry; Z
+ * cleared when the result is not zero, else kept. N and V are undefined on
+ * the 68000; these are the pinned reference core's (its abcd: N and V of the
+ * correcting add). */
+static inline uint8_t nmd_abcd(uint8_t destination, uint8_t source)
+{
+    unsigned x = (nmd_cpu.sr & NMD_X) ? 1u : 0u;
+    unsigned low = (destination & 0xFu) + (source & 0xFu) + x;
+    unsigned correct = low >= 0xA ? 6u : 0u, limit = low >= 0xA ? 0x9Au : 0xA0u;
+    unsigned sum = (unsigned)destination + source + x;
+    uint8_t binary = (uint8_t)sum, result;
+    unsigned carry = (sum >> 8) & 1, overflow;
+
+    if (carry || binary >= limit)
+        correct |= 0x60;
+    result = (uint8_t)(binary + correct);
+    overflow = (unsigned)((binary ^ result) & (correct ^ result) & 0x80) >> 7;
+    if (!carry)
+        carry = (binary + correct) >> 8 & 1;
+    nmd_flags(NMD_X | NMD_C | NMD_N | NMD_V,
+              (carry ? NMD_X | NMD_C : 0) | (result & 0x80 ? NMD_N : 0) | (overflow ? NMD_V : 0));
+    if (result)
+        nmd_flags(NMD_Z, 0);
+    return result;
+}
+
 static inline uint32_t nmd_swap(uint32_t value)
 {
     return nmd_tst32(value << 16 | value >> 16);

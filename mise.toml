@@ -182,6 +182,11 @@ description = "The kit's own checks and its name check (the null build)"
 depends = ["build:null"]
 run = "cmake --build build/null --target kit-check"
 
+[tasks."test:session"]
+description = "The session tool (record, verify, extract) on the kit's session console"
+depends = ["build:null"]
+run = "cmake --build build/null --target kit_session_console && python3 tools/session/session_check.py build/null/kit/tests/kit_session_console"
+
 [tasks."test:consumer"]
 description = "A game as games use it: its own project, the repo root added as a subdirectory"
 run = "cmake -S consoles/snes/tests/consumer -B build/consumer -DNATIVESHVC=$PWD && cmake --build build/consumer -j8 && build/consumer/consumer --headless --frames 5"
@@ -201,3 +206,15 @@ run = "python3 consoles/snes/tests/golden.py compare build/golden"
 description = "Check compatible upstream SNES APIs, timing, graphics and fatal paths"
 depends = ["build:null"]
 run = "cmake --build build/null --target snes-upstream-check"
+
+[tasks."test:decomp"]
+description = "Run synthetic MD recovery, NES foundation and actual-core NES capture checks"
+depends = ["test:md-decomp", "test:nes", "test:nes-capture"]
+
+[tasks."qualify:decomp"]
+description = "Run scenario-scoped private MD lockstep or Dragon Warrior Start bus equality"
+run = "python3 tools/qualify_decomp.py"
+
+[tasks."report:decomp"]
+description = "Consolidate saved title verification results for one or more scenarios"
+run = "python3 tools/decomp_report.py"

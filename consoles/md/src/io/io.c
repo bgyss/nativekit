@@ -3,6 +3,7 @@
 
 #include "../console/md_internal.h"
 #include "nk/fatal.h"
+#include "nk/session.h"
 #include "nmd/cart.h"
 #include "nmd/hw.h"
 
@@ -101,7 +102,7 @@ static void md_io_update_timing(int port)
 
 static uint8_t md_io_pad_pins(int port, int th)
 {
-    uint32_t buttons = button_masks[port];
+    uint32_t buttons = nk_session_poll((unsigned)port, button_masks[port]);
     const md_io_port *state = &ports[port];
     int extended = pad_types[port] == NMD_PORT_PAD6 && th && state->sampled_edges == 3u;
     int recognized = pad_types[port] == NMD_PORT_PAD6 && !th && state->sampled_edges == 2u;

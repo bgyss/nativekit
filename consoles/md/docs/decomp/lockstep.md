@@ -10,10 +10,17 @@ and sound chips running beside them.
 python3 consoles/md/tools/decomp/hybrid.py --runtime live --out DIR SOURCE.c...
 python3 consoles/md/tools/decomp/lockstep.py --core CORE --rom ROM \
     --scenario SCENARIO.json --frames N --library DIR/hybrid-live.dylib --out OUT \
-    [--timeout SECONDS]
+    [--timeout SECONDS] [--inspect-frame FRAME] [--reference-cache DIRECTORY]
 ```
 
 It exits 0 only for IDENTICAL; `OUT/lockstep.json` holds the report.
+
+Use `--inspect-frame` to compare work RAM at a frame while keeping the full
+reference horizon. Reducing `--frames` can leave different calls open and
+change which substitutions run. Rebuild the live hybrid whenever the live C
+runtime changes. The optional cache reuses a reference schedule across C-body
+edits with the same routine addresses, inputs, core, horizon and inspection
+frame. A different capture configuration requires a new schedule.
 
 ## How it runs
 

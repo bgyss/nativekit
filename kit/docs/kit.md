@@ -236,6 +236,7 @@ build) runs the name check and every check in [`tests/`](../tests/):
 | `env_check` | settings by prefix |
 | `save_check` | the battery save loaded when there is one, written only when its save area changed, through a `.new` file renamed over the old; `--past`: a save area past the RAM, fatal |
 | `input_check` | keys to positional bits and back to their names, a stick past half on the d-pad, a new press making a controller its player's source (reported once), the mouse's motion over a frame, two touches |
+| `session_check.py` | the recorder and the frame log on the session console, windowed on the null host with keys from `PORT_EVENTS`: the play's buttons frame by frame, marks, the recorder's pause and steps, a headless replay matching every frame; planted: a dropped input change caught at its frame, the host's clock in the machine caught, `--record` headless refused; `--sound` sample counts |
 | `states_check.py` | the script on the stub console: steps and their errors, dumps, `save` and `load` with fork and without, a state rebuilt from a play |
 | `profile_lib_check.py` | the fitter on made-up kinds: known weights given back, a kind not measured kept at its default, a chip's program fitted |
 | `click_macos.m` | the macOS host's mouse buttons from each press and release, a click quicker than a poll heard (a window; by hand: `build/macos/kit/tests/kit_click_macos`) |
@@ -262,3 +263,28 @@ build) runs the name check and every check in [`tests/`](../tests/):
 
 `cmake --build BUILD --target kit-check` includes a software loop-extension
 check of pause, backdrop tint, overlay-cache invalidation and resumption.
+
+## Additions in 1.2
+
+A play recorded for an exact replay, and a log of every frame
+([`session.h`](../include/nk/session.h), [`src/front/session.c`](../src/front/session.c);
+the plan is `docs/superpowers/plans/2026-11-17-session-record-replay.md`).
+
+- `--record DIR` (windowed) writes the players' buttons each frame as a headless
+  script (`DIR/input.nks`), the play's frame log (`DIR/frames.log`) and the
+  recorder's marks (`DIR/marks.log`). While recording, F1 shows or hides the frame
+  counter, F5 marks the frame shown, F6 and F7 start and end a range, F9 pauses
+  (no frame runs) and F10 runs one frame while paused. The keys go to the recorder
+  before the console. `--headless --script DIR/input.nks` plays the same frames again.
+- `--frame-log FILE` (any run) writes, for each frame the machine ran, the 64-bit
+  FNV-1a of the console's picture and of all its memories (`regions`), and with
+  `--sound` the sound file's sample count after the frame. A replay matches a play
+  when every line matches.
+- `nk_console.held(b)` (optional; `--record` needs it) gives the players'
+  controllers as they stand, by `nk_button.bit`.
+- `--frames N` also closes a windowed run after N passes of the loop.
+- The null host reads keys for a windowed run from `PORT_EVENTS=FILE` (lines
+  `N VK DOWN`, in the Nth drain of the event queue), for checks.
+- `tools/session/session.py` records a play with the binary's identity, verifies
+  that it replays exactly, and extracts a frame range as PNG, WAV and dumps
+  ([`tools/session/README.md`](../../tools/session/README.md)).

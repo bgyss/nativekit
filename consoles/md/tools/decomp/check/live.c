@@ -150,6 +150,10 @@ void nmd_live_at(uint32_t address)
         syncs_to(c, pause);
         c->pause_next++;
         leave(c, PAUSED);
+        /* A later visit to the same PC can have the same registers even
+         * after writing RAM. Let this instruction run before matching it. */
+        if (c->pause_next < c->pause_count && c->pauses[c->pause_next].index[0])
+            return;
     }
 }
 

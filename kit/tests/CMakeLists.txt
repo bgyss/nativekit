@@ -9,6 +9,16 @@ if(NK_HOST STREQUAL "null")
     COMMAND ${CMAKE_COMMAND} -E env PORT_SAVEDIR=${CMAKE_BINARY_DIR}/kit/tests/loop_save $<TARGET_FILE:kit_loop_check>
     COMMAND ${CMAKE_COMMAND} -E env PORT_SAVEDIR=${CMAKE_BINARY_DIR}/kit/tests/loop_save $<TARGET_FILE:kit_loop_check> --headless)
   set(_loop_target kit_loop_check)
+  # the recorder and the frame log, windowed on the null host (PORT_EVENTS keys)
+  add_executable(kit_session_console session_console.c $<TARGET_OBJECTS:nk_app> $<TARGET_OBJECTS:nk_front>
+    $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_resample>)
+  target_link_libraries(kit_session_console PRIVATE ${NK_HOST_TARGETS} ${NK_RENDER_TARGETS})
+  target_include_directories(kit_session_console PRIVATE ${NK_INCLUDE} ${NK_PRIVATE_INCLUDE})
+  set_target_properties(kit_session_console PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/kit/tests)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  list(APPEND _loop_commands COMMAND ${Python3_EXECUTABLE} ${NK_DIR}/tests/session_check.py
+    $<TARGET_FILE:kit_session_console>)
+  list(APPEND _loop_target kit_session_console)
 endif()
 add_executable(kit_kinds_check kinds_check.c $<TARGET_OBJECTS:nk_app> $<TARGET_OBJECTS:nk_front>
   $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_resample>)

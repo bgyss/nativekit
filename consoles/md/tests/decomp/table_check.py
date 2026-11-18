@@ -122,7 +122,7 @@ ff:     movea.l (a7)+,a0
 fg:     lea     (g0h,pc),a0
         bsr.w   fgsub
         jsr     (a0)
-        bra.w   fh
+        bra.w   fi
 fgsub:  rts
         org     $3A0
 g0h:    moveq   #60,d7
@@ -139,14 +139,41 @@ th:     move.l  (a0)+,(a1)
 stray:  rte
         org     $3FE
         dc.w    0
+
+        org     $400
+fi:     bsr.w   fi2
+        bsr.w   fj2
+        bra.w   fh
+fi2:    add.w   d0,d0           ; a table of word offsets read from the PC's table
+        move.w  (ti,pc,d0.w),d0
+        jmp     (ti,pc,d0.w)
+ti:     dc.w    i0h-ti,i1h-ti
+i0h:    moveq   #70,d7
+        rts
+i1h:    moveq   #71,d7
+        rts
+fj2:    lea     (tj,pc),a3      ; word offsets read through a register, added to the PC's base
+        add.w   d0,d0
+        move.w  (0,a3,d0.w),d0
+        jmp     (jb,pc,d0.w)
+tj:     dc.w    j0h-jb,j1h-jb
+jb:
+j0h:    moveq   #80,d7
+        rts
+j1h:    moveq   #81,d7
+        rts
+        org     $5FE
+        dc.w    0
 """
 SITE_A, SITE_B, SITE_C, SITE_D, SITE_E1, SITE_E2, SITE_F, SITE_G = (
     0x22C, 0x284, 0x2AA, 0x2CC, 0x30C, 0x31A, 0x362, 0x388)
 SITE_H, INLINE = 0x3B2, 0x3B6
+SITE_I, SITE_J = 0x412, 0x42C
 HANDLERS = {
     "a0h": 0x260, "a1h": 0x264, "a2h": 0x268, "a3h": 0x26C, "notcode": 0x270,
     "b0h": 0x290, "b1h": 0x294, "c0h": 0x2B4, "c1h": 0x2BC, "d0h": 0x2E0, "d1h": 0x2E4,
     "e0h": 0x340, "e1h": 0x344, "e2h": 0x348, "e3h": 0x34C, "g0h": 0x3A0,
+    "i0h": 0x41A, "i1h": 0x41E, "j0h": 0x434, "j1h": 0x438,
 }
 
 
@@ -159,7 +186,7 @@ def build_rom(directory):
     directory.mkdir(parents=True, exist_ok=True)
     code = census_fixture._assemble("tables", "vasmm68k_mot", M68K, directory,
                                     ("-m68000", "-no-opt"))
-    require(len(code) == 0x200, "table fixture: 68000 image is %d bytes, not 512" % len(code))
+    require(len(code) == 0x400, "table fixture: 68000 image is %d bytes, not 1,024" % len(code))
     rom = bytearray(0x8000)
     rom[0:4] = (0x00FFFF00).to_bytes(4, "big")
     rom[4:8] = (0x200).to_bytes(4, "big")
@@ -169,7 +196,7 @@ def build_rom(directory):
     rom[0x120:0x150] = b"NATIVEKIT TABLE CONTROL".ljust(48, b" ")
     rom[0x150:0x180] = b"NATIVEKIT TABLE CONTROL".ljust(48, b" ")
     rom[0x1F0:0x200] = b"JUE             "
-    rom[0x200:0x400] = code
+    rom[0x200:0x600] = code
     path = directory / "table-control.bin"
     path.write_bytes(rom)
     return path
@@ -205,7 +232,7 @@ def forms(rom):
     space = rom_document(rom)
     table = {name: evidence_at(space, address) for name, address in HANDLERS.items()}
     for name in ("a0h", "a1h", "a2h", "b0h", "b1h", "c0h", "c1h", "d0h", "d1h",
-                 "e0h", "e1h", "e2h", "e3h"):
+                 "e0h", "e1h", "e2h", "e3h", "i0h", "i1h", "j0h", "j1h"):
         require(table[name] == "table", "%s is %r, not code by table evidence" % (name, table[name]))
     for name in ("a3h", "notcode", "g0h"):
         require(table[name] is None, "%s was decoded as code without evidence" % name)
@@ -222,6 +249,8 @@ def forms(rom):
     # rows are the branches themselves; the table ends where its first target begins
     one(SITE_B, "branch", 0x288, 2, [0x288, 0x28C])
     one(SITE_C, "offset", 0x2B0, 2, [0x2B4, 0x2BC])
+    one(SITE_I, "offset", 0x416, 2, [0x41A, 0x41E])
+    one(SITE_J, "offset", 0x430, 2, [0x434, 0x438])
     # a table ends where the next table begins
     one(SITE_E1, "pointer", 0x330, 2, [0x340, 0x344])
     one(SITE_E2, "pointer", 0x338, 2, [0x348, 0x34C])
@@ -239,7 +268,8 @@ def forms(rom):
     require(not tables_at(space, SITE_F) and not tables_at(space, SITE_G),
             "a transfer through an unknown register was given a table")
     require({u["at"] for u in space["unresolved"]} ==
-            {SITE_A, SITE_B, SITE_C, SITE_D, SITE_E1, SITE_E2, SITE_F, SITE_G, SITE_H},
+            {SITE_A, SITE_B, SITE_C, SITE_D, SITE_E1, SITE_E2, SITE_F, SITE_G, SITE_H,
+             SITE_I, SITE_J},
             "a computed transfer is no longer listed as one")
     entries = {e["at"]: e for e in space["entries"]}
     require(entries[0x264]["kinds"] == ["table"] and entries[0x264]["evidence"] == "table",
@@ -279,8 +309,8 @@ def through_intake(temp, rom_path):
     counts, routines, rebuilt = intake.run_intake(rom_path, temp / "out", neutral_id="table-control")
     require(rebuilt, "the image with table code does not rebuild")
     rom_counts = next(space for space in counts["spaces"] if space["id"] == "rom")
-    require(rom_counts["decoded_code_bytes"]["table"] == 13 * 4 + 2 * 4 + 4 + 6 and
-            rom_counts["tables"] == 8 and rom_counts["unresolved_without_target"] == 2,
+    require(rom_counts["decoded_code_bytes"]["table"] == 17 * 4 + 2 * 4 + 4 + 6 and
+            rom_counts["tables"] == 10 and rom_counts["unresolved_without_target"] == 2,
             "census table counts are wrong: %r" % rom_counts)
     tiers = {r["at"]: (r["tier"], r["evidence"]) for r in routines["routines"]}
     require(tiers[HANDLERS["a1h"]] == (None, "table"), "a table entry was given a tier")

@@ -31,6 +31,7 @@
 #include "rr.h"
 #include "rr_size.h"
 #include "backdrop.h"
+#include "session.h"
 
 static const nk_console *c;
 const nk_console *nk_console_now(void) { return c; }
@@ -249,6 +250,7 @@ static void counts_frame(long n)
 static long max_frames = -1;
 static long frame_no;
 static FILE *sound_f;
+static long long sound_samples;            /* stereo samples written to sound_f */
 
 int nk_headless(void) { return headless; }
 long nk_frame_no(void) { return frame_no; }
@@ -282,8 +284,10 @@ static void sound_drain(void)
     int16_t b[2048 * 2];
     int n;
     while ((n = c->audio_take(b, 2048)) > 0)
-        if (!nk_script_replaying())
+        if (!nk_script_replaying()) {
             fwrite(b, 4, (size_t)n, sound_f);
+            sound_samples += n;
+        }
 }
 
 /* <env>_SCALE=S or SXxSY (headless), window pixels a console pixel: a
@@ -343,22 +347,27 @@ static const struct {
     { 'a', { 0, 7, 5, 7, 5 } }, { 'e', { 0, 7, 7, 4, 7 } }, { 'f', { 3, 4, 7, 4, 4 } }, { 'g', { 0, 7, 5, 7, 1 } },
     { 'i', { 2, 0, 2, 2, 2 } }, { 'm', { 0, 7, 7, 5, 5 } }, { 'n', { 0, 6, 5, 5, 5 } }, { 'o', { 0, 7, 5, 5, 7 } },
     { 'p', { 0, 7, 5, 7, 4 } }, { 'r', { 0, 7, 4, 4, 4 } }, { 's', { 0, 7, 6, 3, 7 } }, { 't', { 2, 7, 2, 2, 3 } },
+    { 'c', { 0, 7, 4, 4, 7 } }, { 'd', { 1, 7, 5, 5, 7 } }, { 'k', { 4, 5, 6, 5, 5 } },
     { 'u', { 0, 5, 5, 5, 7 } }, { 'w', { 0, 5, 5, 7, 7 } }, { 'x', { 0, 5, 2, 2, 5 } }, { '/', { 1, 1, 2, 4, 4 } },
 };
 
-static void fps_draw(void)
+/* a line of the meter's font at (8, top) on the target */
+static void text_draw(const char *text, float top)
 {
     static uint32_t px[7 * (2 + 4 * 96)];
-    size_t n = strlen(fps_text), i, w = 2 + 4 * n;
+    size_t n = strlen(text), i, w;
     int x, y;
     float q[6];
     if (!n)
         return;
+    if (n > 96)
+        n = 96;
+    w = 2 + 4 * n;
     for (i = 0; i < 7 * w; i++)
         px[i] = 0xB0000000u;                       /* a dark panel behind the text */
     for (i = 0; i < n; i++) {
         size_t g;
-        for (g = 0; g < sizeof fps_font / sizeof fps_font[0] && fps_font[g].c != fps_text[i]; g++)
+        for (g = 0; g < sizeof fps_font / sizeof fps_font[0] && fps_font[g].c != text[i]; g++)
             ;
         if (g == sizeof fps_font / sizeof fps_font[0])
             continue;
@@ -369,13 +378,15 @@ static void fps_draw(void)
     }
     /* 3 target pixels a font pixel, at the top left */
     q[0] = 8;
-    q[1] = 8;
+    q[1] = top;
     q[2] = 8 + 3.0f * (float)w;
-    q[3] = 8;
+    q[3] = top;
     q[4] = 8;
-    q[5] = 8 + 3.0f * 7;
+    q[5] = top + 3.0f * 7;
     rr_overlay(px, (int)w, 7, q);
 }
+
+static void fps_draw(void) { text_draw(fps_text, 8); }
 
 /* a presented frame's times, ns: the meter's second and the log's line */
 static void fps_frame(uint64_t shown, uint64_t ran, uint64_t presented, uint64_t waited)
@@ -439,6 +450,7 @@ static void show(void)
     draw_overlays(tw, th);
     if (fps_on > 0)
         fps_draw();
+    text_draw(nk_session_text(), fps_on > 0 && fps_text[0] ? 8 + 3.0f * 8 : 8);
     rr_present();
 }
 
@@ -599,7 +611,10 @@ static void frame(void)
         host_event e;
         while (host_poll_event(&e, 0)) {
             if (e.type == HOST_EV_KEY) {
-                /* the console's (and its game's) first; 0: on to the kit */
+                /* the recorder's keys first, then the console's (and its
+                   game's); 0: on to the kit */
+                if (nk_session_key(e.vk, e.down))
+                    continue;
                 if (!(c->key && c->key(e.vk, e.down)))
                     nk_input_key(e.vk, e.down);
             } else if (e.type == HOST_EV_MOUSE) {
@@ -620,7 +635,8 @@ static void frame(void)
         nk_save_write();
     if (c->frame)
         c->frame();
-    if (quitting)
+    /* --frames N windowed: the window closes after N passes (a pause's too) */
+    if (quitting || (max_frames >= 0 && frame_no >= max_frames))
         quit();
     /* the pace: each frame due a frame's time after the last */
     {
@@ -645,7 +661,7 @@ static void frame(void)
 
 int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
 {
-    const char *script = NULL, *out_dir = ".", *dir, *title;
+    const char *script = NULL, *out_dir = ".", *dir, *title, *record = NULL, *frame_log = NULL;
     int i, ww, wh;
     c = con;
     nk_input_keymap(c->keys, c->key_count);
@@ -662,6 +678,16 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
             script = argv[++i];
         else if (!strcmp(argv[i], "--out") && i + 1 < argc)
             out_dir = argv[++i];
+        else if (!strcmp(argv[i], "--record") && i + 1 < argc)
+            record = argv[++i];
+        else if (!strcmp(argv[i], "--poll-log") || !strcmp(argv[i], "--replay-polls")) {
+            int replay = !strcmp(argv[i], "--replay-polls");
+            if (++i >= argc)
+                nk_fatal("poll recording or replay requires a path");
+            nk_session_polls_open(argv[i], replay);
+        }
+        else if (!strcmp(argv[i], "--frame-log") && i + 1 < argc)
+            frame_log = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc)
             max_frames = atol(argv[++i]);
         else if (!strcmp(argv[i], "--counts") && i + 1 < argc) {
@@ -684,6 +710,7 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
     nk_script_args(argc, argv);
     if (script)
         nk_script_load(script, out_dir);
+    nk_session_open(c, record, frame_log, headless);
     c->power(cart);
     c->window_size(&ww, &wh);
     rr_set_headless_size(ww, wh);
@@ -736,8 +763,14 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
         host_audio_open(OUT_RATE, audio_cb, NULL);
     }
     for (;;) {
-        if (!nk_paused())
+        if (!nk_paused() && !nk_session_holding()) {
+            nk_session_run_begin();
             c->run_frame();
+            /* the frame's sound in the file before its line in the log */
+            if (headless && sound_f)
+                sound_drain();
+            nk_session_run_end(headless && sound_f ? sound_samples : -1);
+        }
         frame();
     }
 }

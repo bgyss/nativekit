@@ -17,7 +17,7 @@ other routine's draft or C. TRAP calls `trap_call(number, return_pc)`, which
 the game supplies (the exception frame pushed, the vector's C run, the frame
 popped). Computed jumps inside the routine go through the
 code map's jump tables; others call by address. An instruction this module
-does not translate (TRAP, the BCD and X-extended arithmetic, STOP, RESET,
+does not translate (TRAP, SBCD, NBCD, NEGX, ROXL/ROXR, STOP, RESET,
 CHK, MOVEP) makes the routine a refusal: no C is written for it
 and the reason is listed.
 
@@ -104,9 +104,12 @@ class Operand:
             self.kind, self.reg = "pre", reg_expr(t[2:-1])
         elif re.fullmatch(r"\(\$?[0-9a-f]+\)\.[wl]", t):
             value = number(t[1:t.index(")")])
-            if t.endswith(".w"):
+            if t.endswith(".w"):            # the decoder may print it extended already
+                value &= 0xFFFF
                 value = value - 0x10000 if value & 0x8000 else value
-            self.kind, self.address = "abs", "0x%06Xu" % (value & 0xFFFFFF)
+            # the full 32 bits: an address register loaded from ($A380).w holds
+            # $FFFFA380 (the bus uses the low 24)
+            self.kind, self.address = "abs", "0x%08Xu" % (value & 0xFFFFFFFF)
         else:
             m = re.fullmatch(r"\((-?\$?[0-9a-f]+),(a[0-7]|sp|pc)(?:,([da][0-7])\.([wl]))?\)", t)
             if not m:
@@ -361,8 +364,8 @@ class Drafter:
         if base == "trap":
             out.append("trap_call(%d, 0x%06Xu);" % (number(ops[0][1:]), following))
             return
-        if base in ("trapv", "chk", "stop", "reset", "illegal", "abcd", "sbcd", "nbcd",
-                    "addx", "subx", "negx", "movep", "roxl", "roxr", "rtr"):
+        if base in ("trapv", "chk", "stop", "reset", "illegal", "sbcd", "nbcd",
+                    "negx", "movep", "roxl", "roxr", "rtr"):
             raise Refusal("%s at $%06X" % (base, address))
 
         # moves
@@ -505,6 +508,16 @@ class Drafter:
             source.compute(out, "src")
             out.append("nmd_%s(&%s, %s);" % (base, reg_expr(ops[1]), source.read()))
             source.finish(out)
+            return
+
+        # with X: Dy,Dx or -(Ay),-(Ax), the source read (and decremented) first
+        if base in ("addx", "subx", "abcd"):
+            source, dest = operand(0), operand(1)
+            source.compute(out, "src")
+            out.append("value = %s;" % source.read())
+            dest.compute(out, "ea")
+            helper = "nmd_abcd" if base == "abcd" else "nmd_%s%d" % (base, size)
+            out.append(dest.write("%s(%s, (%s)value)" % (helper, dest.read(), TYPES[size])))
             return
 
         # two-operand arithmetic and logic

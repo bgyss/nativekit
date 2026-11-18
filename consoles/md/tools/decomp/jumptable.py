@@ -9,6 +9,8 @@ is. Four forms are recognised, each by the opcodes that load the register:
             movea.l (T,pc,Xn),An ... jsr (An)           rows of long addresses at T
   offset    lea T,An  move.w (d,An,Xm),Dn  jsr (d',An,Dn.w)
                                                         rows of words added to T+d'
+            move.w (T,pc,Xm),Dn  jmp (T',pc,Dn.w)    rows of words added to T'
+            move.w (d,Am,Xk),Dn  jmp (T',pc,Dn.w)    the same, Am loaded with lea T
   branch    jmp (T,pc,Xn)                               rows of bra.w at T
   inline    jmp (T,pc,Xn)                               code at T, entered at a computed
                                                         distance: only T is known
@@ -140,9 +142,13 @@ class _Finder:
             found, complete = self.loads(site, reg)
             return [(kind, at, None, complete) for kind, at in found]
         if mode == 7 and reg == 3:
-            at = site + 2 + _s8(_word(self.data, offset + 2) & 0xFF)
+            extension = _word(self.data, offset + 2)
+            at = site + 2 + _s8(extension & 0xFF)
             if _word(self.data, at - self.space.base) == 0x6000:
                 return [("branch", at, None, True)]
+            offsets = self._offset_rows(site, extension, at)
+            if offsets is not None:
+                return offsets
             return [("inline", at, None, False)]     # code entered at a computed distance
         if mode == 6:
             extension = _word(self.data, offset + 2)
@@ -160,6 +166,27 @@ class _Finder:
             return [("offset", at + _s8(load_extension & 0xFF), at + _s8(extension & 0xFF), complete)
                     for kind, at in found if kind == "direct"]
         return []
+
+    def _offset_rows(self, site, extension, base):
+        """A jmp (base,pc,Dn.w) whose index the instruction just before read as a
+        word from a table: [("offset", table, base, complete)], or None."""
+        previous = self.before.get(site, ())
+        if len(previous) != 1 or extension & 0x8000:           # index must be a data register
+            return None
+        load = previous[0]
+        load_offset = load - self.space.base
+        load_op = _word(self.data, load_offset)
+        load_extension = _word(self.data, load_offset + 2)
+        if load_op & 0xF1C0 != 0x3000 or (load_op >> 9) & 7 != (extension >> 12) & 7:
+            return None                                         # move.w ea,Dn into the index
+        mode, reg = (load_op >> 3) & 7, load_op & 7
+        if mode == 7 and reg == 3:                              # move.w (T,pc,Xm),Dn
+            return [("offset", load + 2 + _s8(load_extension & 0xFF), base, True)]
+        if mode == 6:                                           # move.w (d,Am,Xk),Dn
+            found, complete = self.loads(load, reg)
+            return [("offset", table + _s8(load_extension & 0xFF), base, complete)
+                    for kind, table in found if kind == "direct"] or None
+        return None
 
     def target_ok(self, target):
         space = self.space

@@ -18,7 +18,7 @@ uint8_t zrd(uint16_t addr) { (void)addr; return 0; }
 void zwr(uint16_t addr, uint8_t value) { (void)addr; (void)value; }
 
 enum { OP_ADD, OP_SUB, OP_CMP, OP_TST, OP_NEG, OP_LSL, OP_ASL, OP_LSR, OP_ASR, OP_ROL, OP_ROR,
-       OP_SWAP, OP_BTST, OP_DIVS, OP_MULU, OP_MULS, OP_DIVU };
+       OP_SWAP, OP_BTST, OP_DIVS, OP_MULU, OP_MULS, OP_DIVU, OP_ADDX, OP_SUBX, OP_ABCD };
 
 #define SIZED(bits, type)                                                           \
     static uint32_t m68k##bits(int op, uint32_t destination, uint32_t source)       \
@@ -35,6 +35,8 @@ enum { OP_ADD, OP_SUB, OP_CMP, OP_TST, OP_NEG, OP_LSL, OP_ASL, OP_LSR, OP_ASR, O
         case OP_LSR: return nmd_shr##bits(d, source, 0);                            \
         case OP_ROL: return nmd_rol##bits(d, source, 0);                            \
         case OP_ROR: return nmd_rol##bits(d, source, 1);                            \
+        case OP_ADDX: return nmd_addx##bits(d, s);                                  \
+        case OP_SUBX: return nmd_subx##bits(d, s);                                  \
         default: return nmd_shr##bits(d, source, 1);                                \
         }                                                                           \
     }
@@ -53,6 +55,8 @@ uint32_t ops_m68k(int op, int bits, uint32_t destination, uint32_t source, uint1
         result = destination;
     } else if (op == OP_SWAP) {
         result = nmd_swap(destination);
+    } else if (op == OP_ABCD) {
+        result = (destination & ~0xFFu) | nmd_abcd((uint8_t)destination, (uint8_t)source);
     } else if (op == OP_DIVS || op == OP_DIVU || op == OP_MULU || op == OP_MULS) {
         result = destination;
         if (op == OP_DIVS)

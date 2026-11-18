@@ -47,6 +47,16 @@ static void poller(void)
     nmd_live_at(0x106);
 }
 
+static unsigned loop_visits;
+
+static void ram_loop(void)
+{
+    for (int i = 0; i < 2; i++) {
+        nmd_live_at(0x100);
+        loop_visits++;
+    }
+}
+
 static int fails;
 
 static void expect(int condition, const char *what)
@@ -88,6 +98,21 @@ int main(void)
     bus_reads = 0;
     status = nmd_live_start(1, slots, 4, NULL, 0, NULL, 0, poller, &handle);
     expect(status == 0 && bus_reads == 4, "the C paused where the original was not interrupted");
+    nmd_live_release(handle);
+
+    /* Two stops before one instruction, then a stop at its next visit. */
+    nmd_live_pause repeated[3] = {0};
+    for (int i = 0; i < 3; i++)
+        repeated[i].pc = 0x100;
+    repeated[2].index[0] = 1;
+    status = nmd_live_start(1, NULL, 0, NULL, 0, repeated, 3, ram_loop, &handle);
+    expect(status == 1 && loop_visits == 0, "missed first loop pause");
+    status = nmd_live_continue(handle);
+    expect(status == 1 && loop_visits == 0, "advanced between stops at one instruction");
+    status = nmd_live_continue(handle);
+    expect(status == 1 && loop_visits == 1, "merged pauses across distinct visits");
+    status = nmd_live_continue(handle);
+    expect(status == 0 && loop_visits == 2, "lost a loop iteration");
     nmd_live_release(handle);
 
     if (fails)

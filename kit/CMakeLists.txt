@@ -37,7 +37,7 @@ add_library(nk_resample OBJECT ${NK_DIR}/src/dsp/resample.c)
 add_library(nk_dispatch OBJECT ${NK_DIR}/src/dispatch/routines.c)
 
 # the front: the console's settings, the battery save, the headless script
-add_library(nk_front OBJECT ${NK_DIR}/src/front/env.c ${NK_DIR}/src/front/save.c ${NK_DIR}/src/front/script.c)
+add_library(nk_front OBJECT ${NK_DIR}/src/front/polls.c ${NK_DIR}/src/front/env.c ${NK_DIR}/src/front/save.c ${NK_DIR}/src/front/script.c)
 
 if(NK_HOST STREQUAL "none" AND NOT WIN32)
   target_sources(nk_front PRIVATE ${NK_DIR}/src/host/host_optional.c)
@@ -47,7 +47,8 @@ endif()
 add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 
 # the application: main's loop, the window, the pace, the sound out
-add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c ${NK_DIR}/src/front/backdrop.c)
+add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c ${NK_DIR}/src/front/backdrop.c
+  ${NK_DIR}/src/front/session.c)
 
 # the presentation backend (NK_RENDER). On Metal and GL its frameworks or
 # libraries are nk_render's link libraries, for the console's library to
