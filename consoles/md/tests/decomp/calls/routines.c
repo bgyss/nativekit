@@ -336,6 +336,14 @@ static void unroll(void)
     nmd_rts();
 }
 
+/* $6A0 absw: A0 = ($8010).w, sign-extended to $FFFF8010; $1234 stored there. */
+static void absw(void)
+{
+    A[0] = 0xFFFF8010u;
+    wr16(A[0], nmd_tst16(0x1234));
+    nmd_rts();
+}
+
 /* $550 relay: calls a routine that has no C here (the record stands in). */
 #ifdef NMD_HYBRID
 static void relay(void)
@@ -392,6 +400,7 @@ const nmd_routine nmd_game_routines[] = {
     {0x660, vbwait, "vbwait"},
     {0x680, unroll, "unroll"},
     {0x694, ulast2, "ulast2"},
+    {0x6A0, absw, "absw"},
 #ifdef NMD_HYBRID
     {0x550, relay, "relay"},
     {0x620, trapper, "trapper"},

@@ -104,9 +104,12 @@ class Operand:
             self.kind, self.reg = "pre", reg_expr(t[2:-1])
         elif re.fullmatch(r"\(\$?[0-9a-f]+\)\.[wl]", t):
             value = number(t[1:t.index(")")])
-            if t.endswith(".w"):
+            if t.endswith(".w"):            # the decoder may print it extended already
+                value &= 0xFFFF
                 value = value - 0x10000 if value & 0x8000 else value
-            self.kind, self.address = "abs", "0x%06Xu" % (value & 0xFFFFFF)
+            # the full 32 bits: an address register loaded from ($A380).w holds
+            # $FFFFA380 (the bus uses the low 24)
+            self.kind, self.address = "abs", "0x%08Xu" % (value & 0xFFFFFFFF)
         else:
             m = re.fullmatch(r"\((-?\$?[0-9a-f]+),(a[0-7]|sp|pc)(?:,([da][0-7])\.([wl]))?\)", t)
             if not m:
