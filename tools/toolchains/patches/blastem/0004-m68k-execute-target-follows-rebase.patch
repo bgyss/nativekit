@@ -1,0 +1,64 @@
+diff --git a/cpu_dsl.py b/cpu_dsl.py
+--- a/cpu_dsl.py
++++ b/cpu_dsl.py
+@@ -2742,13 +2742,19 @@
+ 				self.temp = {}
+ 				self.declaredLocals.clear()
+ 				if self.sync_cycle:
++					if self.prefix == 'm68k_':
++						#nativekit: a clock rebase during this call moves target_cycle by the same amount
++						bodyPieces.append('\n\tcontext->rebase_deduction = 0;')
+ 					bodyPieces.append('\n\t{sync}(context, target_cycle);'.format(sync=self.sync_cycle))
+ 					if self.prefix == 'm68k_':
++						bodyPieces.append('\n\tif (context->rebase_deduction) { target_cycle = target_cycle > context->rebase_deduction ? target_cycle - context->rebase_deduction : 0; context->rebase_deduction = 0; }')
+ 						bodyPieces.append('\n\tif (nmd_decomp_should_stop_cpu(1, nmd_decomp_clock(context->cycles))) { context->should_return = 1; return; }')
+ 				if self.pc_reg:
+ 					bodyPieces.append('\n\tif (context->breakpoints) {')
+ 					bodyPieces.append('\n\t\twhile (context->cycles < target_cycle)')
+ 					bodyPieces.append('\n\t\t{')
++					if self.prefix == 'm68k_':
++						bodyPieces.append('\n\t\t\tif (context->rebase_deduction) { target_cycle = target_cycle > context->rebase_deduction ? target_cycle - context->rebase_deduction : 0; context->rebase_deduction = 0; if (context->cycles >= target_cycle) { break; } }')
+ 					if self.interrupt in self.subroutines:
+ 						bodyPieces.append('\n\t\t\tif (context->cycles >= context->sync_cycle) {')
+ 						bodyPieces.append(f'\n\t\t\t\t{self.sync_cycle}(context, target_cycle);')
+@@ -2777,6 +2783,8 @@
+ 					bodyPieces.append('\n\t} else {')
+ 				bodyPieces.append('\n\twhile (context->cycles < target_cycle)')
+ 				bodyPieces.append('\n\t{')
++				if self.prefix == 'm68k_':
++					bodyPieces.append('\n\t\tif (context->rebase_deduction) { target_cycle = target_cycle > context->rebase_deduction ? target_cycle - context->rebase_deduction : 0; context->rebase_deduction = 0; if (context->cycles >= target_cycle) { break; } }')
+ 				if self.interrupt in self.subroutines:
+ 					bodyPieces.append('\n\t\tif (context->cycles >= context->sync_cycle) {')
+ 					bodyPieces.append(f'\n\t\t\t{self.sync_cycle}(context, target_cycle);')
+diff --git a/genesis.c b/genesis.c
+--- a/genesis.c
++++ b/genesis.c
+@@ -894,6 +894,8 @@
+ 				jcart_adjust_cycles(gen, deduction);
+ 			}
+ 			context->cycles -= deduction;
++			//nativekit: m68k_execute holds its target in a local; tell it how far the clock moved
++			context->rebase_deduction = deduction;
+ 			nmd_trace_adjust(deduction);
+ 			z80_adjust_cycles(z_context, deduction);
+ 			ym_adjust_cycles(gen->ym, deduction);
+@@ -1170,6 +1172,8 @@
+ 				jcart_adjust_cycles(gen, deduction);
+ 			}
+ 			context->cycles -= deduction;
++			//nativekit: m68k_execute holds its target in a local; tell it how far the clock moved
++			context->rebase_deduction = deduction;
+ 			nmd_trace_adjust(deduction);
+ 			if (gen->psg->vgm) {
+ 				vgm_adjust_cycles(gen->psg->vgm, deduction);
+diff --git a/m68k.cpu b/m68k.cpu
+--- a/m68k.cpu
++++ b/m68k.cpu
+@@ -80,6 +80,7 @@
+ 	decomp_instruction_opcode 16
+ 	decomp_event_kind 8
+ 	decomp_event_vector 32
++	rebase_deduction 32
+ 	decomp_event_active 8
+ 	system ptrvoid
+ 	reset_handler ptrvoid

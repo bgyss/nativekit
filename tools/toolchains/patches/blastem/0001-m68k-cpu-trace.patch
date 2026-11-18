@@ -1,0 +1,595 @@
+diff --git a/Makefile b/Makefile
+index 17ec8e7..834cb77 100644
+--- a/Makefile
++++ b/Makefile
+@@ -263,6 +263,20 @@ endif
+ #core, but the two are independent. NEW_Z80 can be set on its own to pair the
+ #JIT 68K with the generated Z80, which is useful for narrowing down which core
+ #a timing difference comes from.
++ifeq ($(MAKECMDGOALS),libblastem.$(SO))
++NEW_CORE:=1
++CFLAGS+=-DNMD_TRACE_HAS_VDP_PORT
++CFLAGS+=-DNMD_TRACE_HAS_PSG_WRITE
++CFLAGS+=-DNMD_TRACE_HAS_YM_WRITE
++CFLAGS+=-DNMD_TRACE_HAS_YM_PORT
++CFLAGS+=-DNMD_TRACE_HAS_Z80_CPU
++CFLAGS+=-DNMD_TRACE_HAS_VDP_DMA_68K
++CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO
++CFLAGS+=-DNMD_TRACE_HAS_VDP_DMA_FILL
++CFLAGS+=-DNMD_TRACE_HAS_VDP_DMA_COPY
++CFLAGS+=-DNMD_TRACE_HAS_VDP_HINT_LINE
++CFLAGS+=-DNMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++endif
+ ifdef NEW_CORE
+ NEW_Z80:=1
+ M68KOBJS+= m68k.o
+@@ -301,7 +314,7 @@ else
+ RENDEROBJS+= $(LIBZOBJS) png.o
+ endif
+ 
+-COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o $(M68KOBJS) \
++COREOBJS:=system.o genesis.o vdp.o io.o romdb.o hash.o xband.o realtec.o i2c.o nor.o trace_abi.o $(M68KOBJS) \
+ 	sega_mapper.o multi_game.o megawifi.o $(NET) serialize.o $(TERMINAL) $(CONFIGOBJS) gst.o \
+ 	$(TRANSOBJS) $(AUDIOOBJS) saves.o jcart.o gen_player.o coleco.o pico_pcm.o ymz263b.o \
+ 	segacd.o lc8951.o cdimage.o chdimage.o $(BUNDLED_LIBCHDR) cdd_mcu.o cd_graphics.o cdd_fader.o sft_mapper.o mediaplayer.o \
+diff --git a/genesis.c b/genesis.c
+index d844080..faae883 100644
+--- a/genesis.c
++++ b/genesis.c
+@@ -22,6 +22,7 @@
+ #include "radica.h"
+ #include "config.h"
+ #include "event_log.h"
++#include "trace_abi.h"
+ #include "paths.h"
+ #define MCLKS_NTSC 53693175
+ #define MCLKS_PAL  53203395
+@@ -637,6 +638,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
+ 				jcart_adjust_cycles(gen, deduction);
+ 			}
+ 			context->cycles -= deduction;
++			nmd_trace_adjust(deduction);
+ 			z80_adjust_cycles(z_context, deduction);
+ 			ym_adjust_cycles(gen->ym, deduction);
+ 			if (gen->ym->vgm) {
+@@ -911,6 +913,7 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
+ 				jcart_adjust_cycles(gen, deduction);
+ 			}
+ 			context->cycles -= deduction;
++			nmd_trace_adjust(deduction);
+ 			if (gen->psg->vgm) {
+ 				vgm_adjust_cycles(gen->psg->vgm, deduction);
+ 			}
+@@ -1128,6 +1131,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context,
+ 			}
+ 		}
+ 	} else if (vdp_port < 0x18) {
++		nmd_trace_emit(context->cycles, NMD_TRACE_PSG, NMD_TRACE_WRITE, 1, 0, value);
+ 		psg_write(gen->psg, value);
+ 	} else if (vdp_port < 0x1C) {
+ 		vdp_test_port_select(gen->vdp, value);
+@@ -1181,6 +1185,7 @@ static void * z80_vdp_port_write(uint32_t vdp_port, void * vcontext, uint8_t val
+ 		}
+ 	} else if (vdp_port < 0x18) {
+ 		sync_sound(gen, context->Z80_CYCLE);
++		nmd_trace_emit(context->Z80_CYCLE, NMD_TRACE_PSG, NMD_TRACE_WRITE, 1, 0, value);
+ 		psg_write(gen->psg, value);
+ 	} else {
+ 		vdp_test_port_write(gen->vdp, value << 8 | value);
+@@ -1319,6 +1324,8 @@ static m68k_context * io_write(uint32_t location, m68k_context * context, uint8_
+ #endif
+ 			} else if (location < 0x6000) {
+ 				sync_sound(gen, context->cycles);
++				nmd_trace_emit(context->cycles, NMD_TRACE_YM2612, NMD_TRACE_WRITE, 1,
++				               NMD_TRACE_YM_PORT_M68K_ADDR_TAG | (location & 3), value);
+ 				if (location & 1) {
+ 					ym_data_write(gen->ym, value);
+ 				} else if(location & 2) {
+@@ -1765,6 +1772,8 @@ static void * z80_write_ym(uint32_t location, void * vcontext, uint8_t value)
+ 	z80_context * context = vcontext;
+ 	genesis_context * gen = context->system;
+ 	sync_sound(gen, context->Z80_CYCLE);
++	nmd_trace_emit(context->Z80_CYCLE, NMD_TRACE_YM2612, NMD_TRACE_WRITE, 1,
++	               NMD_TRACE_YM_PORT_Z80_ADDR_TAG | (location & 3), value);
+ 	if (location & 1) {
+ 		ym_data_write(gen->ym, value);
+ 	} else if (location & 2) {
+diff --git a/link.T b/link.T
+index 8fc8c89..fda72e5 100644
+--- a/link.T
++++ b/link.T
+@@ -1,4 +1,4 @@
+ {
+-	global: retro_*;
++	global: retro_* nmd_trace_*;
+ 	local: *;
+ };
+diff --git a/m68k.cpu b/m68k.cpu
+index 7a2072c..54e5416 100644
+--- a/m68k.cpu
++++ b/m68k.cpu
+@@ -64,6 +64,7 @@ regs
+ 	trace_pending 8
+ 	should_return 8
+ 	stopped 8
++	trace_fetch 8
+ 	system ptrvoid
+ 	reset_handler ptrvoid
+ 	int_ack_handler ptrvoid
+@@ -87,6 +88,7 @@ flags
+ 	C 0 carry cflag
+ 
+ m68k_prefetch
++	ccall m68k_trace_mark_fetch context
+ 	if dynarec
+ 	
+ 	ccall m68k_read16_noinc context pc
+diff --git a/m68k_util.c b/m68k_util.c
+index 8aa7171..8c1de0f 100644
+--- a/m68k_util.c
++++ b/m68k_util.c
+@@ -1,8 +1,14 @@
+ #include <string.h>
++#include "trace_abi.h"
+ #ifdef DEBUG_DISASM
+ #include "68kinst.h"
+ #endif
+ 
++void m68k_trace_mark_fetch(m68k_context *context)
++{
++	context->trace_fetch = 1;
++}
++
+ void m68k_read_8(m68k_context *context)
+ {
+ 	context->cycles += 4 * context->opts->gen.clock_divider;
+@@ -12,6 +18,7 @@ void m68k_read_8(m68k_context *context)
+ 	uint32_t address = context->scratch1 & context->opts->gen.address_mask;
+ 	uint32_t index = address >> 16;
+ 	context->scratch1 = context->read8[index](address, context, context->read8_data[index]);
++	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, NMD_TRACE_READ, 1, address, context->scratch1);
+ #ifdef DEBUG_DISASM
+ 	printf("Read.b %05X: %02X\n", tmp, context->scratch1);
+ #endif
+@@ -32,6 +39,9 @@ void m68k_read_16(m68k_context *context)
+ 	uint32_t address = context->scratch1 & context->opts->gen.address_mask;
+ 	uint32_t index = address >> 16;
+ 	context->scratch1 = context->read16[index](address, context, context->read16_data[index]);
++	uint8_t operation = context->trace_fetch ? NMD_TRACE_FETCH : NMD_TRACE_READ;
++	context->trace_fetch = 0;
++	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, operation, 2, address, context->scratch1);
+ #ifdef DEBUG_DISASM
+ 	if (tmp == context->pc) {
+ 		m68kinst inst;
+@@ -54,6 +64,8 @@ void m68k_write_8(m68k_context *context)
+ 	uint32_t address = context->scratch2 & context->opts->gen.address_mask;
+ 	uint32_t index = address >> 16;
++	uint8_t value = context->scratch1;
+-	context->write8[index](address, context, context->scratch1, context->write8_data[index]);
++	context->write8[index](address, context, value, context->write8_data[index]);
++	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, NMD_TRACE_WRITE, 1, address, value);
+ #ifdef DEBUG_DISASM
+ 	printf("Write.b %05X: %02X\n", context->scratch2, context->scratch1);
+ #endif
+@@ -74,6 +85,8 @@ void m68k_write_16(m68k_context *context)
+ 	int32_t address = context->scratch2 & context->opts->gen.address_mask;
+ 	uint32_t index = address >> 16;
++	uint16_t value = context->scratch1;
+-	context->write16[index](address, context, context->scratch1, context->write16_data[index]);
++	context->write16[index](address, context, value, context->write16_data[index]);
++	nmd_trace_emit(context->cycles, NMD_TRACE_M68K, NMD_TRACE_WRITE, 2, address, value);
+ #ifdef DEBUG_DISASM
+ 	printf("Write %05X: %04X\n", context->scratch2, context->scratch1);
+ #endif
+@@ -259,6 +272,7 @@ m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_ha
+ 
+ void m68k_reset(m68k_context *context)
+ {
++	context->trace_fetch = 0;
+ 	//read initial SP
+ 	context->scratch1 = 0;
+ 	m68k_read_16(context);
+@@ -276,6 +290,7 @@ void m68k_reset(m68k_context *context)
+ 	context->pc |= context->scratch1;
+ 	
+ 	context->scratch1 = context->pc;
++	context->trace_fetch = 1;
+ 	m68k_read_16(context);
+ 	context->prefetch = context->scratch1;
+ 	context->pc += 2;
+@@ -369,6 +384,7 @@ void m68k_deserialize(deserialize_buffer *buf, void *vcontext)
+ void start_68k_context(m68k_context *context, uint32_t pc)
+ {
+ 	context->scratch1 = context->pc = pc;
++	context->trace_fetch = 1;
+ 	m68k_read_16(context);
+ 	context->prefetch = context->scratch1;
+ 	context->pc += 2;
+diff --git a/render_audio.c b/render_audio.c
+index bd98fab..77c8002 100644
+--- a/render_audio.c
++++ b/render_audio.c
+@@ -7,6 +7,9 @@
+ #include "config.h"
+ #include "blastem.h"
+ #include "wave.h"
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO
++#include "trace_abi.h"
++#endif
+ 
+ static uint8_t output_channels;
+ static uint32_t buffer_samples, sample_rate;
+@@ -101,6 +104,30 @@ static void clamp_f32(float *samples, void *vstream, int sample_count)
+ 	}
+ }
+ 
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO
++static uint8_t trace_audio_device(audio_source *audio)
++{
++	if (!strcmp(audio->name, "YM2612")) {
++		return NMD_TRACE_YM2612;
++	}
++	if (!strcmp(audio->name, "PSG")) {
++		return NMD_TRACE_PSG;
++	}
++	return 0;
++}
++
++static int16_t trace_audio_convert_sample(float sample)
++{
++	if (sample >= 1.0f) {
++		return 0x7FFF;
++	}
++	if (sample <= -1.0f) {
++		return -0x8000;
++	}
++	return sample * 0x7FFF;
++}
++#endif
++
+ static int32_t mix_f32(audio_source *audio, float *stream, int samples)
+ {
+ 	float *end = stream + samples;
+@@ -110,22 +137,38 @@ static int32_t mix_f32(audio_source *audio, float *stream, int samples)
+ 	float *cur = stream;
+ 	float gain_mult = audio->gain_mult * overall_gain_mult;
+ 	size_t first_add = output_channels > 1 ? 1 : 0, second_add = output_channels > 1 ? output_channels - 1 : 1;
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO
++	uint8_t trace_device = trace_audio_device(audio);
++	uint8_t trace_audio = trace_device && nmd_trace_audio_active();
++#endif
+ 	if (audio->num_channels == 1) {
+ 		while (cur < end && i != i_end)
+ 		{
+-			*cur += gain_mult * ((float)src[i]) / 0x7FFF;
++			float value = gain_mult * ((float)src[i]) / 0x7FFF;
++			*cur += value;
+ 			cur += first_add;
+-			*cur += gain_mult * ((float)src[i++]) / 0x7FFF;
++			*cur += value;
+ 			cur += second_add;
++			if (trace_audio) {
++				int16_t sample = trace_audio_convert_sample(value);
++				nmd_trace_audio_emit(trace_device, sample, sample);
++			}
++			i++;
+ 			i &= audio->mask;
+ 		}
+ 	} else {
+ 		while(cur < end && i != i_end)
+ 		{
+-			*cur += gain_mult * ((float)src[i++]) / 0x7FFF;
++			float left = gain_mult * ((float)src[i++]) / 0x7FFF;
++			*cur += left;
+ 			cur += first_add;
+-			*cur += gain_mult * ((float)src[i++]) / 0x7FFF;
++			float right = gain_mult * ((float)src[i++]) / 0x7FFF;
++			*cur += right;
+ 			cur += second_add;
++			if (trace_audio) {
++				nmd_trace_audio_emit(trace_device, trace_audio_convert_sample(left),
++				                    trace_audio_convert_sample(right));
++			}
+ 			i &= audio->mask;
+ 		}
+ 	}
+diff --git a/vdp.c b/vdp.c
+index b4b6051..3079b3c 100644
+--- a/vdp.c
++++ b/vdp.c
+@@ -10,6 +10,7 @@
+ #include "render.h"
+ #include "util.h"
+ #include "event_log.h"
++#include "trace_abi.h"
+ #include "terminal.h"
+ #ifndef DISABLE_NUKLEAR
+ #include "nuklear_ui/debug_ui.h"
+@@ -1175,12 +1176,14 @@ static void vdp_advance_dma(vdp_context * context)
+ #define DMA_TYPE_MASK 0xC0
+ static void external_slot(vdp_context * context)
+ {
++	uint8_t fill_dma_slot = 0;
+ 	if ((context->flags & FLAG_DMA_RUN) && (context->regs[REG_DMASRC_H] & DMA_TYPE_MASK) == DMA_FILL && context->fifo_read < 0) {
+ 		context->fifo_read = (context->fifo_write-1) & (FIFO_SIZE-1);
+ 		fifo_entry * cur = context->fifo + context->fifo_read;
+ 		cur->cycle = context->cycles;
+ 		cur->address = context->address;
+ 		cur->partial = 1;
++		fill_dma_slot = 1;
+ 		vdp_advance_dma(context);
+ 	}
+ 	fifo_entry * start = context->fifo + context->fifo_read;
+@@ -1194,0 +1197,4 @@ static void external_slot(vdp_context * context)
++				if (fill_dma_slot) {
++					nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 2,
++					               NMD_TRACE_DMA_FILL_ADDR_TAG | start->address, start->value);
++				}
+@@ -1198,6 +1204,10 @@ static void external_slot(vdp_context * context)
+ 				event_vram_byte(context->cycles, start->address, byte, context->regs[REG_AUTOINC]);
+ 				vdp_check_update_sat_byte(context, address, byte);
+ 				write_vram_byte(context, address, byte);
++				if (fill_dma_slot) {
++					nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 1,
++					               NMD_TRACE_DMA_FILL_ADDR_TAG | start->address, byte);
++				}
+ 				if (!start->partial) {
+ 					start->address = address;
+ 					start->partial = 1;
+@@ -1231,0 +1242,4 @@ static void external_slot(vdp_context * context)
++			if (fill_dma_slot) {
++				nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 2,
++				               NMD_TRACE_DMA_FILL_ADDR_TAG | start->address, val);
++			}
+@@ -1249,0 +1264,5 @@ static void external_slot(vdp_context * context)
++				if (fill_dma_slot) {
++					nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 2,
++					               NMD_TRACE_DMA_FILL_ADDR_TAG | start->address,
++					               context->vsram[(start->address/2) & 63]);
++				}
+@@ -1268,7 +1287,11 @@ static void external_slot(vdp_context * context)
+ 		}
+ 	} else if ((context->flags & FLAG_DMA_RUN) && (context->regs[REG_DMASRC_H] & DMA_TYPE_MASK) == DMA_COPY) {
+ 		if (context->flags & FLAG_READ_FETCHED) {
+-			write_vram_byte(context, context->address ^ 1, context->prefetch);
++			uint32_t destination = context->address;
++			uint8_t value = context->prefetch;
++			write_vram_byte(context, destination ^ 1, value);
++			nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 1,
++			               NMD_TRACE_DMA_COPY_ADDR_TAG | destination, value);
+ 
+ 			//Update DMA state
+ 			vdp_advance_dma(context);
+@@ -1347,7 +1358,11 @@ static void run_dma_src(vdp_context * context, int32_t slot)
+ 			cur = context->fifo + context->fifo_write;
+ 			cur->cycle = context->cycles + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20)*FIFO_LATENCY;
+ 			cur->address = context->address;
+-			cur->value = read_dma_value((context->regs[REG_DMASRC_H] << 16) | (context->regs[REG_DMASRC_M] << 8) | context->regs[REG_DMASRC_L]);
++			uint32_t source_word = (context->regs[REG_DMASRC_H] << 16) |
++				(context->regs[REG_DMASRC_M] << 8) | context->regs[REG_DMASRC_L];
++			cur->value = read_dma_value(source_word);
++			nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_DMA, 2,
++			               source_word << 1, cur->value);
+ 			cur->cd = context->cd;
+ 			cur->partial = 0;
+ 			if (context->fifo_read < 0) {
+@@ -2282,6 +2297,10 @@ static void vdp_advance_line(vdp_context *context)
+ 	} else {
+ 		context->flags2 |= FLAG2_HINT_PENDING;
+ 		context->pending_hint_start = context->cycles;
++		if (context->regs[REG_MODE_1] & BIT_HINT_EN) {
++			nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_IRQ, 1,
++			               context->vcounter, context->regs[REG_HINT]);
++		}
+ 		context->hint_counter = context->regs[REG_HINT];
+ 	}
+ }
+@@ -5989,6 +6008,7 @@ int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_c
+ 					if (context->dma_hook) {
+ 						context->dma_hook(context);
+ 					}
++					nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_WRITE, 2, 4, value);
+ 					return 1;
+ 				} else {
+ 					context->flags |= FLAG_DMA_RUN;
+@@ -6022,6 +6042,7 @@ int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_c
+ 			context->flags2 &= ~FLAG2_READ_PENDING;
+ 		}
+ 	}
++	nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_WRITE, 2, 4, value);
+ 	return 0;
+ }
+ 
+@@ -6077,6 +6098,7 @@ void vdp_data_port_write(vdp_context * context, uint16_t value)
+ 	}
+ 	context->fifo_write = (context->fifo_write + 1) & (FIFO_SIZE-1);
+ 	increment_address(context);
++	nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_WRITE, 2, 0, value);
+ }
+ 
+ void vdp_data_port_write_pbc(vdp_context * context, uint8_t value)
+@@ -6179,6 +6201,7 @@ uint16_t vdp_control_port_read(vdp_context * context)
+ 	uint16_t value = vdp_status(context);
+ 	context->flags &= ~(FLAG_SPRITE_OFLOW|FLAG_PENDING);
+ 	context->flags2 &= ~(FLAG2_SPRITE_COLLIDE|FLAG2_BYTE_PENDING);
++	nmd_trace_emit(context->cycles, NMD_TRACE_VDP, NMD_TRACE_READ, 2, 4, value);
+ 	//printf("status read at cycle %d returned %X\n", context->cycles, value);
+ 	return value;
+ }
+@@ -6194,6 +6217,7 @@ uint16_t vdp_data_port_read(vdp_context * context, uint32_t *cpu_cycle, uint32_t
+ 	if (context->cd & 1) {
+ 		warning("Read from VDP data port while writes are configured, CPU is now frozen. VDP Address: %X, CD: %X\n", context->address, context->cd);
+ 		context->system->enter_debugger = 1;
++		nmd_trace_emit(*cpu_cycle, NMD_TRACE_VDP, NMD_TRACE_READ, 2, 0, context->prefetch);
+ 		return context->prefetch;
+ 	}
+ 	switch (context->cd)
+@@ -6206,6 +6230,7 @@ uint16_t vdp_data_port_read(vdp_context * context, uint32_t *cpu_cycle, uint32_t
+ 	default:
+ 		warning("Read from VDP data port with invalid source, CPU is now frozen. VDP Address: %X, CD: %X\n", context->address, context->cd);
+ 		context->system->enter_debugger = 1;
++		nmd_trace_emit(*cpu_cycle, NMD_TRACE_VDP, NMD_TRACE_READ, 2, 0, context->prefetch);
+ 		return context->prefetch;
+ 	}
+ 	uint32_t starting_cycle = context->cycles;
+@@ -6229,6 +6254,7 @@ uint16_t vdp_data_port_read(vdp_context * context, uint32_t *cpu_cycle, uint32_t
+ 	} else {
+ 		context->read_latency = *cpu_cycle + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20)*(READ_LATENCY - 1);
+ 	}
++	nmd_trace_emit(*cpu_cycle, NMD_TRACE_VDP, NMD_TRACE_READ, 2, 0, context->prefetch);
+ 	return context->prefetch;
+ }
+ 
+diff --git a/ym2612.c b/ym2612.c
+index c2973d1..c4332a7 100644
+--- a/ym2612.c
++++ b/ym2612.c
+@@ -10,6 +10,7 @@
+ #include "wave.h"
+ #include "blastem.h"
+ #include "event_log.h"
++#include "trace_abi.h"
+ 
+ //#define DO_DEBUG_PRINT
+ #ifdef DO_DEBUG_PRINT
+@@ -499,1 +500,4 @@ void ym_output_sample(ym2612_context *context)
+-	render_put_stereo_sample(context->audio, left, right);
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++	nmd_trace_audio_source_emit(NMD_TRACE_YM2612, left, right);
++#endif
++	render_put_stereo_sample(context->audio, left, right);
+@@ -702,6 +703,8 @@ void ym_data_write(ym2612_context * context, uint8_t value)
+ 	}
+ 	uint8_t buffer[3] = {context->selected_part, context->selected_reg, value};
+ 	event_log(EVENT_YM_REG, context->current_cycle, sizeof(buffer), buffer);
++	nmd_trace_emit(context->current_cycle, NMD_TRACE_YM2612, NMD_TRACE_WRITE, 1,
++	               ((uint32_t)context->selected_part << 8) | context->selected_reg, value);
+ 	dfprintf(debug_file, "write of %X to reg %X in part %d\n", value, context->selected_reg, context->selected_part+1);
+ 	if (context->selected_reg < 0x30) {
+ 		//Shared regs
+diff --git a/psg.c b/psg.c
+index b4b9a6d..a2b7480 100644
+--- a/psg.c
++++ b/psg.c
+@@ -6,6 +6,9 @@
+ #include "psg.h"
+ #include "blastem.h"
+ #include "event_log.h"
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++#include "trace_abi.h"
++#endif
+ #include <string.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+@@ -173,1 +176,4 @@
+-		render_put_stereo_sample(context->audio, left_accum, right_accum);
++#ifdef NMD_TRACE_HAS_CHIP_AUDIO_SOURCE
++		nmd_trace_audio_source_emit(NMD_TRACE_PSG, left_accum, right_accum);
++#endif
++		render_put_stereo_sample(context->audio, left_accum, right_accum);
+diff --git a/z80.cpu b/z80.cpu
+index 980e35a..35ef668 100644
+--- a/z80.cpu
++++ b/z80.cpu
+@@ -41,6 +41,7 @@ regs
+ 	ix 16
+ 	iy 16
+ 	pc 16
++	trace_fetch 8
+ 	wz 16
+ 	nflag 8
+ 	last_flag_result 8
+@@ -81,6 +82,7 @@ z80_op_fetch
+ 	cycles 1
+ 	r += 1
+ 	scratch1 = pc
++	ccall z80_trace_mark_fetch context
+ 	ocall read_8
+ 	pc += 1
+ 	
+diff --git a/z80_util.c b/z80_util.c
+index 755d7b6..2b46182 100644
+--- a/z80_util.c
++++ b/z80_util.c
+@@ -1,29 +1,48 @@
+ #include <string.h>
++#include "trace_abi.h"
++
++void z80_trace_mark_fetch(z80_context *context)
++{
++	context->trace_fetch = 1;
++}
++
++static void z80_trace_read(z80_context *context, uint32_t address, uint8_t value)
++{
++	uint8_t operation = context->trace_fetch ? NMD_TRACE_FETCH : NMD_TRACE_READ;
++	context->trace_fetch = 0;
++	nmd_trace_emit(context->cycles, NMD_TRACE_Z80, operation, 1, address, value);
++}
+ 
+ void z80_read_8(z80_context *context)
+ {
+ 	context->cycles += 3 * context->opts->gen.clock_divider;
+-	uint8_t *fast = context->fastread[context->scratch1 >> 10];
++	uint32_t address = context->scratch1;
++	uint8_t *fast = context->fastread[address >> 10];
+ 	if (fast) {
+-		context->scratch1 = fast[context->scratch1 & 0x3FF];
++		context->scratch1 = fast[address & 0x3FF];
+ 	} else {
+-		context->scratch1 = read_byte(context->scratch1, (void **)context->mem_pointers, &context->opts->gen, context);
++		context->scratch1 = read_byte(address, (void **)context->mem_pointers, &context->opts->gen, context);
+ 	}
++	z80_trace_read(context, address, context->scratch1);
+ }
+ 
+ void z80_write_8(z80_context *context)
+ {
+ 	context->cycles += 3 * context->opts->gen.clock_divider;
+-	uint8_t *fast = context->fastwrite[context->scratch2 >> 10];
++	uint32_t address = context->scratch2;
++	uint8_t value = context->scratch1;
++	uint8_t *fast = context->fastwrite[address >> 10];
+ 	if (fast) {
+-		fast[context->scratch2 & 0x3FF] = context->scratch1;
++		fast[address & 0x3FF] = value;
+ 	} else {
+-		write_byte(context->scratch2, context->scratch1, (void **)context->mem_pointers, &context->opts->gen, context);
++		write_byte(address, value, (void **)context->mem_pointers, &context->opts->gen, context);
+ 	}
++	nmd_trace_emit(context->cycles, NMD_TRACE_Z80, NMD_TRACE_WRITE, 1, address, value);
+ }
+ 
+ void z80_io_read8(z80_context *context)
+ {
++	uint32_t address = context->scratch1;
+ 	uint32_t tmp_mask = context->opts->gen.address_mask;
+ 	memmap_chunk const *tmp_map = context->opts->gen.memmap;
+ 	uint32_t tmp_chunks = context->opts->gen.memmap_chunks;
+@@ -34,6 +53,7 @@ void z80_io_read8(z80_context *context)
+ 	
+ 	context->cycles += 4 * context->opts->gen.clock_divider;
+ 	context->scratch1 = read_byte(context->scratch1, (void **)context->mem_pointers, &context->opts->gen, context);
++	z80_trace_read(context, address, context->scratch1);
+ 	
+ 	context->opts->gen.address_mask = tmp_mask;
+ 	context->opts->gen.memmap = tmp_map;
+@@ -42,6 +62,8 @@ void z80_io_read8(z80_context *context)
+ 
+ void z80_io_write8(z80_context *context)
+ {
++	uint32_t address = context->scratch2;
++	uint8_t value = context->scratch1;
+ 	uint32_t tmp_mask = context->opts->gen.address_mask;
+ 	memmap_chunk const *tmp_map = context->opts->gen.memmap;
+ 	uint32_t tmp_chunks = context->opts->gen.memmap_chunks;
+@@ -51,7 +73,8 @@ void z80_io_write8(z80_context *context)
+ 	context->opts->gen.memmap_chunks = context->io_chunks;
+ 	
+ 	context->cycles += 4 * context->opts->gen.clock_divider;
+-	write_byte(context->scratch2, context->scratch1, (void **)context->mem_pointers, &context->opts->gen, context);
++	write_byte(address, value, (void **)context->mem_pointers, &context->opts->gen, context);
++	nmd_trace_emit(context->cycles, NMD_TRACE_Z80, NMD_TRACE_WRITE, 1, address, value);
+ 	
+ 	context->opts->gen.address_mask = tmp_mask;
+ 	context->opts->gen.memmap = tmp_map;

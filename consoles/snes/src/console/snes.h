@@ -21,9 +21,14 @@
  */
 #ifndef NSHVC_SNES_H
 #define NSHVC_SNES_H
+/* The console processors each run on a separate coroutine stack. */
+#define CORO_CPU_STACK (16u << 20)
+#define CORO_SPC_STACK (4u << 20)
+
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdarg.h>
 
 #include "nshvc/nshvc.h"
 
@@ -55,7 +60,11 @@ uint32_t snes_rom_mirror(uint32_t off);
 
 /* ---- time ---- */
 extern uint64_t snes_clock;            /* master clocks since power on */
+/* the clock with the inline accesses made so far in it (machine.h
+   NSHVC_BUS_INLINE): snes_clock is settled only where the console looks */
+uint64_t snes_now(void);
 uint32_t snes_frame(void);             /* frames begun since power on */
+uint32_t snes_last_access(void);       /* the last access made through the console: its address | 1 << 24 a write */
 unsigned snes_vcounter(void);
 unsigned snes_hcounter(void);          /* dots, 0-339 */
 uint32_t snes_line_clock(void);        /* master clocks since the line began */
@@ -79,6 +88,7 @@ extern void (*snes_frame_hook)(void);
 extern void (*snes_write_hook)(uint32_t addr, uint8_t value);
 /* Each S-CPU read, as it is made, with its value. */
 extern void (*snes_read_hook)(uint32_t addr, uint8_t value);
+extern void (*snes_register_write_hook)(uint32_t addr, uint8_t value);
 /* Each byte a DMA or HDMA moves: A-bus address a, B-bus register $2100 + b. */
 extern void (*snes_dma_hook)(uint32_t a, uint8_t b, uint8_t v);
 
@@ -98,12 +108,16 @@ const uint8_t *snes_aram(void);
 
 /* ---- power ---- */
 void snes_power(void);
+/* the picture's lines whose horizontal blank has passed, recorded: before
+   a change to the PPU made outside its registers (nshvc_ext_*) */
+void snes_ppu_catch_up(void);
 uint8_t *snes_sram(void);
 uint32_t snes_sram_size(void);           /* its size (the chip's when the chip owns it) */
 const uint8_t *snes_wram(void);
 uint8_t *snes_wram_rw(void);
 
 /* ---- for the dispatcher ---- */
+_Noreturn void snes_vfatal(const char *fmt, va_list ap);
 void snes_fatal(const char *fmt, ...);
 uint8_t snes_peek(uint32_t addr);
 /* a byte the interrupt sequence pushes */

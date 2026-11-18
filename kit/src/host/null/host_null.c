@@ -5,6 +5,11 @@
  * comparisons with the original.
  *
  * PORT_SAVEDIR names the save folder (default build/<dir>/save).
+ *
+ * PORT_EVENTS=FILE gives a windowed run keys, for checks: lines "N VK DOWN",
+ * key VK (a Win32 virtual key code) down (1) or up (0) in the Nth drain of
+ * the event queue (the first is 1; a windowed run drains it once a frame).
+ * Lines in order of N.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -74,9 +79,36 @@ void host_present(const uint32_t *argb, int w, int h, float aspect)
     (void)aspect;
 }
 
+static FILE *s_events;
+static long s_drain = 1, s_next_n = -1;
+static int s_next_vk, s_next_down;
+
+static void next_event(void)
+{
+    s_next_n = -1;
+    if (s_events && fscanf(s_events, "%ld %d %d", &s_next_n, &s_next_vk, &s_next_down) != 3)
+        s_next_n = -1;
+}
+
 int host_poll_event(host_event *ev, uint32_t wait_ms)
 {
-    (void)ev;
+    static int opened;
+    if (!opened) {
+        const char *e = getenv("PORT_EVENTS");
+        opened = 1;
+        if (e && !(s_events = fopen(e, "r")))
+            fprintf(stderr, "PORT_EVENTS: cannot read %s\n", e);
+        next_event();
+    }
+    if (s_next_n >= 0 && s_next_n <= s_drain) {
+        memset(ev, 0, sizeof *ev);
+        ev->type = HOST_EV_KEY;
+        ev->vk = s_next_vk;
+        ev->down = s_next_down;
+        next_event();
+        return 1;
+    }
+    s_drain++;
     if (wait_ms && wait_ms != 0xFFFFFFFFu)
         host_sleep_ms(wait_ms);
     return 0;
@@ -105,3 +137,8 @@ int host_pad_read(int index, host_pad *p)
 }
 
 void host_safe_area(float *l, float *t, float *r, float *b) { *l = *t = *r = *b = 0; }
+
+void host_text_input(int on) { (void)on; }
+int host_keyboard_attached(void) { return 0; }
+
+int host_app_active(void) { return 1; }

@@ -58,6 +58,10 @@ static void abi_reset(void)
             nshvc_ext_screen_origin(w, h);
         if (getenv("NSHVC_TEST_NOLIMITS"))
             nshvc_ext_sprite_limits(0);
+        /* NSHVC_TEST_COSTS_OFF: the C's accesses take no time, the S-CPU's
+           and the sound driver's (a game's Enhanced mode) */
+        if (getenv("NSHVC_TEST_COSTS_OFF"))
+            nshvc_set_cpu_costs(0);
         /* NSHVC_TEST_VRAM_PAGE=n: everything the cartridge puts in VRAM, and
            every layer's reads, in page n of 256 KB */
         if (getenv("NSHVC_TEST_VRAM_KB"))
@@ -322,6 +326,13 @@ int main(int argc, char **argv)
     rom = (uint8_t *)malloc(16u << 20);
     rom_size = (uint32_t)fread(rom, 1, 16u << 20, f);
     fclose(f);
+    {
+        /* the buffer the file's size (a header's bytes at most 64 KB in:
+           at least that), the rest given back */
+        uint8_t *fit = (uint8_t *)realloc(rom, rom_size > 0x10000 ? rom_size : 0x10000);
+        if (fit)
+            rom = fit;
+    }
     /* the mapping, from where snestest.py put the header (its map mode
        byte), and the cartridge's RAM from the header's size byte */
     {

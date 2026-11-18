@@ -1,0 +1,445 @@
+/*
+ * routines.c: authored C for the routines of the per-call control cartridge
+ * (calls_fixture.py). Each routine is written over the nmd bus calls and
+ * nmd_decomp.h as a game's recovered C is. The PLANT_ macros are the planted
+ * errors calls_check.py builds one at a time. Nothing here comes from a game.
+ */
+#include <stddef.h>
+
+#include "nmd/cart.h"
+#include "nmd_decomp.h"
+
+#define D nmd_cpu.d
+#define A nmd_cpu.a
+
+/* $400 sum: d0.w words at (a0) summed into d0.w; a0 advanced; d1.w = $FFFF. */
+static void sum(void)
+{
+    uint16_t count = nmd_sub16((uint16_t)D[0], 1);      /* subq.w #1,d0 */
+
+    nmd_set16(&D[0], count);
+    nmd_set16(&D[1], nmd_tst16(count));                 /* move.w d0,d1 */
+    D[0] = nmd_tst32(0);                                /* moveq #0,d0 */
+    do {
+#ifdef PLANT_LOAD
+        uint16_t word = rd16(A[0] + 2);
+#else
+        uint16_t word = rd16(A[0]);
+#endif
+        A[0] += 2;
+#ifdef PLANT_FLAGS
+        nmd_set16(&D[0], (uint16_t)(D[0] + word));      /* the sum without its flags */
+#else
+        nmd_set16(&D[0], nmd_add16((uint16_t)D[0], word));
+#endif
+        nmd_set16(&D[1], (uint16_t)(D[1] - 1));         /* dbf d1 */
+    } while ((uint16_t)D[1] != 0xFFFF);
+    nmd_rts();
+}
+
+/* $420 poke: set VDP register 15 to d0's low byte, then read the status. */
+static void poke(void)
+{
+    nmd_set16(&D[0], nmd_tst16((uint16_t)(D[0] | 0x8F00)));     /* or.w #$8F00,d0 */
+#ifdef PLANT_ORDER
+    nmd_set16(&D[1], nmd_tst16(rd16(0xC00004)));    /* the status before the register */
+    wr16(0xC00004, nmd_tst16((uint16_t)D[0]));
+#else
+#ifdef PLANT_STORE
+    wr16(0xC00004, (uint16_t)(D[0] ^ 1));
+#else
+    wr16(0xC00004, nmd_tst16((uint16_t)D[0]));
+#endif
+    nmd_set16(&D[1], nmd_tst16(rd16(0xC00004)));
+#endif
+    nmd_set16(&D[1], nmd_tst16((uint16_t)(D[1] & 0x0200)));
+    nmd_rts();
+}
+
+/* $480.. the four handlers: each stores its own word at $FF0020. */
+#define HANDLER(name, value)                    \
+    static void name(void)                      \
+    {                                           \
+        wr16(0xFF0020, nmd_tst16(value));       \
+        nmd_rts();                              \
+    }
+HANDLER(handler0, 0x1111)
+HANDLER(handler1, 0x2222)
+HANDLER(handler2, 0x3333)
+HANDLER(handler3, 0x4444)
+
+/* $440 dispatch: call handler d0.w (0..3) through the table at $460. */
+static void dispatch(void)
+{
+    static void (*const handlers[4])(void) = {handler0, handler1, handler2, handler3};
+    uint16_t index;
+
+    nmd_set16(&D[0], nmd_add16((uint16_t)D[0], (uint16_t)D[0]));
+    nmd_set16(&D[0], nmd_add16((uint16_t)D[0], (uint16_t)D[0]));
+    index = (uint16_t)D[0];
+    A[1] = 0x460;
+    A[1] = rd32(A[1] + index);
+#ifdef PLANT_TARGET
+    NMD_JSR(0x44E, handlers[(index / 4 + 1) & 3]);
+#else
+    NMD_JSR(0x44E, handlers[index / 4]);
+#endif
+    nmd_rts();
+}
+
+/* $4C0 outer: sum two words, then three more, store the total at $FF0030. */
+static void outer(void)
+{
+    D[0] = nmd_tst32(2);
+    NMD_JSR(0x4C6, sum);
+    nmd_set16(&D[2], nmd_tst16((uint16_t)D[0]));
+    D[0] = nmd_tst32(3);
+    NMD_JSR(0x4CE, sum);
+    nmd_set16(&D[0], nmd_add16((uint16_t)D[0], (uint16_t)D[2]));
+#ifdef PLANT_MEMORY
+    wr16(0xFF0032, nmd_tst16((uint16_t)D[0]));
+#else
+    wr16(0xFF0030, nmd_tst16((uint16_t)D[0]));
+#endif
+#ifdef PLANT_RETURN
+    A[7] += 4;      /* leaves without reading the return address */
+#else
+    nmd_rts();
+#endif
+}
+
+/* $4E0 send: take the Z80 bus, store d0's low byte at Z80 $1F00, release. */
+static void send(void)
+{
+    wr16(0xA11100, nmd_tst16(0x0100));
+    do {
+        nmd_btst(rd8(0xA11100), 0);
+    } while (!(nmd_cpu.sr & NMD_Z));
+    wr8(0xA01F00, nmd_tst8((uint8_t)D[0]));
+    wr16(0xA11100, nmd_tst16(0));
+    nmd_rts();
+}
+
+/* $510 spin: count 8,000 times at $FF0050 (long enough for an interrupt, and
+ * to run past the end of a frame). NMD_AT marks each original instruction, so
+ * the lockstep can pause it where the original was interrupted or the frame
+ * ended. */
+static void spin(void)
+{
+    NMD_AT(0x510);
+    nmd_set16(&D[1], nmd_tst16(7999));
+    do {
+        NMD_AT(0x514);
+#ifdef PLANT_SPIN
+        wr16(0xFF0050, nmd_add16(rd16(0xFF0050), 2));
+#else
+        wr16(0xFF0050, nmd_add16(rd16(0xFF0050), 1));
+#endif
+        NMD_AT(0x51A);
+    } while (nmd_dbf(&D[1]));
+    NMD_AT(0x51E);
+    nmd_rts();
+}
+
+/* $530 unused: has C, is never called. */
+static void unused(void)
+{
+    D[7] = nmd_tst32(99);
+    nmd_rts();
+}
+
+/* $580 pad: make TH an output, raise it, store what pad 1 answers at $FF0070. */
+static void pad(void)
+{
+    wr8(0xA10009, nmd_tst8(0x40));
+    wr8(0xA10003, nmd_tst8(0x40));
+    nmd_set8(&D[0], nmd_tst8(rd8(0xA10003)));
+    wr8(0xFF0070, nmd_tst8((uint8_t)D[0]));
+    nmd_rts();
+}
+
+/* $5A0 tone: PSG channel 0 at a fixed pitch, full volume. */
+static void tone(void)
+{
+    wr8(0xC00011, nmd_tst8(0x8E));
+    wr8(0xC00011, nmd_tst8(0x0F));
+#ifdef PLANT_SAMPLE
+    wr8(0xC00011, nmd_tst8(0x9F));      /* silent */
+#else
+    wr8(0xC00011, nmd_tst8(0x90));
+#endif
+    nmd_rts();
+}
+
+/* $5C0 irqon: enable the vertical interrupt in the VDP and in SR. */
+static void irqon(void)
+{
+    wr16(0xC00004, nmd_tst16(0x8164));
+#ifdef PLANT_IRQ
+    nmd_set_sr(0x2700);                 /* the mask stays up */
+#else
+    nmd_set_sr(0x2000);
+#endif
+    nmd_rts();
+}
+
+/* $5D0 count: count D5.W down to zero; the loop branches back to the entry. */
+static void count(void)
+{
+    do
+        nmd_set16(&D[5], nmd_sub16((uint16_t)D[5], 1));
+    while (!(nmd_cpu.sr & NMD_Z));
+    nmd_rts();
+}
+
+/* $7E2 below: returns at once when D5.W is zero (through the RTS at $7E0, below
+ * the entry); else sets D6 to 1. */
+static void below(void)
+{
+    nmd_tst16((uint16_t)D[5]);
+    if (!(nmd_cpu.sr & NMD_Z))
+        D[6] = nmd_tst32(1);
+    nmd_rts();
+}
+
+/* $7F0 tailc: with D5.W nonzero, continues into count (its rts is this
+ * routine's); else sets D6 to 3. */
+static void tailc(void)
+{
+    nmd_tst16((uint16_t)D[5]);
+    if (!(nmd_cpu.sr & NMD_Z)) {
+        count();
+        return;
+    }
+    D[6] = nmd_tst32(3);
+    nmd_rts();
+}
+
+/* $720 busy: count 2,500 times at $FF0090, long enough for horizontal
+ * interrupts to land in it within a frame. NMD_AT marks each original
+ * instruction, so the lockstep can pause it where the original was interrupted. */
+static void busy(void)
+{
+    NMD_AT(0x720);
+    nmd_set16(&D[1], nmd_tst16(2499));
+    do {
+        NMD_AT(0x724);
+#ifdef PLANT_BUSY
+        wr16(0xFF0090, nmd_add16(rd16(0xFF0090), 2));
+#else
+        wr16(0xFF0090, nmd_add16(rd16(0xFF0090), 1));
+#endif
+        NMD_AT(0x72A);
+    } while (nmd_dbf(&D[1]));
+    NMD_AT(0x72E);
+    nmd_rts();
+}
+
+/* $5E0 dma: copy eight words from $FF0100 to VRAM $0000. */
+static void dma(void)
+{
+    static const uint16_t words[9] = {0x8114, 0x8F02,
+#ifdef PLANT_DMA
+                                      0x9304,       /* half the length */
+#else
+                                      0x9308,
+#endif
+                                      0x9400, 0x9580, 0x9680, 0x977F, 0x4000, 0x0080};
+
+    A[5] = 0xC00004;
+    for (int index = 0; index < 9; index++)
+        wr16(A[5], nmd_tst16(words[index]));
+    nmd_rts();
+}
+
+/* $620 trapper: d2 = 3, TRAP #0 (its handler at $640, which has no C, adds 5
+ * to d2 and stores it), then add d2 to $FF00A0. In the lockstep the machine
+ * takes the TRAP and runs the handler; in a replay the record stands in. */
+#ifdef NMD_HYBRID
+static void trapper(void)
+{
+    NMD_AT(0x620);
+    D[2] = nmd_tst32(3);
+    NMD_AT(0x622);
+    if (!NMD_EXCEPTION_TAKEN(0x622))
+        nmd_check_call_fallback(1, 0x640);
+    NMD_AT(0x624);
+#ifdef PLANT_TRAP
+    wr16(0xFF00A0, nmd_add16(rd16(0xFF00A0), 3));      /* d2 as it was before the TRAP */
+#else
+    wr16(0xFF00A0, nmd_add16(rd16(0xFF00A0), (uint16_t)D[2]));
+#endif
+    NMD_AT(0x62A);
+    nmd_rts();
+}
+#endif
+
+/* $660 vbwait: poll the VDP status until the vertical blank flag is set,
+ * then until it clears (the frame ends in the blank). Every pass of a loop
+ * has the same registers, so a pause point is the right pass only once the
+ * polls before it were made. */
+static void vbwait(void)
+{
+    do {
+        NMD_AT(0x660);
+        nmd_set16(&D[0], nmd_tst16(rd16(0xC00004)));
+        NMD_AT(0x666);
+        nmd_btst(D[0], 3);
+        NMD_AT(0x66A);
+    } while (nmd_cpu.sr & NMD_Z);
+    do {
+        NMD_AT(0x66C);
+        nmd_set16(&D[0], nmd_tst16(rd16(0xC00004)));
+        NMD_AT(0x672);
+        nmd_btst(D[0], 3);
+        NMD_AT(0x676);
+    } while (!(nmd_cpu.sr & NMD_Z));
+    NMD_AT(0x678);
+    nmd_rts();
+}
+
+/* $694 ulast2: copy two words from (A0)+ to (A1)+ (the last two moves of
+ * unroll's run, called on their own). */
+static void ulast2(void)
+{
+    for (int count = 0; count < 2; count++) {
+        wr16(A[1], nmd_tst16(rd16(A[0])));
+        A[0] += 2;
+        A[1] += 2;
+    }
+    nmd_rts();
+}
+
+/* $680 unroll: copy the last D0 (0-4) of four words from (A0) to $FF00B0.
+ * The original jumps into an unrolled run of four moves part way; the run's
+ * last two moves are ulast2, which it falls into. */
+static void unroll(void)
+{
+    A[1] = 0xFF00B0;
+    D[1] = nmd_tst32(4);
+    nmd_set16(&D[1], nmd_sub16((uint16_t)D[1], (uint16_t)D[0]));
+    nmd_set16(&D[1], nmd_add16((uint16_t)D[1], (uint16_t)D[1]));
+    for (unsigned count = (uint16_t)D[0]; count > 2; count--) {
+        wr16(A[1], nmd_tst16(rd16(A[0])));
+        A[0] += 2;
+        A[1] += 2;
+    }
+    if ((uint16_t)D[0] >= 2) {
+        ulast2();                               /* its rts is this routine's */
+        return;
+    }
+    if ((uint16_t)D[0] == 1) {
+        wr16(A[1], nmd_tst16(rd16(A[0])));
+        A[0] += 2;
+        A[1] += 2;
+    }
+    nmd_rts();
+}
+
+/* $6A0 absw: A0 = ($8010).w, sign-extended to $FFFF8010; $1234 stored there. */
+static void absw(void)
+{
+    A[0] = 0xFFFF8010u;
+    wr16(A[0], nmd_tst16(0x1234));
+    nmd_rts();
+}
+
+/* $6B0 extend: D4:D2 = 0:$FFFF0001 + 0:1 by ADD and ADDX; then three bytes of
+ * $FF00D9.. ($995599) and $FF00DD.. ($014501) added in BCD into the latter by
+ * ABCD -(a0),-(a1), lowest byte first. */
+static void extend(void)
+{
+    D[1] = nmd_tst32(0xFFFF0001u);
+    D[2] = nmd_tst32(1);
+    D[3] = nmd_tst32(0);
+    D[4] = nmd_tst32(0);
+    D[2] = nmd_add32(D[2], D[1]);
+    D[4] = nmd_addx32(D[4], D[3]);
+    wr32(0xFF00D0, nmd_tst32(D[4]));
+    wr32(0xFF00D4, nmd_tst32(D[2]));
+    wr32(0xFF00D8, nmd_tst32(0x00995599u));
+    wr32(0xFF00DC, nmd_tst32(0x00014501u));
+    A[0] = 0xFF00DC;
+    A[1] = 0xFF00E0;
+    nmd_flags(0x1F, 0x04);
+    for (int index = 0; index < 3; index++) {
+        uint8_t value;
+
+        A[0] -= 1;
+        value = rd8(A[0]);
+        A[1] -= 1;
+        wr8(A[1], nmd_abcd(rd8(A[1]), value));
+    }
+    nmd_rts();
+}
+
+/* $550 relay: calls a routine that has no C here (the record stands in). */
+#ifdef NMD_HYBRID
+static void relay(void)
+{
+    NMD_JSR_ORIGINAL(0x554, 0x560);
+    nmd_set16(&D[3], nmd_add16((uint16_t)D[3], 1));
+    nmd_rts();
+}
+#endif
+
+/* Z80 $0020 fetch: add the byte the 68000 sent to the total at $1F01, show
+ * it to the YM address port and read the status. */
+static void z_fetch(void)
+{
+    NMD_ZAT(0x20);
+    nmd_z80.a = zrd(0x1F00);
+    NMD_ZAT(0x23);
+    nmd_z80.h = 0x1F;
+    nmd_z80.l = 0x01;
+    NMD_ZAT(0x26);
+    nmd_z80.a = nmd_z_add8(nmd_z80.a, zrd(0x1F01), 0);
+    NMD_ZAT(0x27);
+    zwr(0x1F01, nmd_z80.a);
+    NMD_ZAT(0x28);
+    zwr(0x4000, nmd_z80.a);
+    NMD_ZAT(0x2B);
+    nmd_z80.a = zrd(0x4000);
+    NMD_ZAT(0x2E);
+    nmd_z80.a = nmd_z_and8(nmd_z80.a, 0x80);
+    NMD_ZAT(0x30);
+    nmd_z80_ret();
+}
+
+const nmd_routine nmd_game_routines[] = {
+    {0x400, sum, "sum"},
+    {0x420, poke, "poke"},
+    {0x440, dispatch, "dispatch"},
+    {0x480, handler0, "handler0"},
+    {0x48A, handler1, "handler1"},
+    {0x494, handler2, "handler2"},
+    {0x49E, handler3, "handler3"},
+    {0x4C0, outer, "outer"},
+    {0x4E0, send, "send"},
+    {0x510, spin, "spin"},
+    {0x530, unused, "unused"},
+    {0x580, pad, "pad"},
+    {0x5A0, tone, "tone"},
+    {0x5C0, irqon, "irqon"},
+    {0x5D0, count, "count"},
+    {0x5E0, dma, "dma"},
+    {0x720, busy, "busy"},
+    {0x7E2, below, "below"},
+    {0x7F0, tailc, "tailc"},
+    {0x660, vbwait, "vbwait"},
+    {0x680, unroll, "unroll"},
+    {0x694, ulast2, "ulast2"},
+    {0x6A0, absw, "absw"},
+    {0x6B0, extend, "extend"},
+#ifdef NMD_HYBRID
+    {0x550, relay, "relay"},
+    {0x620, trapper, "trapper"},
+#endif
+};
+const size_t nmd_game_routine_count = sizeof nmd_game_routines / sizeof nmd_game_routines[0];
+
+const nmd_z80_routine nmd_game_z80_routines[] = {
+    {0x0020, z_fetch, "z_fetch"},
+};
+const size_t nmd_game_z80_routine_count =
+    sizeof nmd_game_z80_routines / sizeof nmd_game_z80_routines[0];

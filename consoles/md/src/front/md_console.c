@@ -1,0 +1,261 @@
+/*
+ * md_console.c: the nativekit console adapter. Remaining Stage 2 work fills
+ * in VDP ports, rendering, and variable frame dimensions.
+ */
+#include <stddef.h>
+#include <stdint.h>
+
+#include "nk/nk.h"
+#include "nk/fatal.h"
+#include "nk/input.h"
+#include "nmd/nmd.h"
+#include "md_internal.h"
+#include "../sound/sound.h"
+#include "md_console.h"
+#include "../vdp/render.h"
+#include "md_present.h"
+
+static const nmd_cart *active_cart;
+static const nk_button buttons[] = {
+    { "UP", NMD_BUTTON_UP },
+    { "DOWN", NMD_BUTTON_DOWN },
+    { "LEFT", NMD_BUTTON_LEFT },
+    { "RIGHT", NMD_BUTTON_RIGHT },
+    { "B", NMD_BUTTON_B },
+    { "C", NMD_BUTTON_C },
+    { "A", NMD_BUTTON_A },
+    { "START", NMD_BUTTON_START },
+    { "X", NMD_BUTTON_X },
+    { "Y", NMD_BUTTON_Y },
+    { "Z", NMD_BUTTON_Z },
+    { "MODE", NMD_BUTTON_MODE },
+};
+/* The keyboard, as a controller's positional bits (nk/input.h): the arrows,
+ * A S D for the pad's A B C, Q W E for X Y Z, Return for START, Tab for MODE. */
+static const nk_key keys[] = {
+    { 0x26, 1u << 12, "Up" }, { 0x28, 1u << 14, "Down" }, { 0x25, 1u << 15, "Left" },
+    { 0x27, 1u << 13, "Right" }, { 'A', 1u << 2, "A" }, { 'S', 1u << 0, "S" }, { 'D', 1u << 1, "D" },
+    { 'Q', 1u << 4, "Q" }, { 'W', 1u << 3, "W" }, { 'E', 1u << 5, "E" }, { 0x0D, 1u << 7, "Return" },
+    { 0x09, 1u << 6, "Tab" },
+};
+
+/* A controller's positional bits as the pad's buttons: the face's left,
+ * bottom and right are A, B and C as the pad lays them out; its top and the
+ * shoulders are Y, X and Z; menu is START and view MODE. */
+static uint32_t pad_of(unsigned bits)
+{
+    uint32_t pad = 0;
+
+    if (bits & 1u << 2) pad |= NMD_BUTTON_A;
+    if (bits & 1u << 0) pad |= NMD_BUTTON_B;
+    if (bits & 1u << 1) pad |= NMD_BUTTON_C;
+    if (bits & 1u << 4) pad |= NMD_BUTTON_X;
+    if (bits & 1u << 3) pad |= NMD_BUTTON_Y;
+    if (bits & 1u << 5) pad |= NMD_BUTTON_Z;
+    if (bits & 1u << 7) pad |= NMD_BUTTON_START;
+    if (bits & 1u << 6) pad |= NMD_BUTTON_MODE;
+    if (bits & 1u << 12) pad |= NMD_BUTTON_UP;
+    if (bits & 1u << 13) pad |= NMD_BUTTON_RIGHT;
+    if (bits & 1u << 14) pad |= NMD_BUTTON_DOWN;
+    if (bits & 1u << 15) pad |= NMD_BUTTON_LEFT;
+    return pad;
+}
+
+void nmd_input_frame(const host_pad *now, const int *on)
+{
+    uint32_t masks[2];
+    int player;
+
+    nk_input_pads(now, on);
+    for (player = 0; player < 2; player++)
+        masks[player] = nk_input_pad(player) ? pad_of(nk_pad_bits(nk_input_pad(player))) : 0;
+    masks[0] |= pad_of(nk_input_keyboard_bits());
+    md_io_input(masks);
+}
+
+static const char *const kind_names[] = {
+    "rom", "work ram", "z80 ram", "io", "vdp", "sound", "open bus",
+    "z80 ram", "z80 ym2612", "z80 bank register", "z80 psg", "z80 bank window",
+    "z80 open bus",
+};
+
+_Static_assert(sizeof kind_names / sizeof kind_names[0] == NMD_KINDS + NMD_Z80_KINDS,
+               "nmd access kind names");
+_Static_assert(NMD_KINDS + NMD_Z80_KINDS <= NK_KINDS_MAX, "nmd count kind limit");
+
+static void power(const void *cart)
+{
+    nmd_power((const nmd_cart *)cart);
+}
+
+static void app_name(const void *cart, const char **dir, const char **title)
+{
+    const nmd_cart *k = (const nmd_cart *)cart;
+    *title = k && k->title ? k->title : "nativemd";
+    *dir = *title;
+}
+
+static uint64_t frame_ns(void)
+{
+    uint64_t mclk = active_cart && active_cart->region == NMD_PAL ? 53203395ull : 53693175ull;
+    uint64_t lines = active_cart && active_cart->region == NMD_PAL ? 312ull : 262ull;
+    return 3420ull * lines * 1000000000ull / mclk;
+}
+
+static void window_size(int *w, int *h)
+{
+    md_vdp_dimensions(w, h);
+}
+
+static double aspect(void)
+{
+    int width, height;
+    double logical_height;
+    md_vdp_dimensions(&width, &height);
+    logical_height = (double)height;
+    if ((md_vdp_register(12) & 0x06u) == 0x06u)
+        logical_height /= 2.0;
+    return 4.0 / 3.0 * ((double)width / 256.0) * (224.0 / logical_height);
+}
+
+static void present(const int dst[4])
+{
+    md_present(dst);
+}
+
+static const uint32_t *picture(int *w, int *h)
+{
+    return md_vdp_picture(w, h);
+}
+
+static const uint32_t *shot(int *w, int *h, int *xs, int *ys)
+{
+    *xs = 1;
+    *ys = 1;
+    return picture(w, h);
+}
+
+static int audio_take(int16_t *lr, int max)
+{
+    return md_sound_audio_take(lr, max);
+}
+
+static int audio_queued(void)
+{
+    return md_sound_audio_queued();
+}
+
+/* A headless run's script gives the pads' masks; a windowed one gives none
+ * and the players' devices are read. */
+static void input(int headless, const uint32_t *buttons)
+{
+    if (headless) {
+        md_io_input(buttons);
+        nk_input_script();
+    } else {
+        nmd_input_frame(NULL, NULL);
+    }
+}
+
+/* The pads' buttons as they stand, for the kit's recorder. */
+static void held(uint32_t *buttons)
+{
+    buttons[0] = md_io_button_mask(0);
+    buttons[1] = md_io_button_mask(1);
+}
+
+static void counts_hooks(void (*rd)(uint32_t addr, uint8_t value),
+                         void (*wr)(uint32_t addr, uint8_t value))
+{
+    md_bus_counts_hooks(rd, wr);
+}
+
+static int count_group(uint32_t addr)
+{
+    return (addr & 0xFF000000u) == MD_Z80_COUNT_MARKER;
+}
+
+/* The script's `dump`: memories as they stand, read with no bus access. */
+static const void *region_work_ram(size_t *bytes)
+{
+    *bytes = 0x10000u;
+    return nmd_work_ram();
+}
+
+static const void *region_z80_ram(size_t *bytes)
+{
+    *bytes = 0x2000u;
+    return nmd_z80_ram();
+}
+
+static const void *region_vram(size_t *bytes) { return md_vdp_memory(0, bytes); }
+static const void *region_cram(size_t *bytes) { return md_vdp_memory(1, bytes); }
+static const void *region_vsram(size_t *bytes) { return md_vdp_memory(2, bytes); }
+static const void *region_vdp_registers(size_t *bytes) { return md_vdp_memory(3, bytes); }
+
+static const nk_region regions[] = {
+    { ".wram", region_work_ram, 0 },
+    { ".zram", region_z80_ram, 0 },
+    { ".vram", region_vram, 0 },
+    { ".cram", region_cram, 0 },
+    { ".vsram", region_vsram, 0 },
+    { ".vdpreg", region_vdp_registers, 0 },
+};
+
+const nk_console nmd_console = {
+    .name = "nativemd",
+    .env = "NMD",
+    .play_ext = ".nmd",
+    .power = power,
+    .run_frame = nmd_run_frame,
+    .frame_ns = frame_ns,
+    .app_name = app_name,
+    .window_size = window_size,
+    .aspect = aspect,
+    .present = present,
+    .shot = shot,
+    .picture = picture,
+    .audio_hz = MD_SOUND_OUTPUT_RATE,
+    .audio_take = audio_take,
+    .audio_queued = audio_queued,
+    .players = 2,
+    .keys = keys,
+    .key_count = (int)(sizeof keys / sizeof keys[0]),
+    .buttons = buttons,
+    .button_count = (int)(sizeof buttons / sizeof buttons[0]),
+    .input = input,
+    .held = held,
+    .regions = regions,
+    .region_count = (int)(sizeof regions / sizeof regions[0]),
+    .counts_hooks = counts_hooks,
+    .access_kind = nmd_access_kind,
+    .count_group = count_group,
+    .kind_count = NMD_KINDS + NMD_Z80_KINDS,
+    .kind_names = kind_names,
+};
+
+int nmd_main(const nmd_cart *cart, int argc, char **argv)
+{
+    return nk_main(&nmd_console, cart, argc, argv);
+}
+
+void nmd_power(const nmd_cart *cart)
+{
+    md_m68k_abandon();
+    active_cart = cart;
+    md_io_reset(cart);
+    md_bus_reset(cart);
+    md_timing_reset(cart);
+}
+
+void nmd_run_frame(void)
+{
+    if (!active_cart)
+        nk_fatal("nmd_run_frame before nmd_power");
+    if (md_m68k_native()) {
+        md_m68k_run_frame();
+        return;
+    }
+    md_advance_to(md_vdp_next_vblank_clock());
+    md_irq_dispatch_pending();
+}

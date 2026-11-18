@@ -5,7 +5,7 @@
 #ifndef NSHVC_SNES_RR_H
 #define NSHVC_SNES_RR_H
 
-#include "rr.h"
+#include "nk/rr.h"
 
 #ifdef __cplusplus
 extern "C" {

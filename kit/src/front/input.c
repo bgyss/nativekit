@@ -16,10 +16,12 @@
  *   view             Right Shift, Tab  view
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "host.h"
 #include "input.h"
+#include "fatal.h"
 
 /* ---- what drives each player ---- */
 static nk_input_source source[NK_PLAYERS];
@@ -56,22 +58,66 @@ const nk_input_source *nk_input_source_of(int player)
 }
 
 /* ---- the keyboard ---- */
-static unsigned keys;              /* the positional bits held */
+static uint32_t keys;              /* the positional bits held */
 static unsigned char held[256];    /* the virtual keys held */
 
-static const struct { int vk; unsigned bit; const char *name; } k_map[] = {
-    { 0x26, 1u << 12, "Up" }, { 0x28, 1u << 14, "Down" }, { 0x25, 1u << 15, "Left" },
-    { 0x27, 1u << 13, "Right" }, { 'Z', 1u << 0, "Z" }, { 'X', 1u << 1, "X" }, { 'A', 1u << 2, "A" },
-    { 'S', 1u << 3, "S" }, { 'Q', 1u << 4, "Q" }, { 'W', 1u << 5, "W" }, { 0x0D, 1u << 7, "Return" },
-    { 0x10, 1u << 6, "Right Shift" }, { 0x09, 1u << 6, "Tab" },
-};
+static nk_key *k_map;
+static int k_n;
+
+void nk_input_keymap(const nk_key *map, int n)
+{
+    nk_key *copy = n > 0 ? (nk_key *)malloc((size_t)n * sizeof *copy) : NULL;
+    if (n > 0 && !copy)
+        nk_fatal("no memory for a keyboard map");
+    if (n > 0)
+        memcpy(copy, map, (size_t)n * sizeof *copy);
+    free(k_map);
+    k_map = copy;
+    k_n = n > 0 ? n : 0;
+}
+
+int nk_input_key_for(uint32_t bit)
+{
+    int i;
+    for (i = 0; i < k_n; i++)
+        if (k_map[i].vk && k_map[i].bit == bit)
+            return k_map[i].vk;
+    return 0;
+}
+
+void nk_input_key_bind(uint32_t bit, int vk)
+{
+    int i, slot = -1;
+    if (!bit || (bit & (bit - 1)) || vk < 0 || vk > 0xFE)
+        return;
+    for (i = 0; i < k_n; i++) {
+        if (k_map[i].vk && (k_map[i].bit == bit || k_map[i].vk == vk)) {
+            keys &= ~k_map[i].bit;
+            held[k_map[i].vk] = 0;
+            k_map[i].vk = 0;
+        }
+        if (!k_map[i].vk && slot < 0)
+            slot = i;
+    }
+    if (!vk)
+        return;
+    if (slot < 0) {
+        nk_key *grown = (nk_key *)realloc(k_map, (size_t)(k_n + 1) * sizeof *grown);
+        if (!grown)
+            nk_fatal("no memory for a keyboard binding");
+        k_map = grown;
+        slot = k_n++;
+    }
+    k_map[slot] = (nk_key){ vk, bit, NULL };
+}
+
 
 void nk_input_key(int vk, int down)
 {
-    size_t i;
-    unsigned m = 0;
-    for (i = 0; i < sizeof k_map / sizeof k_map[0]; i++)
-        if (k_map[i].vk == vk)
+    int i;
+    uint32_t m = 0;
+    for (i = 0; i < k_n; i++)
+        if (k_map[i].vk && k_map[i].vk == vk)
             m |= k_map[i].bit;
     if (vk >= 0 && vk < 256)
         held[vk] = (unsigned char)(down != 0);
@@ -88,17 +134,17 @@ int nk_input_key_held(int vk)
     return vk >= 0 && vk < 256 && held[vk];
 }
 
-unsigned nk_input_keyboard_bits(void)
+uint32_t nk_input_keyboard_bits(void)
 {
     return keys;
 }
 
-const char *nk_input_key_name(unsigned bit_mask)
+const char *nk_input_key_name(uint32_t bit_mask)
 {
-    size_t i;
-    for (i = 0; i < sizeof k_map / sizeof k_map[0]; i++)
-        if (k_map[i].bit == bit_mask)
-            return k_map[i].name;
+    int i;
+    for (i = 0; i < k_n; i++)
+        if (k_map[i].vk && k_map[i].bit == bit_mask)
+            return k_map[i].name ? k_map[i].name : nk_key_name(k_map[i].vk);
     return "";
 }
 
@@ -242,4 +288,38 @@ int nk_input_point(const int *at, float scale, int width, int height, int left, 
     *col = (int)(u * width) - left;
     *row = (int)(v * height) - top;
     return 1;
+}
+
+/* a key's name, by its Win32 virtual key code */
+const char *nk_key_name(int vk)
+{
+    static char one[2];
+    static const char *const f[12] = { "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" };
+    static const char *const pad[10] = { "Num 0", "Num 1", "Num 2", "Num 3", "Num 4",
+                                         "Num 5", "Num 6", "Num 7", "Num 8", "Num 9" };
+    static const struct { int vk; const char *name; } named[] = {
+        { 0x08, "Backspace" }, { 0x09, "Tab" }, { 0x0D, "Return" }, { 0x10, "Shift" }, { 0x11, "Control" },
+        { 0x12, "Option" }, { 0x14, "Caps Lock" }, { 0x1B, "Escape" }, { 0x20, "Space" }, { 0x21, "Page Up" },
+        { 0x22, "Page Down" }, { 0x23, "End" }, { 0x24, "Home" }, { 0x25, "Left" }, { 0x26, "Up" },
+        { 0x27, "Right" }, { 0x28, "Down" }, { 0x2D, "Insert" }, { 0x2E, "Delete" }, { 0x5B, "Command" },
+        { 0x6A, "Num *" }, { 0x6B, "Num +" }, { 0x6D, "Num -" }, { 0x6E, "Num ." }, { 0x6F, "Num /" },
+        { 0xA0, "Left Shift" }, { 0xA1, "Right Shift" }, { 0xA2, "Left Control" }, { 0xA3, "Right Control" },
+        { 0xA4, "Left Option" }, { 0xA5, "Right Option" }, { 0xBA, ";" }, { 0xBB, "=" }, { 0xBC, "," },
+        { 0xBD, "-" }, { 0xBE, "." }, { 0xBF, "/" }, { 0xC0, "`" }, { 0xDB, "[" }, { 0xDC, "\\" }, { 0xDD, "]" },
+        { 0xDE, "'" },
+    };
+    size_t i;
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) {
+        one[0] = (char)vk;
+        one[1] = 0;
+        return one;
+    }
+    if (vk >= 0x70 && vk <= 0x7B)
+        return f[vk - 0x70];
+    if (vk >= 0x60 && vk <= 0x69)
+        return pad[vk - 0x60];
+    for (i = 0; i < sizeof named / sizeof named[0]; i++)
+        if (named[i].vk == vk)
+            return named[i].name;
+    return "";
 }

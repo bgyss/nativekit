@@ -1,0 +1,9 @@
+[project]
+name = "nativekit-dev"
+version = "0.1.0"
+description = "Development and reference-capture tools for nativekit"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv]
+package = false

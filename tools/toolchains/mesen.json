@@ -1,0 +1,15 @@
+{
+  "source_url": "https://github.com/bgyss/MesenCE",
+  "source_commit": "2be9fe7bbca16e6187b931ad3be2a16854fd0edf",
+  "patches": [
+    "consoles/nes/tools/nnes-profile-mesen2-optype.patch",
+    "tools/toolchains/patches/mesen/0001-capture-shutdown.patch",
+    "tools/toolchains/patches/mesen/0002-lua-input-port.patch"
+  ],
+  "build_inputs": [
+    "consoles/nes/tools/capture/mesen_host.cpp",
+    "consoles/nes/tools/capture/mesen.mk",
+    "tools/toolchains/setup_nes.py",
+    "tools/toolchains/mesen.json"
+  ]
+}

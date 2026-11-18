@@ -91,3 +91,27 @@ if(NOT MSVC)
   target_compile_options(present_check PRIVATE -ffp-contract=off)
   target_compile_options(canvas_check PRIVATE -ffp-contract=off)
 endif()
+
+# Additive console extensions imported from the register-level upstream.
+foreach(t pause_check backdrop_check window_edges window_map window_columns canvas32_check hdma_bulk_check scaling_check)
+  add_executable(${t} unit/${t}.c)
+  target_include_directories(${t} PRIVATE ${NSHVC_DIR}/src/console ${NSHVC_DIR}/src/ppu ${NSHVC_DIR}/src/render ${NK_INCLUDE})
+  target_link_libraries(${t} PRIVATE nshvc)
+  set_target_properties(${t} PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+endforeach()
+
+if(NK_RENDER MATCHES "^(metal|gl|vulkan)$")
+  string(TOUPPER "${NK_RENDER}" _test_render)
+  target_compile_definitions(canvas32_check PRIVATE NSHVC_RENDER_${_test_render}=1)
+endif()
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+add_custom_target(snes-upstream-check
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/upstream_check.py ${CMAKE_BINARY_DIR}
+  DEPENDS input resample_check vram_direct waits ipl chip chip_irq window_edges window_map
+    window_columns canvas32_check backdrop_check scaling_check pause_check hdma_bulk_check)
+
+add_executable(watchdog_check unit/watchdog_check.c ${NSHVC_DIR}/src/front/watchdog.c)
+target_include_directories(watchdog_check PRIVATE ${NK_INCLUDE} ${NSHVC_DIR}/src/front)
+set_target_properties(watchdog_check PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests)
+add_dependencies(snes-upstream-check watchdog_check)

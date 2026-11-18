@@ -62,6 +62,24 @@ _, err = run("hold Q 1\n", expect=70)
 if "s.txt:1: buttons 'Q'" not in err:
     print("states_check: buttons message: " + err)
     fails += 1
+for button in ("1.A", "3.A", "9.A"):
+    _, err = run("hold %s 1\n" % button, expect=70)
+    if "s.txt:1: buttons '%s'" % button not in err:
+        print("states_check: prefix message: " + err)
+        fails += 1
+run("hold 2.A 1\n")
+d, _ = run("hold 4.A 1\ndump p\n", {"STUB_PLAYERS": "4"})
+data = open(os.path.join(d, "p.players"), "rb").read()
+if int.from_bytes(data[12:16], sys.byteorder) != 1:
+    print("states_check: player 4 did not receive A")
+    fails += 1
+if any(data[:12] + data[16:]):
+    print("states_check: other player inputs were not cleared")
+    fails += 1
+_, err = run("hold 5.A 1\n", {"STUB_PLAYERS": "4"}, expect=70)
+if "s.txt:1: buttons '5.A'" not in err:
+    print("states_check: prefix message: " + err)
+    fails += 1
 _, err = run("repeat 2\nwait 1\n", expect=70)
 if "s.txt:1: repeat without end" not in err:
     print("states_check: repeat message: " + err)

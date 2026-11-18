@@ -16,7 +16,7 @@
 if(NOT TARGET nk_app)
   message(FATAL_ERROR "nativeshvc: configure from the repository root")
 endif()
-project(nativeshvc VERSION 2.1.0 LANGUAGES C)
+project(nativeshvc VERSION 2.19.0 LANGUAGES C)
 set(NSHVC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(nshvc STATIC
@@ -28,6 +28,7 @@ add_library(nshvc STATIC
   src/ppu/ppu.c
   src/dsp/mixer.c
   src/dsp/mixer_regs.c
+  src/front/watchdog.c
   src/front/console.c
   src/front/snes_input.c
   src/front/snes_console.c
@@ -45,6 +46,8 @@ endif()
 # (kit/CMakeLists.txt; no host objects with NSHVC_HOST none on POSIX)
 target_sources(nshvc PRIVATE $<TARGET_OBJECTS:nk_coro> $<TARGET_OBJECTS:nk_resample> $<TARGET_OBJECTS:nk_dispatch> ${NK_HOST_OBJECTS}
   $<TARGET_OBJECTS:nk_front> $<TARGET_OBJECTS:nk_input> $<TARGET_OBJECTS:nk_app>)
+target_link_libraries(nshvc PUBLIC ${NK_HOST_LIBRARIES})
+
 if(WIN32)
   target_link_libraries(nshvc PUBLIC winmm)
 endif()

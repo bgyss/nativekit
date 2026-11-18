@@ -5,6 +5,8 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#include <stdlib.h>
+
 #include "host.h"
 
 uint64_t host_ticks_ns(void)
@@ -31,3 +33,37 @@ void host_thread_interactive(void)
 }
 
 int host_mkdir(const char *path) { return mkdir(path, 0755) == 0 || errno == EEXIST; }
+
+
+/* A separate immutable context lets callers schedule independent callbacks. */
+typedef struct HostEvery {
+    uint32_t ms;
+    void (*fn)(void);
+} HostEvery;
+
+static void *every_thread(void *arg)
+{
+    const HostEvery *e = (const HostEvery *)arg;
+    for (;;) {
+        host_sleep_ms(e->ms);
+        e->fn();
+    }
+    return NULL;
+}
+
+void host_every(uint32_t ms, void (*fn)(void))
+{
+    HostEvery *e;
+    pthread_t t;
+    if (!ms || !fn)
+        return;
+    e = (HostEvery *)malloc(sizeof *e);
+    if (!e)
+        return;
+    e->ms = ms;
+    e->fn = fn;
+    if (pthread_create(&t, NULL, every_thread, e) == 0)
+        pthread_detach(t);
+    else
+        free(e);
+}

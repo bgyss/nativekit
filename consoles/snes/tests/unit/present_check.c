@@ -36,7 +36,7 @@
 #include "nshvc/nshvc.h"
 #include "nshvc/machine.h"
 #include "ppu.h"
-#include "rr_size.h"
+#include "nk/rr_size.h"
 
 #define NSCENES 14
 static int fails;
@@ -208,14 +208,25 @@ static void setup(int k)
         w2(0x1D, -0x0100);
         w2(0x1E, 0x0500);
         break;
-    case 12:  /* a larger screen with the console's picture off its centre */
+    case 12:  /* a larger screen with the console's picture off its centre
+                 (the PSP's: within its 512 x 240) */
+#ifdef PSP
+        nshvc_ext_screen(320, 240);
+        nshvc_ext_screen_origin(8, 10);
+#else
         nshvc_ext_screen(320, 272);
         nshvc_ext_screen_origin(8, 40);
+#endif
         break;
     case 13:  /* a large screen, the console's picture near its top right
-                 (at one to one and scaled down) */
+                 (at one to one and scaled down; the PSP's its largest) */
+#ifdef PSP
+        nshvc_ext_screen(512, 240);
+        nshvc_ext_screen_origin(250, 4);
+#else
         nshvc_ext_screen(2048, 1536);
         nshvc_ext_screen_origin(1700, 40);
+#endif
         break;
     case 8:   /* the console's screen again, wrap, magnified with a turn */
         nshvc_ext_screen(256, 224);
@@ -284,9 +295,9 @@ static RefLine ref_line(const PpuFrame *f, int r)
     int top = f->top, line = r - top + 1, L, y, x0, y0, cx, cy;
     RefLine l;
     L = line < 1 ? 1 : line > f->height ? f->height : line;
-    l.st = &f->line[L];
+    l.st = &f->line[f->st[L]];
     l.m7 = (l.st->bgmode & 7) == 7 && !(l.st->inidisp & 0x80);
-    l.pal = f->palette[L];
+    l.pal = f->palette[f->pl[L]];
     l.vr = f->vram[f->version[L]];
     l.a = l.st->m7a, l.b = l.st->m7b, l.c = l.st->m7c, l.d = l.st->m7d, l.sel = l.st->m7sel;
     cx = s13(l.st->m7x), cy = s13(l.st->m7y);

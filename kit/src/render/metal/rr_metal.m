@@ -52,8 +52,9 @@ static const char k_frag_src[] =
 "  int2 hi = int2(ts) - 1, a = clamp(int2(i), int2(0), hi), b = clamp(int2(i) + 1, int2(0), hi);\n"
 "  float3 c00 = round(t.read(uint2(a.x, a.y)).rgb * 255.0), c01 = round(t.read(uint2(b.x, a.y)).rgb * 255.0);\n"
 "  float3 c10 = round(t.read(uint2(a.x, b.y)).rgb * 255.0), c11 = round(t.read(uint2(b.x, b.y)).rgb * 255.0);\n"
-"  float3 top = floor(c00 + (c01 - c00) * f.x + 0.5), bot = floor(c10 + (c11 - c10) * f.x + 0.5);\n"
-"  return float4(floor(top + (bot - top) * f.y + 0.5) / 255.0, 1); }\n"
+"  float2 w = floor(f * 256.0 + 0.5);\n"
+"  float3 top = c00 + floor(((c01 - c00) * w.x + 128.0) / 256.0), bot = c10 + floor(((c11 - c10) * w.x + 128.0) / 256.0);\n"
+"  return float4((top + floor(((bot - top) * w.y + 128.0) / 256.0)) / 255.0, 1); }\n"
 /* an overlay: bilinear, its alpha kept for the blend */
 "fragment float4 ofs(BO in [[stage_in]], texture2d<float> t [[texture(0)]]) {\n"
 "  constexpr sampler s(filter::linear, address::clamp_to_edge);\n"

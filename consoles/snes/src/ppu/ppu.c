@@ -35,6 +35,8 @@
 #include "snes.h"
 
 static uint16_t vram[PPU_VRAM_PAGES * 0x8000];
+static uint64_t vram_gen;             /* VRAM's writes (and size changes) so far: a copy's (take_version) */
+static uint64_t cgram_gen;            /* CGRAM's writes so far: whether a line's palette is the last's */
 static int vram_pages = 1;            /* nshvc_ext_vram */
 static unsigned port_page;            /* the page the data port reads and writes */
 static int direct_page = -1;          /* nshvc_ext_vram_direct: the data port's writes land here at once */
@@ -110,13 +112,55 @@ static const PpuFrame *d_frame;
 static struct {
     int on, layer, k;
     int screen, w, h, prio, pal;      /* a screen canvas (nshvc_ext_canvas_screen) */
+    int fx, fy;                       /* over the whole screen (k 0): w, h (else 0) */
+    int rgb;                          /* its texels 32 bits each (nshvc_ext_canvas_screen32) */
     unsigned addr, count;
-    uint8_t *data;
-    size_t len, cap;
+    int buf;                          /* its texels' buffer (cv_buf), -1 none */
+    size_t len;
     uint32_t gen;
-} cv_now;
-static uint8_t *cv_kept[3];           /* each frame record's copy of it */
-static size_t cv_kept_cap[3];
+} cv_now = { .buf = -1 };
+/* The canvases' texels: each asked for copied once into a buffer, which
+   the canvas asked for and each frame record that took it hold (refs; the
+   frame records' own, cv_slot), so a frame keeps the texels it began with
+   without a copy of its own; 64-byte aligned (a GPU reads them as they
+   are). At most the canvas asked for and three frames' at once. */
+#define CV_BUFS 5
+static struct {
+    uint8_t *raw, *data;
+    size_t cap;
+    int refs;
+} cv_buf[CV_BUFS];
+static int cv_slot[3] = { -1, -1, -1 };
+
+static void cv_release(int *b)
+{
+    if (*b >= 0)
+        cv_buf[*b].refs--;
+    *b = -1;
+}
+
+/* the canvas asked for: its texels (len bytes) copied into a free buffer */
+static void cv_fill(const void *texels, size_t len)
+{
+    int b, pick = -1;
+    cv_release(&cv_now.buf);
+    for (b = 0; b < CV_BUFS; b++)
+        if (!cv_buf[b].refs && (pick < 0 || (cv_buf[b].cap >= len && cv_buf[pick].cap < len)))
+            pick = b;
+    if (pick < 0)
+        snes_fatal("the canvas's buffers all held (%d)", CV_BUFS);
+    if (cv_buf[pick].cap < len) {
+        free(cv_buf[pick].raw);
+        cv_buf[pick].raw = (uint8_t *)malloc(len + 64);
+        if (!cv_buf[pick].raw)
+            snes_fatal("no memory for the canvas (%zu bytes)", len);
+        cv_buf[pick].data = cv_buf[pick].raw + ((64u - ((uintptr_t)cv_buf[pick].raw & 63u)) & 63u);
+        cv_buf[pick].cap = len;
+    }
+    memcpy(cv_buf[pick].data, texels, len);
+    cv_buf[pick].refs++;
+    cv_now.buf = pick;
+}
 static int cv_scale = 1;              /* the window's texels a console pixel (ppu_set_canvas_scale) */
 
 /* the data ports: where the game's writes of tiles, palette and sprites go */
@@ -129,6 +173,9 @@ static uint8_t cgaddr, cg_flip, cg_latch;
 static uint16_t oam_at;
 static uint8_t oam_latch;
 static uint8_t range_over, time_over;
+static const PpuFrame *stat_f;        /* (ppu_stat_catch_up) */
+static int stat_row;
+static unsigned stat_rec;
 static unsigned mosaic_y;
 /* what the read side keeps: the two PPUs' open bus, the counters' latch */
 static uint8_t ppu1_mdr, ppu2_mdr;
@@ -197,11 +244,13 @@ int ppu_line_hires(const PpuScreen *l)
 void ppu_reset(void)
 {
     memset(vram, 0, sizeof vram);
+    vram_gen++;
     vram_pages = 1;
     port_page = 0;
     direct_page = -1;
     hidden_dirty = 0;
     memset(cgram, 0, sizeof cgram);
+    cgram_gen++;
     memset(oam, 0, sizeof oam);
     if (picture)
         memset(picture, 0, picture_cap * sizeof *picture);
@@ -243,6 +292,7 @@ void ppu_reset(void)
     h_flip = v_flip = latch_flag = field = 0;
     live_vline = live_n = 0;
     cv_now.on = 0;
+    cv_release(&cv_now.buf);
     cv_now.gen++;
 }
 
@@ -503,10 +553,12 @@ static void ppu_write_reg(uint8_t reg, uint8_t v)
         if (direct_page >= 0) {
             a = (uint32_t)direct_page << 15 | (vram_remap(vmaddr) & 0x7FFF);
             vram[a] = (uint16_t)((vram[a] & 0xFF00) | v);
+            vram_gen++;
             page_changed((unsigned)direct_page);
         } else if (vram_open()) {
             dirty = 1;
             vram[a] = (uint16_t)((vram[a] & 0xFF00) | v);
+            vram_gen++;
         }
         if (!(vmain & 0x80))
             vram_step();
@@ -517,10 +569,12 @@ static void ppu_write_reg(uint8_t reg, uint8_t v)
         if (direct_page >= 0) {
             a = (uint32_t)direct_page << 15 | (vram_remap(vmaddr) & 0x7FFF);
             vram[a] = (uint16_t)((vram[a] & 0x00FF) | v << 8);
+            vram_gen++;
             page_changed((unsigned)direct_page);
         } else if (vram_open()) {
             dirty = 1;
             vram[a] = (uint16_t)((vram[a] & 0x00FF) | v << 8);
+            vram_gen++;
         }
         if (vmain & 0x80)
             vram_step();
@@ -540,6 +594,7 @@ static void ppu_write_reg(uint8_t reg, uint8_t v)
             cg_flip = 1;
         } else {
             cgram[cgram_target(4)] = (uint16_t)((v & 0x7F) << 8 | cg_latch);
+            cgram_gen++;
             cgaddr++;
             cg_flip = 0;
         }
@@ -665,6 +720,7 @@ void ppu_ext_vram(int kb)
     if (kb < 64 || kb > 64 * PPU_VRAM_PAGES || kb % 64)
         snes_fatal("nshvc_ext_vram(%d): 64 to %d KB, in 64 KB pages", kb, 64 * PPU_VRAM_PAGES);
     vram_pages = kb / 64;
+    vram_gen++;
     dirty = 1;
 }
 
@@ -723,6 +779,35 @@ void ppu_ext_layer_clip(int layer, int on)
     cur.clip = (uint8_t)((cur.clip & ~(1u << layer)) | (on ? 1u : 0u) << layer);
 }
 
+void ppu_ext_window_edges(int on) { cur.wedges = on != 0; }
+
+void ppu_ext_window_map(int on, int32_t scale_q16, int offset)
+{
+    if (on && (scale_q16 <= 0 || offset < -PPU_WMAP_OFFSET || offset > PPU_WMAP_OFFSET))
+        snes_fatal("nshvc_ext_window_map(%d, %ld, %d): the scale above 0, the offset -%d to %d", on, (long)scale_q16,
+                   offset, PPU_WMAP_OFFSET, PPU_WMAP_OFFSET);
+    cur.wmap = on != 0;
+    cur.wmap_scale = on ? scale_q16 : 0;
+    cur.wmap_offset = on ? offset : 0;
+}
+
+void ppu_ext_window_columns(int window, int left, int right)
+{
+    unsigned n = (unsigned)window - 1;
+    if (window < 1 || window > 2 || left < -1 || left >= PPU_EXT_WIDTH ||
+        (left >= 0 && (right < 0 || right >= PPU_EXT_WIDTH)))
+        snes_fatal("nshvc_ext_window_columns(%d, %d, %d): windows 1 and 2, columns 0 to %d (left -1: the registers')",
+                   window, left, right, PPU_EXT_WIDTH - 1);
+    if (left < 0) {
+        cur.wcols = (uint8_t)(cur.wcols & ~(1u << n));
+        cur.wcol[2 * n] = cur.wcol[2 * n + 1] = 0;
+        return;
+    }
+    cur.wcols = (uint8_t)(cur.wcols | 1u << n);
+    cur.wcol[2 * n] = (uint16_t)left;
+    cur.wcol[2 * n + 1] = (uint16_t)right;
+}
+
 void ppu_ext_vram_copy(int to_page, int from_page)
 {
     if (to_page < 1 || to_page >= vram_pages || from_page < 0 || from_page >= vram_pages)
@@ -731,6 +816,7 @@ void ppu_ext_vram_copy(int to_page, int from_page)
     if (to_page == from_page)
         return;
     memcpy(&vram[(unsigned)to_page << 15], &vram[(unsigned)from_page << 15], 0x8000 * sizeof vram[0]);
+    vram_gen++;
     page_changed((unsigned)to_page);
 }
 
@@ -743,11 +829,37 @@ void ppu_ext_vram_direct(int page)
 
 int ppu_vram_direct(void) { return direct_page; }
 
+/* A DMA's run of n bytes to the VRAM data port ($2118-$2119; the B-bus
+   register of byte i is b[i]), in order, as n ppu_write calls make them:
+   in one line's time with no event in it (dma.c vram_run), so whether
+   VRAM is open stays as it is; not while the port writes a page directly
+   (dma.c takes those with no time) */
+void ppu_vram_port_run(const uint8_t *b, const uint8_t *v, unsigned n)
+{
+    static const uint16_t inc[4] = { 1, 32, 128, 128 };
+    int open = vram_open();
+    unsigned i, step = inc[vmain & 3], hi_steps = vmain & 0x80;
+    if (open && n)
+        dirty = 1;
+    for (i = 0; i < n; i++) {
+        int hi = b[i] == 0x19;
+        if (open) {
+            uint32_t a = port_page << 15 | (vram_remap(vmaddr) & 0x7FFF);
+            vram[a] = hi ? (uint16_t)((vram[a] & 0x00FF) | v[i] << 8) : (uint16_t)((vram[a] & 0xFF00) | v[i]);
+        }
+        if (!hi == !hi_steps)
+            vmaddr = (uint16_t)(vmaddr + step);
+    }
+    if (open)
+        vram_gen += n;
+}
+
 void ppu_ext_canvas_chars(int layer, unsigned word_addr, int count, const uint8_t *texels, int k)
 {
     size_t len;
     if (!texels || count <= 0) {
         cv_now.on = 0;
+        cv_release(&cv_now.buf);
         cv_now.gen++;
         return;
     }
@@ -756,16 +868,11 @@ void ppu_ext_canvas_chars(int layer, unsigned word_addr, int count, const uint8_
                    "(the layer's page below $8000, VRAM's pages from it), at most 4,096 characters, k 1 to 64",
                    layer, word_addr, count, k, (unsigned)vram_pages << 15);
     len = (size_t)count * 64u * (size_t)k * (size_t)k;
-    if (len > cv_now.cap) {
-        uint8_t *n = (uint8_t *)realloc(cv_now.data, len);
-        if (!n)
-            snes_fatal("no memory for the canvas (%zu bytes)", len);
-        cv_now.data = n;
-        cv_now.cap = len;
-    }
-    memcpy(cv_now.data, texels, len);
+    cv_fill(texels, len);
     cv_now.on = 1;
     cv_now.screen = 0;
+    cv_now.rgb = 0;
+    cv_now.fx = cv_now.fy = 0;
     cv_now.layer = layer;
     cv_now.addr = word_addr;
     cv_now.count = (unsigned)count;
@@ -774,38 +881,41 @@ void ppu_ext_canvas_chars(int layer, unsigned word_addr, int count, const uint8_
     cv_now.gen++;
 }
 
+/* the canvas asked for (from the next frame): its whole k, 0 when none or
+   over the whole screen (k 0) */
+int ppu_canvas_k(void) { return cv_now.on && !cv_now.fx ? cv_now.k : 0; }
 void ppu_set_canvas_scale(int k) { cv_scale = k < 1 ? 1 : k > 64 ? 64 : k; }
 int ppu_canvas_scale(void) { return cv_scale; }
 
-/* the frame being made takes the canvas as it stands as the frame begins */
-void ppu_ext_canvas_screen(int layer, const uint8_t *texels, int w, int h, int k, int priority, int palette)
+/* the frame being made takes the canvas as it stands as the frame begins:
+   texels of `size` bytes each (1, or 4 for nshvc_ext_canvas_screen32's) */
+static void canvas_screen(const char *name, int layer, const void *texels, size_t size, int w, int h, int k, int priority,
+                          int palette)
 {
     size_t len;
     if (!texels) {
         cv_now.on = 0;
+        cv_release(&cv_now.buf);
         cv_now.gen++;
         return;
     }
-    if (layer < 0 || layer > 3 || w < 1 || h < 1 || k < 1 || k > 64 || priority < 0 || priority > 1 || palette < 0 ||
-        palette > 7)
-        snes_fatal("nshvc_ext_canvas_screen(%d, texels, %d, %d, k %d, priority %d, palette %d): layers 0-3 (BG1-4), "
-                   "a size of at least 1 x 1, k 1 to 64, priority 0 or 1, palette 0-7",
-                   layer, w, h, k, priority, palette);
-    len = (size_t)w * (size_t)h;
-    if (len > cv_now.cap) {
-        uint8_t *n = (uint8_t *)realloc(cv_now.data, len);
-        if (!n)
-            snes_fatal("no memory for the canvas (%zu bytes)", len);
-        cv_now.data = n;
-        cv_now.cap = len;
-    }
-    memcpy(cv_now.data, texels, len);
+    if (layer < 0 || layer > 3 || w < 1 || h < 1 || k < 0 || k > 64 || (k == 0 && (w > 65535 || h > 65535)) ||
+        priority < 0 || priority > 1 || palette < 0 || palette > 7)
+        snes_fatal("%s(%d, texels, %d, %d, k %d, priority %d, palette %d): layers 0-3 (BG1-4), "
+                   "a size of at least 1 x 1, k 1 to 64 (or 0: the texels over the whole screen, "
+                   "up to 65,535 x 65,535), priority 0 or 1, palette 0-7",
+                   name, layer, w, h, k, priority, palette);
+    len = (size_t)w * (size_t)h * size;
+    cv_fill(texels, len);
     cv_now.on = 1;
     cv_now.screen = 1;
+    cv_now.rgb = size == 4;
     cv_now.layer = layer;
     cv_now.addr = 0;
     cv_now.count = 0;
-    cv_now.k = k;
+    cv_now.k = k ? k : 1;
+    cv_now.fx = k ? 0 : w;
+    cv_now.fy = k ? 0 : h;
     cv_now.w = w;
     cv_now.h = h;
     cv_now.prio = priority;
@@ -814,22 +924,28 @@ void ppu_ext_canvas_screen(int layer, const uint8_t *texels, int w, int h, int k
     cv_now.gen++;
 }
 
+void ppu_ext_canvas_screen(int layer, const uint8_t *texels, int w, int h, int k, int priority, int palette)
+{
+    canvas_screen("nshvc_ext_canvas_screen", layer, texels, 1, w, h, k, priority, palette);
+}
+
+void ppu_ext_canvas_screen32(int layer, const uint32_t *texels, int w, int h, int k, int priority, int palette)
+{
+    canvas_screen("nshvc_ext_canvas_screen32", layer, texels, 4, w, h, k, priority, palette);
+}
+
 static void cv_take(void)
 {
     int slot = (int)(making - frames);
     if (!cv_now.on) {
         making->cv_on = 0;
+        cv_release(&cv_slot[slot]);
         return;
     }
-    if (!making->cv_on || making->cv_gen != cv_now.gen) {
-        if (cv_now.len > cv_kept_cap[slot]) {
-            uint8_t *n = (uint8_t *)realloc(cv_kept[slot], cv_now.len);
-            if (!n)
-                snes_fatal("no memory for the canvas (%zu bytes)", cv_now.len);
-            cv_kept[slot] = n;
-            cv_kept_cap[slot] = cv_now.len;
-        }
-        memcpy(cv_kept[slot], cv_now.data, cv_now.len);
+    if (cv_slot[slot] != cv_now.buf) {
+        cv_release(&cv_slot[slot]);
+        cv_slot[slot] = cv_now.buf;
+        cv_buf[cv_now.buf].refs++;
     }
     making->cv_on = 1;
     making->cv_layer = cv_now.layer;
@@ -839,10 +955,13 @@ static void cv_take(void)
     making->cv_screen = cv_now.screen;
     making->cv_w = cv_now.w;
     making->cv_h = cv_now.h;
+    making->cv_fx = cv_now.fx;
+    making->cv_fy = cv_now.fy;
     making->cv_prio = cv_now.prio;
     making->cv_pal = cv_now.pal;
+    making->cv_rgb = cv_now.rgb;
     making->cv_len = cv_now.len;
-    making->cv = cv_kept[slot];
+    making->cv = cv_buf[cv_now.buf].data;
     making->cv_gen = cv_now.gen;
 }
 
@@ -893,6 +1012,9 @@ void ppu_frame_start(void)
     }
     mosaic_y = 1;
     range_over = time_over = 0;
+    stat_f = making;
+    stat_row = 0;
+    stat_rec = 0;
     making->field = field;
     making->interlace = cur.setini & 0x01;
 }
@@ -975,12 +1097,13 @@ static void weave_pixels(void)
 
 int ppu_woven(int *w, int *h, int from[2])
 {
-    if (!frames_done || !finished->interlace || woven_of != frames_done || woven_from[0] > 1 || woven_from[1] > 1)
+    if (!frames_done || !finished->interlace || woven_of != frames_done)
         return 0;
     *w = woven_w;
     *h = woven_h;
-    from[0] = woven_from[0];
-    from[1] = woven_from[1];
+    /* (a parity's rows the frame before's however old: weave_pixels's) */
+    from[0] = woven_from[0] ? 1 : 0;
+    from[1] = woven_from[1] ? 1 : 0;
     return 1;
 }
 
@@ -1050,7 +1173,7 @@ void ppu_vblank_start(void)
                 uint32_t got = rr_cp_pixel((uint32_t)x, (uint32_t)y), want = check_pic[(size_t)y * (size_t)w + (size_t)x];
                 if (got != want && !bad && ppu_compose_bad < 3)
                     fprintf(stderr, "composecheck: frame %lu at (%d, %d): got %08x want %08x\n", frames_done, x, y,
-                            got, want);
+                            (unsigned)got, (unsigned)want);
                 bad += got != want;
             }
         if (ppu_frame_mode7(finished)) {
@@ -1085,7 +1208,8 @@ void ppu_vblank_start(void)
                     }
                     if (!same && !rbad && ppu_compose_bad < 3)
                         fprintf(stderr, "composecheck: frame %lu record (%d, %d): got %08x %08x %08x %08x want %08x %08x %08x %08x\n",
-                                frames_done, x, y, cp_r0, cp_r1, cp_r2, cp_r3, q->w0, q->w1, q->w2, q->w3);
+                                frames_done, x, y, (unsigned)cp_r0, (unsigned)cp_r1, (unsigned)cp_r2, (unsigned)cp_r3,
+                                (unsigned)q->w0, (unsigned)q->w1, (unsigned)q->w2, (unsigned)q->w3);
                     rbad += !same;
                 }
             /* the rows marked: every row ppu_mode7 marks, at least */
@@ -1121,7 +1245,7 @@ void ppu_vblank_start(void)
                         uint32_t want = pic[(size_t)y * (size_t)ww + (size_t)x];
                         if (got != want && !bad && ppu_compose_bad < 3)
                             fprintf(stderr, "composecheck: frame %lu woven (%d, %d): got %08x want %08x\n", frames_done,
-                                    x, y, got, want);
+                                    x, y, (unsigned)got, (unsigned)want);
                         bad += got != want;
                     }
                 cp_fdb = 0;
@@ -1136,12 +1260,13 @@ void ppu_vblank_start(void)
 }
 
 /* ---- drawing ---------------------------------------------------------------------- */
-/* What one screen of one line holds at each pixel: a colour (15-bit BGR),
+/* What one screen of one line holds at each pixel: a colour (15-bit BGR,
+   or a full-colour canvas's, rr_mode7.h RR_RGB),
    its depth (higher in front; 0 the backdrop) and the layer it came from
    (0-3 BG1-4, 4 sprites with palettes 4-7, 5 the backdrop, 6 sprites with
    palettes 0-3, which colour maths never takes). */
 typedef struct {
-    uint16_t color;
+    uint32_t color;
     uint8_t z, layer;
     uint8_t ci;               /* the CGRAM entry its colour came from */
 } Pixel;
@@ -1151,7 +1276,7 @@ static Pixel main_px[PPU_EXT_WIDTH], sub_px[PPU_EXT_WIDTH];
 /* a layer's pixels for one line: colour, palette-0 (transparent) and
    priority */
 typedef struct {
-    uint16_t color;
+    uint32_t color;
     uint8_t opaque, prio, ci;
 } LayerPx;
 
@@ -1288,14 +1413,34 @@ static void draw_bg(int n, unsigned line, unsigned mode)
         unsigned pal = (unsigned)f->cv_pal, prio = (unsigned)f->cv_prio, c;
         for (x = 0; x < count; x++) {
             long tx = (long)x * k + k / 2, ty = (long)R * k + k / 2;
-            c = R >= 0 && tx < f->cv_w && ty < f->cv_h ? f->cv[(size_t)ty * (size_t)f->cv_w + (size_t)tx] : 0u;
-            c &= (1u << bpp) - 1u;
+            uint32_t t = 0;
+            if (f->cv_fx && R >= 0) {
+                /* (over the whole screen: the texel under the pixel's centre) */
+                tx = (long)rr_cv_fit(x, 512u, (uint32_t)f->cv_fx, (uint32_t)f->width);
+                ty = (long)rr_cv_fit((uint32_t)R, 512u, (uint32_t)f->cv_fy, (uint32_t)f->screen_height);
+            }
+            if (R >= 0 && tx < f->cv_w && ty < f->cv_h) {
+                size_t at = (size_t)ty * (size_t)f->cv_w + (size_t)tx;
+                if (f->cv_rgb)
+                    memcpy(&t, f->cv + 4 * at, 4);
+                else
+                    t = f->cv[at];
+            }
             if (cv_capture) {
                 cv_at[x].ci1 = 1;
                 cv_at[x].px = cv_at[x].py = cv_at[x].flip = 0;
                 cv_at[x].pal = (uint8_t)pal;
                 cv_at[x].prio = (uint8_t)prio;
             }
+            if (t >= RR_RGB) {
+                /* a full colour (nshvc_ext_canvas_screen32) */
+                lp[x].opaque = 1;
+                lp[x].prio = (uint8_t)prio;
+                lp[x].color = RR_RGB | (t & 0xFFFFFFu);
+                lp[x].ci = 0;
+                continue;
+            }
+            c = t & ((1u << bpp) - 1u);
             lp[x].opaque = c != 0;
             lp[x].prio = (uint8_t)prio;
             if (!c)
@@ -1536,6 +1681,8 @@ static int obj_row(unsigned s, unsigned y, unsigned h, int r, unsigned *row)
    its tiles the console draws (-1 none). The first 32 sprites in range of
    its 256 columns (range over past them), then their tiles in those
    columns from the last in the list, up to 34 (time over past them). */
+static unsigned obj_items, obj_tiles;      /* obj_eval's last: the sprites in range (at most 32), tiles kept */
+
 static void obj_eval(int keep[128])
 {
     unsigned first = s->oam_prio ? (s->oamaddr >> 1) & 0x7F : 0;
@@ -1563,6 +1710,8 @@ static void obj_eval(int keep[128])
         }
         list[n++] = sp;
     }
+    obj_items = n;
+    obj_tiles = 0;
     for (k = n; k-- > 0;) {
         unsigned sp = list[k];
         uint8_t hi = (uint8_t)(d_oam[0x200 + (sp >> 2)] >> ((sp & 3) * 2));
@@ -1578,11 +1727,66 @@ static void obj_eval(int keep[128])
         if (tiles + on > 34) {
             time_over = 1;
             keep[sp] = (int)(34 - tiles);
+            obj_tiles = 34;
             break;
         }
         tiles += on;
+        obj_tiles = tiles;
         keep[sp] = (int)on;
     }
+}
+
+/* STAT77's flags are the console's work on each line (the reference's
+   Object::fetch, at its end, whatever the screens show but in forced
+   blank), worked out here when they are read, from the frame's recorded
+   lines: row r evaluated on the hardware's line r, its flags set at dot
+   clock 1080 and 8 clocks a tile fetched (or a sprite past the display's
+   last line, no tiles fetched there) later; up to line 240. stat_f the
+   frame the beam is in, stat_row its next row, stat_rec the lines
+   recorded of it so far. */
+void ppu_stat_catch_up(unsigned v, unsigned h, unsigned vdisp)
+{
+    const PpuScreen *keep_s = s;
+    const uint8_t *keep_oam = d_oam;
+    int keep_row = draw_row, keep_arr[128];
+    unsigned r;
+    if (!stat_f)
+        return;
+    for (r = (unsigned)stat_row; r <= v && r <= 240; r++) {
+        unsigned line = r ? r : 1;
+        uint8_t ro = range_over, to = time_over;
+        unsigned dur;
+        const PpuScreen *st = &cur;
+        const uint8_t *om = live_oam();
+        if (line < stat_rec || (stat_f != making && line <= (unsigned)stat_f->height)) {
+            st = &stat_f->line[stat_f->st[line]];
+            om = stat_f->oam[stat_f->version[line]];
+        } else if (r < vdisp) {
+            break;                           /* (its line not recorded yet: the beam's own, before its blank) */
+        }
+        if (r == v && h < 1080)
+            break;
+        if (st->inidisp & 0x80) {
+            stat_row = (int)r + 1;
+            continue;
+        }
+        s = st;
+        d_oam = om;
+        draw_row = (int)r;
+        obj_eval(keep_arr);
+        dur = r + 1 >= vdisp ? 8 * obj_items : 8 * obj_tiles;
+        if (r + 1 >= vdisp)
+            time_over = to;                  /* (no tiles fetched there) */
+        if (r == v && h < 1080 + dur) {
+            range_over = ro;
+            time_over = to;
+            break;
+        }
+        stat_row = (int)r + 1;
+    }
+    s = keep_s;
+    d_oam = keep_oam;
+    draw_row = keep_row;
 }
 
 static void draw_obj(unsigned line)
@@ -1664,9 +1868,39 @@ static void draw_obj(unsigned line)
 }
 
 /* ---- windows ---- */
+/* the screen's column console column c (0-256) maps to (nshvc_ext_window_map):
+   c * scale / 65536 rounded down, plus the offset, the product in two
+   parts so that no part passes 32 bits (compose_body.h cp_wmap's) */
+static int wmap_col(int c)
+{
+    return c * (s->wmap_scale >> 16) + ((c * (s->wmap_scale & 0xFFFF)) >> 16) + s->wmap_offset;
+}
+
+/* whether column x (the hardware's, 0-255 its picture's) is inside window
+   n (0, 1): at its screen columns (nshvc_ext_window_columns); mapped
+   onto the screen (nshvc_ext_window_map), L to R covering the columns
+   L maps to up to the one before R + 1's; else past the picture outside
+   but that, its edges open (nshvc_ext_window_edges), a window from column
+   0 reaches every column left of it and one to column 255 every column
+   right */
+static int win_in(int n, int x)
+{
+    int l = s->wh[2 * n], r = s->wh[2 * n + 1];
+    if (s->wcols >> n & 1)
+        return x + sl >= s->wcol[2 * n] && x + sl <= s->wcol[2 * n + 1];
+    if (s->wmap)
+        return x + sl >= wmap_col(l) && x + sl < wmap_col(r + 1);
+    if (s->wedges && x < 0 && l == 0)
+        x = 0;
+    else if (s->wedges && x > 255 && r == 255)
+        x = 255;
+    return x >= l && x <= r;
+}
+
+/* whether column x (the hardware's) is inside the window mask */
 static uint8_t win_mask(uint8_t sel, uint8_t logic, int x)
 {
-    int w1 = x >= s->wh[0] && x <= s->wh[1], w2 = x >= s->wh[2] && x <= s->wh[3];
+    int w1 = win_in(0, x), w2 = win_in(1, x);
     int e1 = sel & 2, e2 = sel & 8;
     if (!e1 && !e2)
         return 0;
@@ -1840,6 +2074,7 @@ static void take_version(void)
 {
     if (making->versions < PPU_VERSIONS) {
         memcpy(making->vram[making->versions], vram, (size_t)vram_pages * 0x8000 * sizeof vram[0]);
+        making->vram_gen[making->versions] = vram_gen;
         memcpy(making->oam[making->versions], oam, sizeof oam);
         memcpy(making->oam[making->versions] + 544, ext_xp, sizeof ext_xp);
         memcpy(making->oam[making->versions] + 672, ext_yp, sizeof ext_yp);
@@ -1849,6 +2084,36 @@ static void take_version(void)
     }
     dirty = 0;
     hidden_dirty = 0;
+}
+
+/* the last line recorded with CGRAM as its palette (record_line): its
+   number (0: none since), frame and CGRAM's writes then */
+static unsigned pal_line;
+static const PpuFrame *pal_frame;
+static uint64_t pal_gen;
+/* the frame's last palette CGRAM as it stood (pal_last_gen: CGRAM's
+   writes then), not a line's changed one */
+static int pal_last_cgram;
+static uint64_t pal_last_gen;
+
+/* line `line`'s state and palette, kept unless the last kept is the same */
+static void keep_state(unsigned line, const PpuScreen *st)
+{
+    if (!making->states || memcmp(st, &making->line[making->states - 1], sizeof *st)) {
+        making->line[making->states] = *st;
+        making->states++;
+    }
+    making->st[line] = (uint8_t)(making->states - 1);
+}
+static void keep_palette(unsigned line, const uint16_t *pal, int is_cgram)
+{
+    if (!(is_cgram && pal_last_cgram && pal_last_gen == cgram_gen && making->palettes)) {
+        memcpy(making->palette[making->palettes], pal, 512);
+        making->palettes++;
+        pal_last_cgram = is_cgram;
+        pal_last_gen = cgram_gen;
+    }
+    making->pl[line] = (uint8_t)(making->palettes - 1);
 }
 
 static void record_line(unsigned line)
@@ -1864,6 +2129,8 @@ static void record_line(unsigned line)
             }
         making->versions = 0;
         making->hires = 0;
+        making->states = making->palettes = 0;
+        pal_last_cgram = 0;
         dirty = 1;
     }
     if (dirty && (making->versions == 0 || !(cur.inidisp & 0x80)))
@@ -1884,8 +2151,8 @@ static void record_line(unsigned line)
         }
         for (i = 0; i < live_n && live_ev[order[i]].x == 0; i++)
             apply_event(&st, pal, &live_ev[order[i]]);
-        making->line[line] = st;
-        memcpy(making->palette[line], pal, sizeof pal);
+        keep_state(line, &st);
+        keep_palette(line, pal, 0);
         while (i < live_n) {
             int x = live_ev[order[i]].x;
             for (; i < live_n && live_ev[order[i]].x == x; i++)
@@ -1905,12 +2172,19 @@ static void record_line(unsigned line)
             k++;
         }
         making->segs[line] = (uint8_t)k;
+        making->pal_same[line] = 0;
+        pal_line = 0;
     } else {
-        making->line[line] = cur;
-        memcpy(making->palette[line], cgram, sizeof cgram);
+        keep_state(line, &cur);
+        keep_palette(line, cgram, 1);
+        /* (the line before this frame's, its palette CGRAM as this one's) */
+        making->pal_same[line] = pal_line && pal_line == line - 1 && pal_frame == making && pal_gen == cgram_gen;
+        pal_line = line;
+        pal_frame = making;
+        pal_gen = cgram_gen;
     }
     live_n = 0;
-    if (!(making->line[line].inidisp & 0x80) && ppu_line_hires(&making->line[line]))
+    if (!(making->line[making->st[line]].inidisp & 0x80) && ppu_line_hires(&making->line[making->st[line]]))
         making->hires = 1;
 }
 
@@ -1923,8 +2197,8 @@ static void draw_recorded(const PpuFrame *f, unsigned line, uint32_t *out, int w
     static uint32_t part[2 * PPU_EXT_WIDTH];
     unsigned k, n = f->segs[line], scale = width == 2 * sw ? 2 : 1;
     draw_row = (int)line - 1;
-    s = &f->line[line];
-    d_cgram = f->palette[line];
+    s = &f->line[f->st[line]];
+    d_cgram = f->palette[f->pl[line]];
     if (!n) {
         draw_line(line, out, width);
         return;
@@ -1943,6 +2217,38 @@ static void draw_recorded(const PpuFrame *f, unsigned line, uint32_t *out, int w
     }
 }
 
+void ppu_render_line(unsigned line);
+
+/* Lines first to end - 1, their horizontal blanks passed with nothing
+   changed in the PPU between them (bus.c records them before each
+   change): each after the first as the line before (its state, palette
+   and copy of the tiles), but a line drawn in segments, which the next
+   follows with the state after them. */
+void ppu_render_lines(unsigned first, unsigned end)
+{
+    unsigned line, msize;
+    if (end > PPU_MAX_HEIGHT + 1)
+        end = PPU_MAX_HEIGHT + 1;
+    for (line = first; line < end; line++) {
+        if (line == first || line == 1 || draw_lines || making->segs[line - 1] || (live_vline == line && live_n)) {
+            ppu_render_line(line);
+            continue;
+        }
+        making->st[line] = making->st[line - 1];
+        making->pl[line] = making->pl[line - 1];
+        making->version[line] = making->version[line - 1];
+        making->segs[line] = 0;
+        stat_rec = line + 1;
+        /* (the line before's palette CGRAM as this one's, nothing written) */
+        making->pal_same[line] = 1;
+        pal_line = line;
+        making->mosaic_row[line] = (uint8_t)mosaic_y;
+        msize = (making->line[making->st[line]].mosaic >> 4) + 1u;
+        if (msize == 1 || line % msize == 0)
+            mosaic_y = line + 1;
+    }
+}
+
 void ppu_render_line(unsigned line)
 {
     unsigned msize;
@@ -1953,6 +2259,7 @@ void ppu_render_line(unsigned line)
     if (mosaic_y == 0)
         mosaic_y = 1;
     record_line(line);
+    stat_rec = line + 1;
     making->mosaic_row[line] = (uint8_t)mosaic_y;
     if (draw_lines) {
         d_field = making->field;
@@ -1965,7 +2272,7 @@ void ppu_render_line(unsigned line)
     }
     /* the vertical mosaic: the line the next lines repeat moves on every
        `size` lines */
-    msize = (making->line[line].mosaic >> 4) + 1u;
+    msize = (making->line[making->st[line]].mosaic >> 4) + 1u;
     if (msize == 1 || line % msize == 0)
         mosaic_y = line + 1;
 }
@@ -1995,8 +2302,8 @@ void ppu_draw_frame(const PpuFrame *f, uint32_t *out)
            line's state (its first segment), the row its own */
         {
             int edge = line < 1 ? 1 : f->height;
-            s = &f->line[edge];
-            d_cgram = f->palette[edge];
+            s = &f->line[f->st[edge]];
+            d_cgram = f->palette[f->pl[edge]];
             d_vram = f->vram[f->version[edge]];
             d_oam = f->oam[f->version[edge]];
             draw_row = line - 1;
@@ -2020,7 +2327,7 @@ void ppu_draw_frame(const PpuFrame *f, uint32_t *out)
 
 void ppu_pack_line(const PpuFrame *f, unsigned line, uint32_t *w)
 {
-    const PpuScreen *l = &f->line[line];
+    const PpuScreen *l = &f->line[f->st[line]];
     w[0] = l->inidisp | l->obsel << 8 | l->bgmode << 16 | (uint32_t)l->mosaic << 24;
     w[1] = l->bgsc[0] | l->bgsc[1] << 8 | l->bgsc[2] << 16 | (uint32_t)l->bgsc[3] << 24;
     w[2] = l->bgnba[0] | l->bgnba[1] << 8 | l->m7sel << 16 | (uint32_t)l->setini << 24;
@@ -2069,6 +2376,11 @@ typedef struct {
 static CpObj cp_objs[128];
 static const uint8_t *cp_obj_oam;
 static unsigned cp_obj_key = ~0u;
+/* each row's Y page 0 sprites by the row's low byte (cp_row's test for
+   them is that byte's), in priority order, and the sprites with a page */
+static uint8_t cp_on_row[256][128];
+static uint8_t cp_on_row_n[256], cp_paged[128];
+static unsigned cp_paged_n;
 
 static void cp_decode(void)
 {
@@ -2097,6 +2409,20 @@ static void cp_decode(void)
             int tx = o->x + (int)c * 8;
             if (o->at256 || (tx > -8 && tx < PPU_WIDTH))
                 o->on++;
+        }
+    }
+    memset(cp_on_row_n, 0, sizeof cp_on_row_n);
+    cp_paged_n = 0;
+    for (i = 0; i < 128; i++) {
+        const CpObj *o = &cp_objs[i];
+        int d;
+        if (o->page) {
+            cp_paged[cp_paged_n++] = (uint8_t)i;
+            continue;
+        }
+        for (d = 0; d < o->h && d < 256; d++) {
+            unsigned q = (unsigned)(o->y + d) & 0xFF;
+            cp_on_row[q][cp_on_row_n[q]++] = (uint8_t)i;
         }
     }
 }
@@ -2134,10 +2460,24 @@ static uint32_t cp_sprites(uint32_t *n)
     cp_decode();
     /* the sprites on the row; the console's: the first 32 in range of its
        columns, then their tiles from the last, up to 34 */
-    for (i = 0; i < 128; i++) {
-        keep[i] = -1;
-        if (cp_row(&cp_objs[i], row, &rows[i]))
+    {
+        /* (cp_row's hits, in order: the row's page 0 sprites merged with
+           those with a page that cover it) */
+        unsigned a = 0, b = 0, na = 0, q = (unsigned)row & 0xFF;
+        if (row < 256 && (row >= 0 || ext_wrap))
+            na = cp_on_row_n[q];
+        while (a < na || b < cp_paged_n) {
+            if (b == cp_paged_n || (a < na && cp_on_row[q][a] < cp_paged[b])) {
+                i = cp_on_row[q][a++];
+                rows[i] = (unsigned)(row - cp_objs[i].y) & 0xFF;
+            } else {
+                i = cp_paged[b++];
+                if (!cp_row(&cp_objs[i], row, &rows[i]))
+                    continue;
+            }
+            keep[i] = -1;
             hit[nhit++] = (int)i;
+        }
     }
     for (k = 0; k < (unsigned)nhit; k++) {
         const CpObj *o = &cp_objs[hit[k]];
@@ -2192,7 +2532,8 @@ static void cp_state(uint32_t *o, const PpuScreen *l, uint32_t pal, uint32_t vba
     o[8] = l->bghofs[2] | (uint32_t)l->bghofs[3] << 16;
     o[9] = l->bgvofs[0] | (uint32_t)l->bgvofs[1] << 16;
     o[10] = l->bgvofs[2] | (uint32_t)l->bgvofs[3] << 16;
-    o[11] = l->fixed_r | l->fixed_g << 8 | l->fixed_b << 16;
+    o[11] = l->fixed_r | l->fixed_g << 8 | l->fixed_b << 16 |
+            (uint32_t)(l->wedges | l->wmap << 1 | (l->wcols & 3) << 2) << 24;
     o[12] = (uint16_t)l->m7a | (uint32_t)(uint16_t)l->m7b << 16;
     o[13] = (uint16_t)l->m7c | (uint32_t)(uint16_t)l->m7d << 16;
     o[14] = (uint16_t)l->m7x | (uint32_t)(uint16_t)l->m7y << 16;
@@ -2210,6 +2551,10 @@ static void cp_state(uint32_t *o, const PpuScreen *l, uint32_t pal, uint32_t vba
                     !(f->out_on >> n & 1);
         o[20 + n] = (uint32_t)plain | bpp << 1 | (big ? 4u : 3u) << 5 | (big ? 4u : 3u) << 8;
     }
+    o[24] = l->wcol[0] | (uint32_t)l->wcol[1] << 16;
+    o[25] = l->wcol[2] | (uint32_t)l->wcol[3] << 16;
+    o[26] = (uint32_t)l->wmap_scale;
+    o[27] = (uint32_t)l->wmap_offset;
 }
 
 const uint32_t *ppu_compose(const PpuFrame *f, size_t *words)
@@ -2229,11 +2574,14 @@ const uint32_t *ppu_compose(const PpuFrame *f, size_t *words)
     pals = n;
     for (line = 1; line <= (unsigned)f->height; line++)
         for (k = 0; k <= f->segs[line]; k++) {
-            const uint16_t *p = k ? f->seg_palette[line][k - 1] : f->palette[line];
-            if (!last_pal || memcmp(p, last_pal, 512)) {
+            const uint16_t *p = k ? f->seg_palette[line][k - 1] : f->palette[f->pl[line]];
+            /* (a line's the line before's, its last: pal_same) */
+            if (!last_pal || (!(k == 0 && line > 1 && f->pal_same[line]) && memcmp(p, last_pal, 512))) {
+                /* two colours a word, the first the low half: in memory,
+                   the colours in order on a little-endian host (the
+                   canvas's below), so one copy */
                 cp_w = grow(cp_w, &cp_cap, n + 128, sizeof *cp_w);
-                for (i = 0; i < 128; i++)
-                    cp_w[n + i] = p[2 * i] | (uint32_t)p[2 * i + 1] << 16;
+                memcpy(cp_w + n, p, 512);
                 last_at = (uint32_t)n;
                 last_pal = p;
                 n += 128;
@@ -2243,15 +2591,17 @@ const uint32_t *ppu_compose(const PpuFrame *f, size_t *words)
     /* the VRAM's copies */
     vr = n;
     cp_w = grow(cp_w, &cp_cap, n + (size_t)f->versions * vwords / 2 + 1, sizeof *cp_w);
-    for (v = 0; v < (size_t)f->versions; v++)
-        for (i = 0; i < vwords; i += 2)
-            cp_w[n++] = f->vram[v][i] | (uint32_t)f->vram[v][i + 1] << 16;
+    for (v = 0; v < (size_t)f->versions; v++) {
+        memcpy(cp_w + n, f->vram[v], vwords * 2);   /* (two words a word, as the palettes) */
+        n += vwords / 2;
+    }
     /* the canvas's texels */
     cv = n;
     if (f->cv_on) {
-        /* four texels a word, the first the low byte: in memory, the texels
-           in order on a little-endian host (every host nativeshvc builds
-           for), so one copy */
+        /* four texels a word, the first the low byte (a full-colour
+           canvas's a word each): in memory, the texels in order on a
+           little-endian host (every host nativeshvc builds for), so one
+           copy */
         size_t words = (f->cv_len + 3) / 4;
         cp_w = grow(cp_w, &cp_cap, n + words + 1, sizeof *cp_w);
         cp_w[n + words - 1] = 0;
@@ -2275,7 +2625,7 @@ const uint32_t *ppu_compose(const PpuFrame *f, size_t *words)
     for (line = 1; line <= (unsigned)f->height; line++)
         for (k = 0; k <= f->segs[line]; k++) {
             cp_w = grow(cp_w, &cp_cap, n + CP_ST, sizeof *cp_w);
-            cp_state(cp_w + n, k ? &f->seg_line[line][k - 1] : &f->line[line], st_of[line][k],
+            cp_state(cp_w + n, k ? &f->seg_line[line][k - 1] : &f->line[f->st[line]], st_of[line][k],
                      (uint32_t)(f->version[line] * vwords), f);
             st_of[line][k] = (uint32_t)nst++;
             n += CP_ST;
@@ -2301,7 +2651,7 @@ const uint32_t *ppu_compose(const PpuFrame *f, size_t *words)
         d_oam = f->oam[f->version[edge]];
         for (k = 0; k < parts; k++) {
             uint32_t ns, at;
-            s = k ? &f->seg_line[edge][k - 1] : &f->line[edge];
+            s = k ? &f->seg_line[edge][k - 1] : &f->line[f->st[edge]];
             at = cp_sprites(&ns);
             cp_part(k ? f->seg_x[edge][k - 1] : 0, st_of[edge][k], at, ns);
         }
@@ -2339,10 +2689,20 @@ const uint32_t *ppu_compose(const PpuFrame *f, size_t *words)
     cp_w[CP_CVLEN] = (uint32_t)f->cv_len;
     cp_w[CP_M7SEG] = 0;
     cp_w[CP_OUT] = (uint32_t)outs;
-    cp_w[CP_CVSCREEN] = f->cv_on && f->cv_screen ? 1u | (uint32_t)f->cv_prio << 1 | (uint32_t)f->cv_pal << 2 : 0u;
+    cp_w[CP_CVSCREEN] = f->cv_on && f->cv_screen ?
+                            1u | (uint32_t)f->cv_prio << 1 | (uint32_t)f->cv_pal << 2 | (uint32_t)f->cv_rgb << 5 : 0u;
     cp_w[CP_CVW] = (uint32_t)f->cv_w;
     cp_w[CP_CVH] = (uint32_t)f->cv_h;
+    cp_w[CP_CVFX] = f->cv_on && f->cv_screen ? (uint32_t)f->cv_fx : 0u;
+    cp_w[CP_CVFY] = f->cv_on && f->cv_screen ? (uint32_t)f->cv_fy : 0u;
+    cp_w[CP_CVGEN] = f->cv_on ? (uint32_t)f->cv_gen : 0u;
     cp_w[CP_TOP] = (uint32_t)f->top;
+    cp_w[CP_VCOPY] = (uint32_t)vwords;
+    for (v = 0; v < PPU_VERSIONS; v++) {
+        uint64_t g = v < (size_t)f->versions ? f->vram_gen[v] : 0;
+        cp_w[CP_VGEN + 2 * v] = (uint32_t)g;
+        cp_w[CP_VGEN + 2 * v + 1] = (uint32_t)(g >> 32);
+    }
     *words = n + cp_parts_n + cp_spr_n;
     return cp_w;
 }
@@ -2356,11 +2716,13 @@ static uint32_t finish(const Pixel *m, const Pixel *sp, int x, uint16_t fixed, u
     int clip = region(s->cgwsel >> 6, cw);
     int prevent = region(s->cgwsel >> 4, cw);
     unsigned bit = m->layer == 5 ? 5 : m->layer == 6 ? 8 : m->layer;
-    uint16_t c = clip ? 0 : m->color;
+    uint32_t c = clip ? 0 : m->color;
     unsigned r = c & 31, g = (c >> 5) & 31, b = (c >> 10) & 31;
-    if (bit < 8 && (s->cgadsub >> bit & 1) && !prevent) {
-        uint16_t o;
-        int halve = (s->cgadsub & 0x40) != 0 && !clip;
+    int math = bit < 8 && (s->cgadsub >> bit & 1) && !prevent;
+    uint32_t o = 0;
+    int halve = 0;
+    if (math) {
+        halve = (s->cgadsub & 0x40) != 0 && !clip;
         if (s->cgwsel & 2) {
             if (sp->layer == 5) {
                 o = fixed;
@@ -2371,8 +2733,12 @@ static uint32_t finish(const Pixel *m, const Pixel *sp, int x, uint16_t fixed, u
         } else {
             o = fixed;
         }
+    }
+    if ((c | o) & RR_RGB)
+        return rr_rgb_finish(c, o, math, (s->cgadsub & 0x80) != 0, halve, bright);
+    if (math) {
         if (s->cgadsub & 0x80) {
-            int rr = (int)r - (o & 31), gg = (int)g - ((o >> 5) & 31), bb = (int)b - ((o >> 10) & 31);
+            int rr = (int)r - (int)(o & 31), gg = (int)g - (int)((o >> 5) & 31), bb = (int)b - (int)((o >> 10) & 31);
             r = rr < 0 ? 0 : (unsigned)rr;
             g = gg < 0 ? 0 : (unsigned)gg;
             b = bb < 0 ? 0 : (unsigned)bb;
@@ -2567,17 +2933,36 @@ static int pres_is_cv(const PpuFrame *f, const PpuScreen *st)
     return !ppu_line_hires(st) && !((st->mosaic & (1u << n)) && (st->mosaic >> 4));
 }
 
+/* a canvas on a pseudo-hires line: its layer the canvas at the console's
+   resolution (draw_bg: each pixel the texel under its centre), the line
+   presented as the picture is */
+static int pres_is_cv_low(const PpuFrame *f, const PpuScreen *st)
+{
+    unsigned mode = st->bgmode & 7;
+    int n = f->cv_layer;
+    if (!f->cv_on || (st->inidisp & 0x80) || mode == 7 || mode == 5 || mode == 6 || !(st->setini & 0x08) ||
+        !mode_bpp[mode][n] || !(((st->tm | st->ts) >> n) & 1))
+        return 0;
+    return !((st->mosaic & (1u << n)) && (st->mosaic >> 4));
+}
+
+int ppu_frame_presents(const PpuFrame *f)
+{
+    int line, k, what = 0;
+    for (line = 1; line <= f->height; line++) {
+        const PpuScreen *st = &f->line[f->st[line]];
+        what |= pres_is_m7(st) | pres_is_cv(f, st) << 1 | pres_is_cv_low(f, st) << 2;
+        for (k = 0; k < f->segs[line]; k++) {
+            st = &f->seg_line[line][k];
+            what |= pres_is_m7(st) | pres_is_cv(f, st) << 1 | pres_is_cv_low(f, st) << 2;
+        }
+    }
+    return what;
+}
+
 int ppu_frame_mode7(const PpuFrame *f)
 {
-    int line, k;
-    for (line = 1; line <= f->height; line++) {
-        if (pres_is_m7(&f->line[line]) || pres_is_cv(f, &f->line[line]))
-            return 1;
-        for (k = 0; k < f->segs[line]; k++)
-            if (pres_is_m7(&f->seg_line[line][k]) || pres_is_cv(f, &f->seg_line[line][k]))
-                return 1;
-    }
-    return 0;
+    return ppu_frame_presents(f) != 0;
 }
 
 /* whether background n may show on a screen at column x (its enable bit
@@ -2717,6 +3102,12 @@ static unsigned m7_mosaic_texel(int n, int x, unsigned mosaic_row, const uint16_
     return rr_m7_texel(vp, s->m7sel, (ox + s->m7a * sx) >> 8, (oy + s->m7c * sx) >> 8);
 }
 
+/* a Mode 7 line's pixels recorded as the picture's own (RR_M7_NOT): a
+   platform presenting Mode 7 at the console's resolution, scaled as any
+   picture (rr.h rr_mode7_plain), a canvas still at the window's */
+static int m7_plain;
+void ppu_set_mode7_plain(int on) { m7_plain = on != 0; }
+
 int ppu_mode7(const PpuFrame *f, const uint32_t *pic, RrMode7 *m)
 {
     int pw = ppu_frame_width(f), ph = f->screen_height, cpp = pw / f->width, top = f->top, r;
@@ -2761,8 +3152,8 @@ int ppu_mode7(const PpuFrame *f, const uint32_t *pic, RrMode7 *m)
         n = edge == line ? f->segs[line] : 0;
         m7_row[r] = 0;
         for (k = 0; k <= n; k++) {
-            const PpuScreen *st = k ? &f->seg_line[line][k - 1] : &f->line[edge];
-            const uint16_t *pal = k ? f->seg_palette[line][k - 1] : f->palette[edge];
+            const PpuScreen *st = k ? &f->seg_line[line][k - 1] : &f->line[f->st[edge]];
+            const uint16_t *pal = k ? f->seg_palette[line][k - 1] : f->palette[f->pl[edge]];
             int x0 = k ? f->seg_x[line][k - 1] + sl : 0, x1 = k < n ? f->seg_x[line][k] + sl : sw, g, hires;
             if (x0 < 0) x0 = 0;
             if (x1 > sw) x1 = sw;
@@ -2818,7 +3209,7 @@ int ppu_mode7(const PpuFrame *f, const uint32_t *pic, RrMode7 *m)
                 }
                 continue;
             }
-            if (!pres_is_m7(st)) {
+            if (!pres_is_m7(st) || m7_plain) {
                 for (i = x0 * cpp; i < x1 * cpp; i++)
                     row[i].w0 = row[i].w1 = row[i].w3 = 0, row[i].w2 = RR_M7_NOT;
                 continue;
@@ -2880,6 +3271,9 @@ int ppu_mode7(const PpuFrame *f, const uint32_t *pic, RrMode7 *m)
     m->cv_k = f->cv_on ? f->cv_k : 1;
     m->cv_w = f->cv_on && f->cv_screen ? f->cv_w : 0;
     m->cv_h = f->cv_on && f->cv_screen ? f->cv_h : 0;
+    m->cv_rgb = f->cv_on && f->cv_screen && f->cv_rgb;
+    m->cv_fx = f->cv_on && f->cv_screen ? f->cv_fx : 0;
+    m->cv_fy = f->cv_on && f->cv_screen ? f->cv_fy : 0;
     mosaic_y = keep_my;
     range_over = ro;
     time_over = to;
@@ -2923,8 +3317,8 @@ static void mode7_segs(const PpuFrame *f, RrMode7 *m, uint32_t *seg_of)
         n = edge == line ? f->segs[line] : 0;
         m7_row[r] = 0;
         for (k = 0; k <= n; k++) {
-            const PpuScreen *st = k ? &f->seg_line[line][k - 1] : &f->line[edge];
-            const uint16_t *pal = k ? f->seg_palette[line][k - 1] : f->palette[edge];
+            const PpuScreen *st = k ? &f->seg_line[line][k - 1] : &f->line[f->st[edge]];
+            const uint16_t *pal = k ? f->seg_palette[line][k - 1] : f->palette[f->pl[edge]];
             uint32_t g = 0;
             if (pres_is_cv(f, st)) {
                 g = (uint32_t)cv_state(m, st, pal, f->cv_layer);
@@ -2943,6 +3337,9 @@ static void mode7_segs(const PpuFrame *f, RrMode7 *m, uint32_t *seg_of)
     m->cv_k = f->cv_on ? f->cv_k : 1;
     m->cv_w = f->cv_on && f->cv_screen ? f->cv_w : 0;
     m->cv_h = f->cv_on && f->cv_screen ? f->cv_h : 0;
+    m->cv_rgb = f->cv_on && f->cv_screen && f->cv_rgb;
+    m->cv_fx = f->cv_on && f->cv_screen ? f->cv_fx : 0;
+    m->cv_fy = f->cv_on && f->cv_screen ? f->cv_fy : 0;
     s = &cur;
     d_vram = vram;
     d_cgram = cgram;

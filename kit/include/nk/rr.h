@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 /* the backend, ready to draw; 0 when it cannot run here */
+void rr_set_headless_size(int w, int h);
 int  rr_open(void);
 void rr_close(void);
 /* the name of this backend ("metal", "gl", "vulkan", "soft", "null") */

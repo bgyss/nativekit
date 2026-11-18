@@ -1,0 +1,23 @@
+diff --git a/genesis.c b/genesis.c
+--- a/genesis.c
++++ b/genesis.c
+@@ -2053,7 +2053,8 @@
+ {
+ 	z80_context * context = vcontext;
+ 	genesis_context *gen = context->system;
+-	if (gen->bus_busy) {
++	//nativekit: the Z80 waits for the 68000 to release the bus; it is never moved back in time
++	if (gen->bus_busy && context->Z80_CYCLE < gen->m68k->cycles) {
+ 		context->Z80_CYCLE = gen->m68k->cycles;
+ 	}
+ 	//typical delay from bus arbitration
+@@ -2091,7 +2092,8 @@
+ {
+ 	z80_context * context = vcontext;
+ 	genesis_context *gen = context->system;
+-	if (gen->bus_busy) {
++	//nativekit: the Z80 waits for the 68000 to release the bus; it is never moved back in time
++	if (gen->bus_busy && context->Z80_CYCLE < gen->m68k->cycles) {
+ 		context->Z80_CYCLE = gen->m68k->cycles;
+ 	}
+ 	//typical delay from bus arbitration

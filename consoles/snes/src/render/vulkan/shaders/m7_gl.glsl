@@ -5,7 +5,7 @@ uniform usamplerBuffer Pb, palb, vramb, picb;
 uniform isamplerBuffer Sb, colsb, rowsb;
 uniform usampler2DArray planet;
 uniform usamplerBuffer cvb;
-uniform int U_pw, U_ph, U_d0, U_d1, U_step_u, U_step_v, U_rh, U_cpp, U_left, U_cvk, U_cvlen, U_cvw, U_cvh;
+uniform int U_pw, U_ph, U_d0, U_d1, U_step_u, U_step_v, U_rh, U_cpp, U_left, U_cvk, U_cvlen, U_cvw, U_cvh, U_cvfx, U_cvfy;
 uniform int U_du_[28], U_dv_[28];
 in vec2 uv;
 out vec4 o;
@@ -17,7 +17,7 @@ out vec4 o;
 #define COL_(i) texelFetch(colsb, (i)).r
 #define ROW_(i) texelFetch(rowsb, (i)).r
 #define PLANE_(x, y, l) texelFetch(planet, ivec3((x), (y), (l)), 0).r
-#define CV_(i) texelFetch(cvb, (i)).r
+#define CV_(i) texelFetch(cvb, (i)).r      // a byte, or a full-colour canvas's 32 bits (R32UI)
 #define U_du(k) U_du_[k]
 #define U_dv(k) U_dv_[k]
 #define FRAG_X int(gl_FragCoord.x)

@@ -24,10 +24,16 @@ its own version unless what its games see changes, and then by these rules.
 
 ## nativekit's version
 
-nativekit is at **0.1.0**. Until a second console builds on it, it is internal to the
-consoles in this repository, and a minor version may still change what a console writes,
-with each console moved in the same change. It reaches **1.0** when the second console
-builds on it unchanged; from 1.0 the rules above hold in full.
+nativekit is at **1.1.0**. Two native console libraries now build on the kit. The
+compatibility rules above apply in full: public additions are appended and default to the
+prior behavior, while contract-breaking changes require a major version.
+
+1.1 adds pause/backdrop and overlay updates, mutable key bindings and names,
+optional pointer interception (a callback appended to `nk_console`), text-input
+host hooks, and explicit headless presentation. Existing console callback tables
+need no new initializer. Custom POSIX hosts get weak defaults for the added host
+functions. Console execution remains on its deterministic coroutine schedule;
+the optional stall timer observes an atomic heartbeat outside that schedule.
 
 What is in the kit's contract: the headers in [`include/nk/`](../include/nk/) and the
 settings and arguments [kit.md](kit.md) lists. Everything under `src/`, `tests/` and

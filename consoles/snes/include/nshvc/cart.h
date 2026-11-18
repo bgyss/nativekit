@@ -40,7 +40,8 @@ struct nshvc_chip {
        DMA and a look alike, as it does a mapping's. */
     int (*rom_at)(uint32_t addr, uint32_t *off);
     /* the chip brought up to the clock nshvc_cart_clock gives: made before
-       the S-CPU's accesses to it, once a line, and, while it runs, where
+       the S-CPU's accesses to it, once a frame (the vertical blank's start),
+       and, while it runs, where
        the S-CPU could take its IRQ. That clock can be ahead of the
        S-CPU's, through time in which the S-CPU makes no access, and comes
        back to the clock the chip's IRQ rises at (nshvc_cart_irq_at): the
@@ -55,7 +56,30 @@ struct nshvc_chip {
     uint8_t *(*ram)(uint32_t *size);
     /* for NSHVC_DEBUG: whether it is running */
     int (*busy)(void);
+    /* Where the S-CPU's accesses are plain memory, with nothing of the
+       chip's in them (contract 2.18): for the 8 KB at bank:offset `addr` (8
+       KB aligned), the first of the bytes the S-CPU reads there
+       (direct_read) or writes (direct_write), or NULL (the chip answers
+       them). Asked for a range the S-CPU's access reaches after the chip
+       answered it there; the answer stands until the chip calls
+       nshvc_cart_direct_changed(), which it does before anything changes
+       what such an access would do: the chip starting work that reads or
+       writes those bytes, or taking the bus to them, or a register that
+       remaps them. Accesses made directly still take their time (and the
+       cost profile's weights), and the chip is not synced for them. */
+    const uint8_t *(*direct_read)(uint32_t addr);
+    uint8_t *(*direct_write)(uint32_t addr);
+    /* Optional (since 2.23). The S-CPU waits on `addr`, which the chip just
+       answered with `seen`, itself brought up to nshvc_cart_clock: the master
+       clock from which a read of it could next answer otherwise, its own work
+       being all that changes it till then. NSHVC_CART_NO_CHANGE: only an access
+       of the S-CPU's could change it. 0, or no call: the chip cannot tell, and
+       the wait reads it again every few clocks. A clock too late makes the wait
+       see the change late; it must not be guessed. */
+    uint64_t (*next_change)(uint32_t addr, uint8_t seen);
 };
+
+#define NSHVC_CART_NO_CHANGE UINT64_MAX
 
 /* ---- what the connector gives a chip ---- */
 /* the master clock: clocks since power on (21.477 MHz NTSC); in a sync,
@@ -71,6 +95,9 @@ void nshvc_cart_irq(int level);
 /* a byte of the cartridge's ROM at file offset `off` (mirrored as the
    console decodes a size that is not a power of two); `who`: NSHVC_ROM_* */
 uint8_t nshvc_cart_rom(uint32_t off, int who);
+/* the chip's direct answers (direct_read, direct_write) no longer stand:
+   the console asks again */
+void nshvc_cart_direct_changed(void);
 /* the data bus's open value (what a read the chip leaves unanswered sees) */
 uint8_t nshvc_open_bus(void);
 /* the cartridge's routine with C at bank:address (nshvc_cart.routines), or

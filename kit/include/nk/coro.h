@@ -24,4 +24,7 @@ Coro *coro_new(void (*fn)(void *), void *arg, size_t stack);
    back to `from`) */
 void coro_switch(Coro *from, Coro *to);
 
+/* Check the lowest 64 stack bytes; Windows fibers have guard pages. */
+int coro_stack_ok(const Coro *c);
+
 #endif

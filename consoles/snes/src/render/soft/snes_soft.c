@@ -5,7 +5,7 @@
  */
 #include "snes_rr.h"
 #include "rr_mode7.h"
-#include "rr_soft_ext.h"
+#include "nk/rr_soft_ext.h"
 
 int rr_compose(const uint32_t *desc, size_t words, int w, int h, const int d[4])
 {

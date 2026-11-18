@@ -148,14 +148,14 @@ static uint64_t refresh_of(uint64_t t, uint64_t line_now)
 /* a rise at t: seen there, or at the end of the refresh it falls in */
 static uint64_t seen_at(uint64_t t)
 {
-    uint64_t r = refresh_of(t, snes_clock - snes_line_clock());
+    uint64_t r = refresh_of(t, snes_now() - snes_line_clock());
     return t >= r && t < r + 40 ? r + 40 : t;
 }
 
 static void abi_irq(void)
 {
     taken++;
-    taken_at = snes_clock;
+    taken_at = snes_now();
     rd8(0x003031);
     acked = 1;
 }
@@ -174,7 +174,7 @@ static int stopped(void *ctx)
 {
     (void)ctx;
     if (reads < 4096)
-        read_at[reads++] = snes_clock;
+        read_at[reads++] = snes_now();
     return !(rd8(0x003030) & 0x20);
 }
 
@@ -183,7 +183,7 @@ static int stopped(void *ctx)
    clock reaches it) */
 static uint64_t pass(uint64_t t, unsigned n)
 {
-    uint64_t r = refresh_of(t + n, snes_clock - snes_line_clock());
+    uint64_t r = refresh_of(t + n, snes_now() - snes_line_clock());
     return r > t && r <= t + n ? t + n + 40 : t + n;
 }
 
@@ -238,8 +238,8 @@ static void abi_reset(void)
             back = accesses(pass(taken_at, REG), 8, 4);
             if (!seen)
                 back = pass(back, REG);
-            check(taken == n + 1 && taken_at == at && snes_clock == back && acked,
-                  "waiting, unmasked: the wait ends after the handler", d, (long long)(snes_clock - started),
+            check(taken == n + 1 && taken_at == at && snes_now() == back && acked,
+                  "waiting, unmasked: the wait ends after the handler", d, (long long)(snes_now() - started),
                   (long long)(back - started));
         }
         check(taken == n + 1 && taken_at == at && acked,
@@ -260,7 +260,7 @@ static void abi_reset(void)
         {
             int last = reads - 1;
             int ok = last >= 0 && read_at[last] + 2 >= stop_at && (last == 0 || read_at[last - 1] + 2 < stop_at) &&
-                     snes_clock == pass(read_at[last], REG);
+                     snes_now() == pass(read_at[last], REG);
             check(taken == n && ok, "waiting, masked: the wait ends with the first read after the chip's clock", d,
                   (long long)(last >= 0 ? read_at[last] + 2 - started : 0), (long long)(stop_at - started));
         }
@@ -273,7 +273,7 @@ static void abi_reset(void)
     n = taken;
     cpu.p = (uint8_t)(cpu.p & ~P_I);
     {
-        uint64_t before = snes_clock;
+        uint64_t before = snes_now();
         rd8(0x7E0000);
         check(taken == n + 1 && taken_at == accesses(pass(before, 8), 8, 4), "unmasked: taken at the next read's end",
               200, (long long)(taken_at - before), (long long)(accesses(pass(before, 8), 8, 4) - before));
@@ -288,6 +288,33 @@ static void abi_reset(void)
         check(taken == n + 1 && taken_at == accesses(seen_at(stop_at), 8, 4), "WAI: taken at the chip's clock", d,
               (long long)(taken_at - started), (long long)(accesses(seen_at(stop_at), 8, 4) - started));
     }
+
+    /* the S-CPU's costs off (contract 2.17): its accesses take no time, so
+       the chip, running, raises nothing in them however many there are
+       (work RAM's made inline); a wait then takes the IRQ at the chip's
+       clock, the interrupt's pushes taking no time either */
+    nshvc_set_cpu_costs(0);
+    cpu.p = (uint8_t)(cpu.p & ~P_I);
+    for (i = 0; i < 50; i++) {
+        uint16_t d = (uint16_t)(25 + 89 * i);
+        uint64_t before;
+        unsigned k;
+        uint8_t sum = 0;
+        n = taken;
+        start(d);
+        before = snes_now();
+        for (k = 0; k < 20000; k++) {
+            wr8(0x7E1000 + (k & 0xFFF), (uint8_t)k);
+            sum = (uint8_t)(sum + rd8(0x7E1000 + ((k * 7) & 0xFFF)));
+        }
+        check(taken == n && snes_now() == before && running, "costs off: no time in the accesses, the chip still running",
+              d, (long long)(snes_now() - before), 0);
+        nshvc_wait_until(stopped, NULL);
+        check(taken == n + 1 && taken_at == seen_at(stop_at), "costs off: a wait takes the IRQ at the chip's clock", d,
+              (long long)(taken_at - started), (long long)(seen_at(stop_at) - started));
+        (void)sum;
+    }
+    nshvc_set_cpu_costs(1);
 
     printf("%d check(s) failed\n", fails);
     exit(fails ? 1 : 0);

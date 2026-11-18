@@ -59,6 +59,8 @@ int main(void)
             fprintf(stderr, "coro_check: trace[%d] = %d\n", i, trace[i]);
             return 1;
         }
+    if (!coro_stack_ok(a) || !coro_stack_ok(b) || !coro_stack_ok(self))
+        return 1;
     printf("coro_check: ok\n");
     return 0;
 }

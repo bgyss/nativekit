@@ -7,9 +7,39 @@ says where things stand, what was decided, where to start, and how to know each 
 The two documents it builds on are:
 
 - **Spec (approved):** `docs/superpowers/specs/2026-11-01-nativemd-design.md`
-- **Stage 0 plan (written, not yet started):** `docs/superpowers/plans/2026-11-01-nativemd-stage0-kit.md`
+- **Stage 0 plan (completed):** `docs/superpowers/plans/2026-11-01-nativemd-stage0-kit.md`
 
-Read the spec first, then this handoff, then the stage 0 plan.
+**Current state (2026-11-04):** Stages 0-4 are complete for their recorded scopes. Stage 4 adds
+selectable md1va3 and TMSS-equipped md1va6 models, 3- and 6-button input, separate 68000/Z80 cost
+profiles, a 1.0.0 public nmd contract, an independent consumer, and a frozen 59-case synthetic
+golden. The selectable model and both processor profiles were approved as drafted. All 59 cases
+match or have one of six documented candidate `KNOWN` differences; no known case newly matches.
+BlastEm remains a candidate oracle, not a hardware qualification result.
+
+The MD unit, profile, toolchain, oracle-smoke, trace, feature, survey, consumer, ROM, kit, and golden
+checks passed. `test:md-rom` reported 0 of 59 unlisted differences and `golden:md-compare` reported
+0 of 59 differences. The frozen manifest SHA-256 is
+`e9eb3bdacc221fd3e27b162e21156c046584afd93a91cfc6a2b0fa52a22aec97`. SNES preservation gates
+passed: golden comparison 0/2393, ROM comparison 0/1164 unlisted (56 documented known, 0 newly
+matching), and timing 20.3 s CPU against a 23.07 s limit.
+
+The nine-target build matrix completed eight targets; Windows failed at the `hello.exe` link because
+the Nix MinGW installation lacks `libmcfgthread.a`. iOS returned success with stale CoreSimulator/
+Xcode warnings. `mise run test` had four host/render failures: the macOS pointer check trapped after
+Launch Services returned `LSModifyNotification -50`; Metal, GL, and Vulkan overlay checks could not
+open a renderer (`vkCreateInstance -9`). Other repository checks passed. A fresh Stage 4 review found
+no remaining Critical or Important issues. One minor test limitation remains: the native testcart
+consumes only the first `input_frames` snapshot, while per-frame input sampling is unit-tested.
+First-game selection from the local ROM survey is the next objective; keep ROMs and paths external.
+
+The proposed [ROM-to-decomp milestone suite](../plans/2026-11-04-nativemd-decomp/README.md) and
+[master goal prompt](../plans/2026-11-04-nativemd-decomp/GOAL.md) now define that follow-on work.
+Its source audit identifies an execution gap beyond the synthetic consumer: the current frame
+adapter advances hardware and IRQs but does not dispatch and resume a game's 68000 reset/main
+routine. The suite includes this runtime path, both CPU verification harnesses and the first game's
+assembly/C recovery. None of those new milestones has been executed.
+
+Read the Stage 4 plan and design, then this handoff for current evidence and the next objective.
 
 ---
 
@@ -29,8 +59,8 @@ The user has decided:
 | Scope | Base console only: 68000, Z80, VDP (with DMA and H/V interrupts), YM2612, SN76489, 3- and 6-button pads |
 | Not in scope | Sega CD, 32X, SVP, Master System mode, multitap, mouse, light guns, SRAM/EEPROM, mappers, Linux verification |
 | Names | `consoles/md/`, library `nmd`, settings `NMD_*`, headers `include/nmd/`, fatal prefix `nativemd: ` |
-| Approach | "A": mirror nativeshvc's structure and write the chips fresh from documentation, checked against BlastEm. `~/src/segagenesisrecomp` is **reference reading only**; don't copy code from it. |
-| ROMs | The user's own, in `~/src/dcomp/.dcomp/game-material/` (about 390 Genesis ROMs). They are used for the feature survey and for choosing the first game. **Never commit ROM bytes, code, graphics, or ROM paths.** The ROM directory is a command-line argument. |
+| Approach | "A": mirror nativeshvc's structure and write the chips fresh from documentation, checked against BlastEm. The separate `segagenesisrecomp` checkout is **reference reading only**; don't copy code from it. |
+| ROMs | The user's own local library, supplied as a runtime directory argument for the feature survey and first-game choice; the latest survey scanned 416 candidates. **Never commit ROM bytes, code, graphics, or ROM paths.** |
 | Licence | AGPL-3.0, like the repo. The BlastEm patches are GPLv3-derived and live in this repo, which is compatible. vasm is free for non-commercial use, built locally and never shipped. |
 
 Success, from the spec:
@@ -44,20 +74,22 @@ Success, from the spec:
 
 ## 2. Where to start
 
-**Execute stage 0. It is fully planned.**
+Stages 0-4 are complete for their recorded scopes. Stage 1 evidence and limitations are in
+`docs/superpowers/plans/2026-11-01-nativemd-stage1-oracle.md` and its SDD ledger; Stage 2
+implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage2-bus-vdp.md`;
+Stage 3 implementation and validation are in `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`;
+Stage 4 implementation and final gate evidence are in
+`docs/superpowers/plans/2026-11-03-nativemd-stage4.md` and its approved design.
 
-1. `cd ~/src/nativeshvc` (to be renamed `~/src/nativekit`; the folder rename is still pending)
-   and `git switch nativemd`.
+1. From the repository root, use the `nativemd` branch.
 2. `nix develop`. Run everything inside it, and use the mise tasks.
 3. Run `tools/toolchains/setup.sh`, or `mise run tools`, if `build/tools/` is missing. It builds
    asar 1.91 and the patched bsnes oracle, which the SNES checks need.
-4. Do **Task 0** of the plan (the baseline check) and confirm the numbers in section 4 below.
-5. Work through Tasks 1–9 in order. The plan recommends **subagent-driven** execution
-   (`superpowers:subagent-driven-development`): a fresh implementer per task, a fresh reviewer
-   per task, and a whole-branch review at the end. The tasks change shared interfaces
-   (`nk_console`, `nk_script_frame`, includes), so they must run in order, not in parallel.
-6. The user still has to approve the plan and choose the execution method before stage 0
-   starts. If they haven't yet, ask first.
+4. Ensure the candidate MD tools are present with `mise run tools:md`; `mise run test:md-*`
+   covers their synthetic fixtures and survey logic.
+5. Continue with first-game selection from the local ROM survey. Use only user-owned ROMs as runtime
+   inputs; do not store ROM paths or contents in the repository. Keep BlastEm comparisons separate
+   from hardware qualification.
 
 ### Stage 0 tasks (the plan has the code and the tests for each)
 
@@ -78,11 +110,10 @@ Success, from the spec:
 `include/nshvc/*.h` stays byte-identical. `include/nk.h` must never include `input.h`; it is
 `input.h` that includes `nk.h`.
 
-## 3. After stage 0: the stages that still need plans
+## 3. Stage plans and implementation history
 
-Each stage gets its own plan (`superpowers:writing-plans`, saved under
-`docs/superpowers/plans/`), its per-task reviews, and a branch review. Write each plan only
-after the previous stage has landed, because each one depends on what the previous stage found.
+Stages 0-4 are complete for the scopes recorded in their plans. The following sections preserve
+the original implementation sequence and decisions; consult the linked plans for current evidence.
 
 ### Stage 1: tooling, the oracle, and the survey
 - Add pins to `tools/toolchains/pins.env`: BlastEm (by commit) and vasm (`vasmm68k_mot`,
@@ -129,11 +160,18 @@ after the previous stage has landed, because each one depends on what the previo
   68000 interpreter that runs a table of steps, plus `cases.py`, `run.py` and `KNOWN`.
 
 ### Stage 3: the Z80 side and sound
+- Plan: `docs/superpowers/plans/2026-11-03-nativemd-stage3-z80-sound.md`.
 - The Z80 runs on its own coroutine (`kit/include/nk/coro.h`), with its own routine table,
   through `zrd`/`zwr`. BUSREQ and RESET from the 68000 suspend and restart it at exact clocks.
   The bank window costs its real time and stalls the 68000.
-- The SN76489 and YM2612 (registers, timers, busy flag, DAC) live in `src/sound/`, and their mix
-  feeds `audio_take`. Resample with `kit/include/nk/resample.h`.
+- The SN76489, YM2612, and the bounded audio mixer live in `src/sound/`. The YM2612 models ports,
+  timers, busy status, DAC, FM operators/envelopes, algorithms, pan, LFO, and channel 3
+  special-frequency key scaling. The PSG applies data-only writes to the latched register and clocks
+  tone-driven noise from tone 3 rising edges. Synthetic vectors compare raw FM and mixed PCM exactly
+  before BlastEm's host audio filtering; six individually reviewed candidate differences stay in
+  `consoles/md/tests/rom/KNOWN`. The bounded ring keeps its indices monotonic across reset and makes
+  the host drain discard a previous audio generation. Stage 3's gate evidence and limitations are
+  recorded in its plan and SDD ledger; resampling uses `kit/include/nk/resample.h`.
 
 ### Stage 4: pads, cost profiles, the full comparison, the golden master, and 1.0
 - Pads: 3- and 6-button with TH timing, plus the version register and TMSS (`src/io/`).
@@ -194,7 +232,7 @@ master holds once it is recorded.
 | `consoles/snes/CMakeLists.txt`, top-level `CMakeLists.txt` | how a console adds its library (`add_subdirectory(consoles/snes)` today) |
 | `tools/toolchains/{setup.sh,pins.env}` | where BlastEm and vasm get pinned and built |
 | `consoles/snes/docs/snes-decomp-learnings.md` | lessons from the SNES that carry over |
-| `~/src/segagenesisrecomp/{GENESIS_AUDIO_FIDELITY.md,COSIM.md,...}` | background on MD hardware (read only; don't copy code) |
+| the separate `segagenesisrecomp` checkout's `GENESIS_AUDIO_FIDELITY.md`, `COSIM.md`, and related docs | background on MD hardware (read only; don't copy code) |
 
 ## 6. Environment notes and pitfalls
 
@@ -205,14 +243,19 @@ master holds once it is recorded.
 - The local dcg hook blocks `rm -rf` and heredocs containing backticks. Use other forms. The SDD
   workspace from the extraction is still at `.superpowers/sdd/2026-10-30-nativekit-extraction/`
   (git-ignored).
-- Commit messages end with the `Co-Authored-By` / `Claude-Session` lines in the plan's Global
-  Constraints. Ask the user before any outward-facing action (push, PR, merge).
+- Use focused commit subjects consistent with the repository history. Ask before any outward-facing
+  action (push, PR, merge).
 - Never commit ROM content or ROM paths. Survey output holds only feature names and counts.
 
-## 7. Open items, not blocking stage 0
+## 7. Open items after Stage 1
 
+- Stage 1 is exploratory coverage for valid traffic on the pinned `md1va3` candidate. It does not
+  qualify BlastEm as hardware-accurate. The Pico-specific epoch adjustment, 128-KiB VRAM word-fill
+  arm, and invalid VDP data-read returns were not exercised by the fixtures.
+- Exact equivalence between the pinned vasm mirror and the author's 1.9d archive remains unverified;
+  see `docs/research/vasm-1.9d-provenance-audit.md`.
 - PR #1 (nativekit) is still open. `nativemd` is stacked on it, so rebase if it changes.
-- The repo folder rename to `~/src/nativekit` is pending.
+- The repository folder rename to `nativekit` is complete in this checkout.
 - An optional extra check: build Stunt Race FX (jeff-strutb/stuntracefx, shallow clone in
   `build/tools/stuntracefx`) against nativekit. It needs the user's own cartridge, plus
   `NSHVC=<root>/consoles/snes` and the library path for the new layout. The user hasn't decided

@@ -10,8 +10,8 @@
  * addresses; the echo's delay line lives in the same memory. The arithmetic
  * (decoding, Gaussian interpolation, envelopes, the echo's filter) is the
  * sound chip's as Nocash's fullsnes documents it, so the game sounds as it
- * did. It runs a clock at a time, each voice reading what the game set at
- * the clock the chip does, so a change takes effect where it would there.
+ * did. It makes a sample at a time, each voice given what the game had set by
+ * the clock the chip reads it, so a change takes effect where it would there.
  */
 #ifndef PORT_MIXER_H
 #define PORT_MIXER_H
@@ -74,8 +74,30 @@ void mix_voice_output_write(int v, uint8_t value);
 /* one clock (an SPC700 cycle; a frame is 32): 1, with the frame's left and
    right, on the clock that finishes one */
 int mix_clock(int16_t *left, int16_t *right);
+/* n clocks, as n calls of mix_clock: each frame made into out (left, right,
+   interleaved) while it has room for max; the frames made, at most max (a
+   run of n clocks makes n / 32 + 1 at most) */
+int mix_run(int n, int16_t *out, int max);
+/* The sound memory as the chip's clocks up to this one leave it (the echo's
+   writes): call before reading it */
+void mix_settle(void);
+/* Call before each write to the sound memory, made at this clock: the chip's
+   reads before it do not see it, those after it do */
+void mix_before_ram_write(void);
+/* the clocks until a read of a register (0: only the game changes it), or of
+   the RAM the echo writes, could next answer otherwise */
+int mix_reg_next(uint8_t reg);
+int mix_ram_next(void);
+/* 1 while the echo writes the sound RAM (FLG's echo-write bit clear) */
+int mix_writes_ram(void);
+/* 1 if the echo may write the byte at addr in the clocks to come before a
+   write to its settings: it writes the RAM, and addr is in its buffer at
+   the page in use or the one set, at the length in use or the one set */
+int mix_echo_may_write(uint16_t addr);
 /* the clock to run next within the frame, 0-31 */
 int mix_phase(void);
+/* the clocks to run until a KON or KOFF written now is taken */
+int mix_key_clocks(void);
 
 /* the replay check's view: each voice's envelope level and stage (0
    release, 1 attack, 2 decay, 3 sustain), play position, block address and

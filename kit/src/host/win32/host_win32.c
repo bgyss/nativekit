@@ -4,6 +4,8 @@
 #include <windows.h>
 #include <timeapi.h>
 
+#include <stdlib.h>
+
 #include "host.h"
 
 uint64_t host_ticks_ns(void)
@@ -34,4 +36,39 @@ void host_thread_interactive(void) { SetThreadPriority(GetCurrentThread(), THREA
 int host_mkdir(const char *path)
 {
     return CreateDirectoryA(path, NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
+
+/* A separate immutable context lets callers schedule independent callbacks. */
+typedef struct HostEvery {
+    uint32_t ms;
+    void (*fn)(void);
+} HostEvery;
+
+static DWORD WINAPI every_thread(LPVOID arg)
+{
+    const HostEvery *e = (const HostEvery *)arg;
+    for (;;) {
+        host_sleep_ms(e->ms);
+        e->fn();
+    }
+    return 0;
+}
+
+void host_every(uint32_t ms, void (*fn)(void))
+{
+    HostEvery *e;
+    HANDLE t;
+    if (!ms || !fn)
+        return;
+    e = (HostEvery *)malloc(sizeof *e);
+    if (!e)
+        return;
+    e->ms = ms;
+    e->fn = fn;
+    t = CreateThread(NULL, 0, every_thread, e, 0, NULL);
+    if (t)
+        CloseHandle(t);
+    else
+        free(e);
 }

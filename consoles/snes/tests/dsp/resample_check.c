@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "resample.h"
+#include "nk/resample.h"
 
 static double run(double hz, double *level)
 {

@@ -32,6 +32,8 @@ void     host_sleep_ms(uint32_t ms);
 /* the calling thread keeps time for the game (paces frames): ask the OS to
    wake it on time (no timer coalescing) */
 void     host_thread_interactive(void);
+/* Call fn every ms milliseconds on a detached thread until process exit. */
+void     host_every(uint32_t ms, void (*fn)(void));
 
 /* ---- files ------------------------------------------------------------------ */
 int         host_mkdir(const char *path);
@@ -81,6 +83,12 @@ void host_message_box(const char *text, const char *caption);
    scaled to the window; aspect is the shape it is shown at (width over
    height: 4/3 for a television's picture) */
 void host_present(const uint32_t *argb, int w, int h, float aspect);
+
+/* Native text entry; harmless on hosts without a touch-screen keyboard. */
+void host_text_input(int on);
+int host_keyboard_attached(void);
+/* Safe from a timer thread: 0 while the host deliberately parks execution. */
+int host_app_active(void);
 
 /* ---- audio out ------------------------------------------------------------------ */
 /* the callback fills frames of interleaved stereo float, from the host's

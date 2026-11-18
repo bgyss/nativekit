@@ -33,7 +33,8 @@
  *   sprites     for each row and part, the sprites on its row in priority
  *               order (the first on top), the console's line limits
  *               decided (ppu.c obj_eval): CP_SE words each
- *   canvas      the canvas's texels, four to a word
+ *   canvas      the canvas's texels, four to a word (a full-colour
+ *               canvas's, nshvc_ext_canvas_screen32, a word each)
  *   outside     BG1-4's maps outside the console's picture
  *               (nshvc_ext_layer_outside), when one is on
  *   segments    with a frame presenting Mode 7 or a canvas: each part's
@@ -64,13 +65,22 @@
 #define CP_M7SEG 20      /* the parts' segments (0: none, the frame presents neither) */
 #define CP_OUT 21        /* the maps outside the picture: on (bits 0-3) | sizes << 4 (3 bits
                             each), then 8192 entries a layer, two a word (0: none) */
-#define CP_CVSCREEN 22   /* a screen canvas: 1 | priority << 1 | palette << 2 (0: none) */
+#define CP_CVSCREEN 22   /* a screen canvas: 1 | priority << 1 | palette << 2 | its texels a word
+                            each (full colour) << 5 (0: none) */
 #define CP_CVW 23        /* its texels across and down */
 #define CP_CVH 24
 #define CP_TOP 25        /* the hardware's line 1's row */
-#define CP_HEADER 26
+#define CP_VCOPY 26      /* a VRAM copy's 16-bit words */
+#define CP_VGEN 27       /* each copy's count of VRAM writes before it (ppu.h vram_gen), low
+                            word then high: copies with the same count, the same words */
+#define CP_CVFX 35       /* a screen canvas over the whole screen (k 0): its texels across and
+                            down (0: k a console pixel) */
+#define CP_CVFY 36
+#define CP_CVGEN 37      /* the canvas's texels' count of changes (ppu.h cv_gen): the same count,
+                            the same texels */
+#define CP_HEADER 38
 
-#define CP_ST 24         /* a state's words */
+#define CP_ST 28         /* a state's words */
 #define CP_S_INIDISP 0   /* inidisp, obsel, bgmode, mosaic */
 #define CP_S_BGSC 1
 #define CP_S_NBA 2       /* bgnba[0], bgnba[1], m7sel, setini */
@@ -80,7 +90,9 @@
 #define CP_S_TSW 6       /* tsw, cgwsel, cgadsub, clip */
 #define CP_S_HOFS 7      /* bghofs, two a word */
 #define CP_S_VOFS 9
-#define CP_S_FIXED 11    /* the fixed colour: r, g, b */
+#define CP_S_FIXED 11    /* the fixed colour: r, g, b; the windows: edges open (nshvc_ext_window_edges)
+                            | mapped onto the screen << 1 (_window_map) | windows 1, 2 at columns << 2
+                            (_window_columns) */
 #define CP_S_M7AB 12
 #define CP_S_M7CD 13
 #define CP_S_M7XY 14
@@ -91,6 +103,9 @@
 #define CP_S_VBASE 19
 #define CP_S_LAYER 20    /* BG1-4 each: plain (no offset-per-tile, mosaic, hires, canvas or
                             map outside) | bpp << 1 | tile width's shift << 5 | height's << 8 */
+#define CP_S_WCOL 24     /* windows 1 and 2's screen columns (nshvc_ext_window_columns): left,
+                            right, a word each */
+#define CP_S_WMAP 26     /* the windows' map (nshvc_ext_window_map): its scale (16.16), its offset */
 
 #define CP_SE 3          /* a sprite entry: X; row, columns, flips, palette, priority, kept; name */
 
@@ -101,6 +116,9 @@ CP_VAR U32 cp_fdb;
    pixels at it (cp_screens) */
 CP_VAR U32 cp_st[CP_ST];
 CP_VAR U32 cp_main, cp_sub;
+/* a full-colour canvas's colour at the pixel, 0xRRGGBB (cp_bg): a layer's
+   pixel with CP_LP_RGB, or a screen's colour CP_PX_RGB, is it */
+CP_VAR U32 cp_rgb;
 /* the layers the screens leave out (cp_screens, a canvas's record), and
    where cp_bg found the canvas: its character | the pixel's column << 14
    | row << 17 | flips << 20 | palette << 22 | priority << 25, or ~0u */
@@ -174,8 +192,18 @@ CP_FN U32 cp_direct(U32 c, U32 pal)
     return r | g << 5 | b << 10;
 }
 
-/* a layer's pixel: colour | ci << 15 | priority << 23 | opaque << 24 */
+/* a layer's pixel: colour | ci << 15 | priority << 23 | opaque << 24, |
+   CP_LP_RGB: its colour cp_rgb */
 #define CP_LP(color, ci, prio) ((color) | (ci) << 15 | (prio) << 23 | 0x1000000u)
+#define CP_LP_RGB 0x2000000u
+
+/* a screen canvas over the whole screen: fx texels across n pixels, the
+   texel under the point f / 1024 into pixel c (rr_mode7.h rr_cv_fit) */
+CP_FN U32 cp_cv_fit(U32 c, U32 f, U32 fx, U32 n)
+{
+    U32 a = c * fx, q = a / n, e = a - q * n;
+    return q + (1024u * e + f * fx) / (1024u * n);
+}
 
 /* the canvas's texel for char address ca of layer n (ppu.c cv_char and
    cv_centre), or 256 when the canvas does not cover it */
@@ -256,11 +284,24 @@ CP_FN U32 cp_bg(U32 si, U32 n, U32 x, I32 dr, U32 my)
         U32 k = FD_(CP_CVK), sc = FD_(CP_CVSCREEN), prio = (sc >> 1) & 1u, spal = (sc >> 2) & 7u;
         I32 R = dr + I_(FD_(CP_TOP));
         U32 ex = x * k + (k >> 1), ey = U_(R) * k + (k >> 1), v = 0u;
+        if (FD_(CP_CVFX) != 0u && R >= 0) {
+            /* (over the whole screen: the texel under the pixel's centre) */
+            ex = cp_cv_fit(x, 512u, FD_(CP_CVFX), FD_(CP_SW));
+            ey = cp_cv_fit(U_(R), 512u, FD_(CP_CVFY), FD_(CP_PH));
+        }
         if (R >= 0 && ex < FD_(CP_CVW) && ey < FD_(CP_CVH)) {
             U32 at = ey * FD_(CP_CVW) + ex;
-            v = (FD_(FD_(CP_CV) + (at >> 2)) >> (8u * (at & 3u))) & 0xFFu;
+            if ((sc & 0x20u) != 0u)
+                v = FD_(FD_(CP_CV) + at);
+            else
+                v = (FD_(FD_(CP_CV) + (at >> 2)) >> (8u * (at & 3u))) & 0xFFu;
         }
         cp_cvat = spal << 22 | prio << 25;
+        if (v >= 0x1000000u) {
+            /* a full colour (nshvc_ext_canvas_screen32) */
+            cp_rgb = v & 0xFFFFFFu;
+            return CP_LP(0u, 0u, prio) | CP_LP_RGB;
+        }
         v &= (1u << bpp) - 1u;
         if (v == 0u)
             return prio << 23;
@@ -483,11 +524,40 @@ CP_FN U32 cp_obj(U32 si, U32 p, U32 x)
     return 0u;
 }
 
+/* (ppu.c wmap_col) the screen's column console column c (0-256) maps to:
+   c * scale / 65536 rounded down, plus the offset, in two parts that stay
+   inside 32 bits */
+CP_FN I32 cp_wmap(U32 si, I32 c)
+{
+    U32 k = cp_sw(si, U_(CP_S_WMAP));
+    return c * I_(k >> 16) + I_((U_(c) * (k & 0xFFFFu)) >> 16) + I_(cp_sw(si, U_(CP_S_WMAP) + 1u));
+}
+
+/* (ppu.c win_in) whether column x (the hardware's) is inside window n
+   (0, 1): at its screen columns; mapped onto the screen, L to R covering
+   the columns L maps to up to the one before R + 1's; else past the
+   picture outside but that, its edges open, a window from column 0
+   reaches every column left of it and one to column 255 every column
+   right */
+CP_FN U32 cp_win_in(U32 si, U32 n, I32 x)
+{
+    I32 l = I_(cp_b(si, U_(CP_S_WH), 2u * n)), r = I_(cp_b(si, U_(CP_S_WH), 2u * n + 1u));
+    I32 sx = x + I_(FD_(CP_SL));
+    U32 f = cp_b(si, U_(CP_S_FIXED), 3u);
+    if (((f >> (2u + n)) & 1u) != 0u)
+        return sx >= I_(cp_h(si, U_(CP_S_WCOL) + n, 0u)) && sx <= I_(cp_h(si, U_(CP_S_WCOL) + n, 1u)) ? 1u : 0u;
+    if ((f & 2u) != 0u)
+        return sx >= cp_wmap(si, l) && sx < cp_wmap(si, r + 1) ? 1u : 0u;
+    if ((f & 1u) != 0u && x < 0 && l == 0)
+        x = 0;
+    else if ((f & 1u) != 0u && x > 255 && r == 255)
+        x = 255;
+    return x >= l && x <= r ? 1u : 0u;
+}
+
 CP_FN U32 cp_win(U32 si, U32 sel, U32 logic, I32 x)
 {
-    U32 w1 = x >= I_(cp_b(si, U_(CP_S_WH), 0u)) && x <= I_(cp_b(si, U_(CP_S_WH), 1u)) ? 1u : 0u;
-    U32 w2 = x >= I_(cp_b(si, U_(CP_S_WH), 2u)) && x <= I_(cp_b(si, U_(CP_S_WH), 3u)) ? 1u : 0u;
-    U32 e1 = sel & 2u, e2 = sel & 8u;
+    U32 w1 = cp_win_in(si, 0u, x), w2 = cp_win_in(si, 1u, x), e1 = sel & 2u, e2 = sel & 8u;
     if (e1 == 0u && e2 == 0u)
         return 0u;
     if ((sel & 1u) != 0u) w1 ^= 1u;
@@ -524,8 +594,10 @@ CP_FN U32 cp_clipped(U32 si, U32 n, U32 x, I32 dr)
                : 0u;
 }
 
-/* a screen's pixel: colour | depth << 16 | layer << 21 */
+/* a screen's pixel: colour | depth << 16 | layer << 21; colour CP_PX_RGB:
+   cp_rgb */
 #define CP_PX(color, z, layer) ((color) | (z) << 16 | (layer) << 21)
+#define CP_PX_RGB 0x8000u
 
 /* put a layer's pixel (m on the main screen, b on the sub) at depth z
    (ppu.c put_layer); which (0 main, 1 sub) */
@@ -539,7 +611,7 @@ CP_FN U32 cp_put(U32 si, U32 layer, U32 lp, U32 zz, U32 cur, U32 which, U32 x, I
         inside = cp_win(si, cp_sel(si, layer), cp_logic(si, layer), I_(x) - I_(FD_(CP_SL)));
     if (inside != 0u && ((wn >> layer) & 1u) != 0u)
         return cur;
-    return CP_PX(lp & 0x7FFFu, zz, layer);
+    return CP_PX((lp & CP_LP_RGB) != 0u ? CP_PX_RGB : lp & 0x7FFFu, zz, layer);
 }
 
 /* background n's depth for priority prio in the mode (draw_line's tables) */
@@ -573,6 +645,45 @@ CP_FN U32 cp_region(U32 mode, U32 inside)
     return 1u;
 }
 
+/* channel k (0 red, 1 green, 2 blue) of colour c, 15-bit or a full
+   colour 0x1000000 | 0xRRGGBB, in eighths of a console step (rr_mode7.h
+   rr_rgb_eighths) */
+CP_FN U32 cp_rgb_eighths(U32 c, U32 k)
+{
+    U32 v;
+    if ((c & 0x1000000u) == 0u)
+        return ((c >> (5u * k)) & 31u) << 3;
+    v = (c >> (16u - 8u * k)) & 0xFFu;
+    return v - (v >> 5);
+}
+
+/* colour c out of colour maths with o and brightness where either is a
+   full colour (rr_mode7.h rr_rgb_finish) */
+CP_FN U32 cp_rgb_finish(U32 c, U32 o, U32 math, U32 sub, U32 halve, U32 bright)
+{
+    U32 res = 0xFF000000u, k, sh, z, y;
+    for (k = 0u; k < 3u; k++) {
+        sh = 16u - 8u * k;
+        if (math == 0u && bright == 15u && (c & 0x1000000u) != 0u) {
+            res |= c & (0xFFu << sh);
+        } else {
+            z = cp_rgb_eighths(c, k);
+            if (math != 0u) {
+                y = cp_rgb_eighths(o, k);
+                z = sub != 0u ? (z > y ? z - y : 0u) : z + y;
+                if (halve != 0u)
+                    z = (z >> 4) << 3;
+                if (z > 248u)
+                    z = 248u;
+            }
+            if (bright != 15u)
+                z = ((((z >> 3) * bright + 7u) * 4370u) >> 16) << 3;
+            res |= (z + (z >> 5)) << sh;
+        }
+    }
+    return res;
+}
+
 /* one pixel's colour out of its screen m and the other one o (ppu.c finish) */
 CP_FN U32 cp_finish(U32 si, U32 m, U32 o, I32 x)
 {
@@ -582,19 +693,25 @@ CP_FN U32 cp_finish(U32 si, U32 m, U32 o, I32 x)
     U32 cw = cp_win(si, cp_sel(si, 5u), cp_logic(si, 5u), x);
     U32 clip = cp_region(cgwsel >> 6, cw), prevent = cp_region(cgwsel >> 4, cw);
     U32 ml = (m >> 21) & 7u, bit = ml == 5u ? 5u : ml == 6u ? 8u : ml;
-    U32 c = clip != 0u ? 0u : m & 0x7FFFu, r = c & 31u, g = (c >> 5) & 31u, b = (c >> 10) & 31u;
-    if (bit < 8u && ((cgadsub >> bit) & 1u) != 0u && prevent == 0u) {
-        U32 oc, halve = (cgadsub & 0x40u) != 0u && clip == 0u ? 1u : 0u;
+    U32 c = clip != 0u ? 0u : m & 0xFFFFu, r = c & 31u, g = (c >> 5) & 31u, b = (c >> 10) & 31u;
+    U32 math = bit < 8u && ((cgadsub >> bit) & 1u) != 0u && prevent == 0u ? 1u : 0u, oc = 0u, halve = 0u;
+    if (math != 0u) {
+        halve = (cgadsub & 0x40u) != 0u && clip == 0u ? 1u : 0u;
         if ((cgwsel & 2u) != 0u) {
             if (((o >> 21) & 7u) == 5u) {
                 oc = fixc;
                 halve = 0u;
             } else {
-                oc = o & 0x7FFFu;
+                oc = o & 0xFFFFu;
             }
         } else {
             oc = fixc;
         }
+    }
+    if (((c | oc) & CP_PX_RGB) != 0u)
+        return cp_rgb_finish(c == CP_PX_RGB ? 0x1000000u | cp_rgb : c, oc == CP_PX_RGB ? 0x1000000u | cp_rgb : oc, math,
+                             (cgadsub & 0x80u) != 0u ? 1u : 0u, halve, bright);
+    if (math != 0u) {
         if ((cgadsub & 0x80u) != 0u) {
             r = r > (oc & 31u) ? r - (oc & 31u) : 0u;
             g = g > ((oc >> 5) & 31u) ? g - ((oc >> 5) & 31u) : 0u;

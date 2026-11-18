@@ -60,7 +60,7 @@ enum {
 
 typedef struct {
     int kind;
-    uint32_t buttons[2];
+    uint32_t buttons[NK_PLAYERS];
     long frames;
     char name[128];
     char *text;             /* the line (the console's own steps) */
@@ -96,7 +96,7 @@ void nk_script_console(const nk_console *c) { con = c; }
 
 int nk_script_steps(void) { return main_list.n; }
 
-static Step *add_step(List *l, int kind, uint32_t b0, uint32_t b1, long frames, const char *name)
+static Step *add_step(List *l, int kind, const uint32_t *buttons, long frames, const char *name)
 {
     Step *s;
     l->s = (Step *)realloc(l->s, sizeof *l->s * (size_t)(l->n + 1));
@@ -105,8 +105,8 @@ static Step *add_step(List *l, int kind, uint32_t b0, uint32_t b1, long frames, 
     s = &l->s[l->n++];
     memset(s, 0, sizeof *s);
     s->kind = kind;
-    s->buttons[0] = b0;
-    s->buttons[1] = b1;
+    if (buttons)
+        memcpy(s->buttons, buttons, sizeof s->buttons);
     s->frames = frames;
     if (name)
         snprintf(s->name, sizeof s->name, "%s", name);
@@ -115,7 +115,7 @@ static Step *add_step(List *l, int kind, uint32_t b0, uint32_t b1, long frames, 
 
 static Step *add_text(List *l, int kind, const char *text, int line)
 {
-    Step *s = add_step(l, kind, 0, 0, 0, NULL);
+    Step *s = add_step(l, kind, NULL, 0, NULL);
     s->text = strdup(text);
     s->line = line;
     if (!s->text)
@@ -124,13 +124,13 @@ static Step *add_text(List *l, int kind, const char *text, int line)
 }
 
 /* the console's buttons (nk_console.buttons) by name, '+' between them;
-   2. before one for player 2 (2.START) */
-static int parse_buttons(const char *t, uint32_t *b0, uint32_t *b1)
+   N. before one for player N, up to the console's player count (2.START) */
+static int parse_buttons(const char *t, uint32_t b[NK_PLAYERS])
 {
     const nk_button *k = con->buttons;
     int nk = con->button_count;
     char buf[256], *p, *next;
-    *b0 = *b1 = 0;
+    memset(b, 0, sizeof(uint32_t) * NK_PLAYERS);
     snprintf(buf, sizeof buf, "%s", t);
     for (p = buf; p; p = next) {
         int pad = 0;
@@ -138,8 +138,8 @@ static int parse_buttons(const char *t, uint32_t *b0, uint32_t *b1)
         next = strchr(p, '+');
         if (next)
             *next++ = 0;
-        if (!strncmp(p, "2.", 2)) {
-            pad = 1;
+        if (p[0] >= '2' && p[0] <= '9' && p[1] == '.' && p[0] - '0' <= con->players) {
+            pad = p[0] - '1';
             p += 2;
         }
         for (i = 0; i < nk; i++)
@@ -147,10 +147,7 @@ static int parse_buttons(const char *t, uint32_t *b0, uint32_t *b1)
                 break;
         if (i == nk)
             return 0;
-        if (pad)
-            *b1 |= k[i].bit;
-        else
-            *b0 |= k[i].bit;
+        b[pad] |= k[i].bit;
     }
     return 1;
 }
@@ -188,22 +185,22 @@ static void script_range(List *l, char **lines, int lo, int hi, const char *path
     int i;
     for (i = lo; i < hi; i++) {
         char cmd[64] = "", a[256] = "", b[64] = "";
-        uint32_t b0, b1;
+        uint32_t buttons[NK_PLAYERS];
         int n = sscanf(lines[i], "%63s %255s %63s", cmd, a, b);
         if (n < 1)
             continue;
         if (!strcmp(cmd, "wait")) {
-            add_step(l, S_FRAMES, 0, 0, atol(a), NULL);
+            add_step(l, S_FRAMES, NULL, atol(a), NULL);
         } else if (!strcmp(cmd, "hold") || !strcmp(cmd, "press")) {
-            if (!parse_buttons(a, &b0, &b1))
+            if (!parse_buttons(a, buttons))
                 nk_fatal("%s:%d: buttons '%s'", path, i + 1, a);
-            add_step(l, S_FRAMES, b0, b1, b[0] ? atol(b) : (cmd[0] == 'p' ? 2 : 1), NULL);
+            add_step(l, S_FRAMES, buttons, b[0] ? atol(b) : (cmd[0] == 'p' ? 2 : 1), NULL);
             if (cmd[0] == 'p')
-                add_step(l, S_FRAMES, 0, 0, 2, NULL);
+                add_step(l, S_FRAMES, NULL, 2, NULL);
         } else if (!strcmp(cmd, "shot") || !strcmp(cmd, "dump") || !strcmp(cmd, "save") || !strcmp(cmd, "load")) {
             if (n < 2)
                 nk_fatal("%s:%d: %s NAME", path, i + 1, cmd);
-            add_step(l, cmd[0] == 's' ? (cmd[1] == 'h' ? S_SHOT : S_SAVE) : cmd[0] == 'd' ? S_DUMP : S_LOAD, 0, 0, 0,
+            add_step(l, cmd[0] == 's' ? (cmd[1] == 'h' ? S_SHOT : S_SAVE) : cmd[0] == 'd' ? S_DUMP : S_LOAD, NULL, 0,
                      a)->line = i + 1;
         } else if (own_step(cmd)) {
             add_text(l, S_INPUT, lines[i], i + 1);
@@ -772,7 +769,7 @@ static int frame_out(void)
     return 1;
 }
 
-int nk_script_frame(uint32_t *b0, uint32_t *b1)
+int nk_script_frame(uint32_t b[NK_PLAYERS])
 {
     start();
     if (counting && shared) {
@@ -799,8 +796,7 @@ int nk_script_frame(uint32_t *b0, uint32_t *b1)
             step_left = 0;
             continue;
         }
-        *b0 = s->buttons[0];
-        *b1 = s->buttons[1];
+        memcpy(b, s->buttons, sizeof s->buttons);
         if (--step_left == 0)
             step_at++;
         return frame_out();

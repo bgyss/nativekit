@@ -12,7 +12,7 @@
 #include "nshvc/nshvc.h"
 #include "snes_internal.h"
 #include "snes_rr.h"
-#include "rr_size.h"
+#include "nk/rr_size.h"
 #include "rr_mode7.h"
 #include "snes_console.h"
 #include "nk/input.h"
@@ -21,17 +21,17 @@
 /* the canvas's texels a console pixel along each axis for a picture shown
    w x h: the window's pixels a console pixel, rounded up (so a canvas at
    that scale has at least a texel a window pixel) */
+static int presented_w, presented_h;
+
 static void canvas_scale(int w, int h)
 {
     const PpuFrame *f = ppu_frame();
+    presented_w = w;
+    presented_h = h;
     int kx = (w + f->width - 1) / f->width, ky = (h + f->screen_height - 1) / f->screen_height;
     ppu_set_canvas_scale(kx > ky ? kx : ky);
 }
 
-/* The last frame's picture over target rectangle d: drawn by the
-   renderer's compositor from the frame's description where it has one
-   (render/compose_body.h; NSHVC_COMPOSE=0: never), else the PPU's picture
-   drawn here. An interlaced frame's weave is the PPU's. */
 static void show_picture(const int d[4])
 {
     static int on = -1;
@@ -48,8 +48,12 @@ static void show_picture(const int d[4])
     } else if (on && f->versions > 0) {
         /* an interlaced frame: woven from its description and, for the
            rows that are the frame before's, that one's */
-        static uint32_t *both;
-        static size_t cap;
+        static uint32_t *both, *kept;
+        static size_t cap, kept_n, kept_cap;
+        /* the description last composed as the finished frame's: the next
+           frame's frame before (the same record, whole until then) */
+        static const PpuFrame *kept_f;
+        static long kept_no = -2;
         int ww, wh, from[2];
         size_t na, nb = 0;
         const uint32_t *a;
@@ -63,7 +67,13 @@ static void show_picture(const int d[4])
             if (both) {
                 memcpy(both, a, na * sizeof *both);
                 if (from[0] | from[1]) {
-                    const uint32_t *b = ppu_compose(ppu_frame_before(), &nb);
+                    const uint32_t *b;
+                    if (kept && kept_f == ppu_frame_before() && kept_no + 1 == nk_frame_no()) {
+                        b = kept;
+                        nb = kept_n;
+                    } else {
+                        b = ppu_compose(ppu_frame_before(), &nb);
+                    }
                     if (na + nb > cap) {
                         uint32_t *g = (uint32_t *)realloc(both, (na + nb) * sizeof *both);
                         if (g) {
@@ -76,6 +86,18 @@ static void show_picture(const int d[4])
                     else
                         nb = (size_t)-1;
                 }
+                if (na > kept_cap) {
+                    free(kept);
+                    kept = (uint32_t *)malloc(na * sizeof *kept);
+                    kept_cap = kept ? na : 0;
+                }
+                kept_f = NULL;
+                if (kept) {
+                    memcpy(kept, both, na * sizeof *kept);
+                    kept_n = na;
+                    kept_f = f;
+                    kept_no = nk_frame_no();
+                }
                 if (nb != (size_t)-1 &&
                     rr_compose_woven(both, na + nb, ww, wh, from[0] ? (uint32_t)na : 0, from[1] ? (uint32_t)na : 0, d))
                     return;
@@ -84,6 +106,22 @@ static void show_picture(const int d[4])
     }
     px = ppu_picture(&pw, &ph);
     rr_image(px, pw, ph, d);
+}
+
+void nshvc_ext_canvas_presented(int *w, int *h)
+{
+    const PpuFrame *f = ppu_frame();
+    double sx, sy;
+    int pw = presented_w, ph = presented_h;
+    if (!pw) {
+        nk_shot_scale(&sx, &sy);
+        pw = sx ? (int)(f->width * sx + 0.5) : f->width;
+        ph = sy ? (int)(f->screen_height * sy + 0.5) : f->screen_height;
+    }
+    if (w)
+        *w = pw < 1 ? 1 : pw;
+    if (h)
+        *h = ph < 1 ? 1 : ph;
 }
 
 /* ---- a frame with Mode 7 or a canvas presented (render/rr_mode7.h) ---- */

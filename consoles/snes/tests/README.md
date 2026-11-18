@@ -92,3 +92,18 @@ later than the reference's, though the reference's own formula gives
 nativeshvc's clock for it; not yet explained. A test that differs goes in
 `rom/KNOWN` with the reason; `rom/run.py` reports it as KNOWN, never as
 passing, and reports any that start passing, so the list is kept true.
+
+
+## Compatible upstream checks
+
+`mise run test:snes-upstream`, or `cmake --build BUILD --target
+snes-upstream-check`, runs the imported window edge/map/column checks,
+full-colour canvases, pause, backdrop, rebindings, direct chip memory,
+waits, bulk HDMA, scaling and expected fatal cases. `upstream_check.py BUILD`
+can run those executables from a separate build tree and bounds each check.
+The full ROM matrix also contains the added synthetic hardware cases.
+
+`canvas32_check` installs the console's renderer open hook when testing a GPU
+backend. Failure to open that backend is a failure, not an implicit GPU pass.
+Software checks remain available without a GPU. Platform evidence for this
+sync is recorded in [../docs/upstream-sync.md](../docs/upstream-sync.md).
