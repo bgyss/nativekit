@@ -206,3 +206,7 @@ run = "python3 consoles/snes/tests/golden.py compare build/golden"
 description = "Check compatible upstream SNES APIs, timing, graphics and fatal paths"
 depends = ["build:null"]
 run = "cmake --build build/null --target snes-upstream-check"
+
+[tasks."test:decomp"]
+description = "Run synthetic MD recovery, NES foundation and actual-core NES capture checks"
+depends = ["test:md-decomp", "test:nes", "test:nes-capture"]

@@ -238,7 +238,7 @@ class Machine:
         else:
             ram[offset ^ 1] = value
 
-    def frame(self, inputs):
+    def frame(self, inputs, snapshots=None):
         """Run one frame; the hashes of its picture, sound and snapshot regions."""
         self.inputs = inputs
         self.video, self.audio = hashlib.sha256(), hashlib.sha256()
@@ -255,7 +255,11 @@ class Machine:
                                                  self._name, len(self._name))
             if not size:
                 break
-            hashes[self._name.value.decode()] = hashlib.sha256(self._buffer.raw[:size]).hexdigest()
+            name = self._name.value.decode()
+            data = self._buffer.raw[:size]
+            hashes[name] = hashlib.sha256(data).hexdigest()
+            if snapshots is not None and name == "work_ram":
+                snapshots[name] = data
             region += 1
         if region == 0:
             self.errors.append("the core gave no comparison snapshot")
@@ -372,9 +376,11 @@ def _reference(args, scenario, routines, rom_size):
     _register(machine.core, handler, routines)
     inputs = runner._load_inputs(scenario, args.frames)
     frames = []
+    snapshots = {}
     for number in range(1, args.frames + 1):
         frame[0] = number
-        frames.append(machine.frame(inputs.get(number, {})))
+        frames.append(machine.frame(inputs.get(number, {}),
+                                    snapshots if number == args.inspect_frame else None))
         feed.frame_end()
         feed.slice_end()                        # the Z80 stopped where the frame ended
         if machine.errors:
@@ -425,7 +431,7 @@ def _reference(args, scenario, routines, rom_size):
         leftover = arrivals[position:]
         loops[key].update(leftover[1:])
         entered[key] = len(rows) + (1 if leftover else 0)
-    return {"frames": frames, "schedule": schedule, "entered": entered, "loops": loops}
+    return {"snapshots": snapshots, "frames": frames, "schedule": schedule, "entered": entered, "loops": loops}
 
 
 def _register(core, handler, routines):
@@ -716,7 +722,8 @@ def _hybrid(args, scenario, routines, rom_size, reference):
     compared = 0
     for number in range(1, args.frames + 1):
         current[0] = number
-        hashes = machine.frame(inputs.get(number, {}))
+        snapshot = {} if number == args.inspect_frame else None
+        hashes = machine.frame(inputs.get(number, {}), snapshot)
         if divergence:
             break
         if machine.errors:
@@ -724,7 +731,18 @@ def _hybrid(args, scenario, routines, rom_size, reference):
         expected = reference["frames"][number - 1]
         regions = sorted(name for name in expected if hashes.get(name) != expected[name])
         if regions:
-            diverge(kind="frame", what="state after the frame differs", regions=regions)
+            detail = {}
+            if snapshot is not None and "work_ram" in regions:
+                expected_ram = reference["snapshots"]["work_ram"]
+                actual_ram = snapshot["work_ram"]
+                for offset in range(0, len(expected_ram), 2):
+                    expected_word = int.from_bytes(expected_ram[offset:offset + 2], sys.byteorder)
+                    actual_word = int.from_bytes(actual_ram[offset:offset + 2], sys.byteorder)
+                    if expected_word != actual_word:
+                        detail.update(word_address=0xff0000 + offset, expected_word=expected_word,
+                                      actual_word=actual_word)
+                        break
+            diverge(kind="frame", what="state after the frame differs", regions=regions, **detail)
             break
         compared += 1
     for key in routines:        # calls the original made that the hybrid never reached
@@ -764,7 +782,7 @@ def _sha256(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
-def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout=600):
+def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout=600, inspect_frame=None):
     """Both runs; return (and write) the lockstep report."""
     out = pathlib.Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -779,6 +797,10 @@ def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout
                 for name in ("lockstep.py", "check_calls.py", "run.py", "check/live.c"))).hexdigest(),
         },
     }
+    if inspect_frame is not None:
+        if not 1 <= inspect_frame <= frames:
+            raise ValueError("inspection frame must be inside the run")
+        report["inspect_frame"] = inspect_frame
     for stale in ("reference.pickle", "hybrid.json", "lockstep.json"):
         (out / stale).unlink(missing_ok=True)
     started = time.monotonic()
@@ -788,6 +810,8 @@ def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout
         command = [sys.executable, str(pathlib.Path(__file__).resolve()), "--worker", worker,
                    "--core", str(core), "--rom", str(rom), "--scenario", str(worker_scenario),
                    "--frames", str(frames), "--library", str(library), "--out", str(out)]
+        if inspect_frame is not None:
+            command.extend(["--inspect-frame", str(inspect_frame)])
         child = runner.supervise_child(command, max(remaining, 0.001))
         if child.timed_out:
             report.update(verdict="INCONCLUSIVE", certified=False,
@@ -841,6 +865,7 @@ def main(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--hybrid-scenario", help="another scenario for the hybrid run (a control)")
     parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--inspect-frame", type=int, help="compare RAM words at this frame while preserving the full schedule")
     parser.add_argument("--worker", choices=("reference", "hybrid"), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.worker:
@@ -850,7 +875,7 @@ def main(argv=None):
             sys.exit("lockstep: " + str(exc))
         return
     report = run(args.core, args.rom, args.scenario, args.frames, args.library, args.out,
-                 args.hybrid_scenario, args.timeout)
+                 args.hybrid_scenario, args.timeout, args.inspect_frame)
     print(summary(report))
     sys.exit(0 if report["verdict"] == "IDENTICAL" else 1)
 
