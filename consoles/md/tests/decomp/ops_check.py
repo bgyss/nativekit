@@ -55,6 +55,10 @@ def m68k_tests():
     tests.append(("mulu.w d3,d0", len(M68K_OPS) + 3, 32))
     tests.append(("muls.w d3,d0", len(M68K_OPS) + 4, 32))
     tests.append(("divu.w d3,d0", len(M68K_OPS) + 5, 32))     # a zero divisor traps: skipped
+    for offset, name in ((6, "addx"), (7, "subx")):         # with X both ways (the ccr)
+        for suffix, bits in SIZES:
+            tests.append(("%s.%s d3,d0" % (name, suffix), len(M68K_OPS) + offset, bits))
+    tests.append(("abcd.b d3,d0", len(M68K_OPS) + 8, 8))
     return tests
 
 

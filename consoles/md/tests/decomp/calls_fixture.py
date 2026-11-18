@@ -97,6 +97,7 @@ nocov:  move.l  #$12345678,($FF0100).l
         lea     ($FF00C0).l,a1
         bsr.w   ulast2                  ; called into the middle of the run
         bsr.w   absw
+        bsr.w   extend
         move.w  #$8A20,($C00004).l      ; a horizontal interrupt every 33 lines
         move.w  #$8014,($C00004).l
         bsr.w   irqon
@@ -264,6 +265,25 @@ absw:   lea     ($FFFF8010).w,a0        ; absolute short: sign-extended in A0
         move.w  #$1234,(a0)
         rts
 
+        org     $6B0
+extend: move.l  #$FFFF0001,d1           ; a 64-bit add by ADDX, then BCD in memory
+        moveq   #1,d2
+        moveq   #0,d3
+        moveq   #0,d4
+        add.l   d1,d2
+        addx.l  d3,d4
+        move.l  d4,($FF00D0).l
+        move.l  d2,($FF00D4).l
+        move.l  #$00995599,($FF00D8).l
+        move.l  #$00014501,($FF00DC).l
+        lea     ($FF00DC).l,a0
+        lea     ($FF00E0).l,a1
+        move    #$04,ccr                ; X clear, Z set: ABCD keeps Z only while 0
+        abcd.b  -(a0),-(a1)
+        abcd.b  -(a0),-(a1)
+        abcd.b  -(a0),-(a1)
+        rts
+
         org     $700
 hint:   addq.w  #1,($FF0080).l
         rte
@@ -296,7 +316,7 @@ ROUTINES = {"sum": 0x400, "poke": 0x420, "dispatch": 0x440, "handler0": 0x480,
             "pad": 0x580, "tone": 0x5A0, "irqon": 0x5C0, "dma": 0x5E0, "count": 0x5D0,
             "below": 0x7E2, "tailc": 0x7F0, "busy": 0x720, "trapper": 0x620,
             "vbwait": 0x660, "unroll": 0x680, "ulast2": 0x694,
-            "absw": 0x6A0}
+            "absw": 0x6A0, "extend": 0x6B0}
 NOCODE = 0x560
 Z_FETCH = 0x20
 LOOPS = 6
