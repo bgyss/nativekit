@@ -108,8 +108,9 @@ recognises five forms by their opcodes:
 | `direct` | `lea T,An` … `jsr (An)` | `T` |
 | `pointer` | `lea T,Am` [`adda.w x,Am`] `movea.l (..Am..),An` … `jsr (An)`, or `movea.l (T,pc,Xn),An` | rows of long addresses at `T` |
 | `offset` | `lea T,An`, `move.w (d,An,Xm),Dn`, `jsr (d',An,Dn.w)` | rows of words added to `T+d'` |
+| `offset` | `move.w (T,pc,Xm),Dn` then `jmp (T',pc,Dn.w)`, or `move.w (d,Am,Xk),Dn` (`Am` loaded with `lea T`) then `jmp (T',pc,Dn.w)` | rows of words at `T` (`T+d`) added to `T'` |
 | `branch` | `jmp (T,pc,Xn)` with `bra.w` at `T` | each `bra.w` row |
-| `inline` | `jmp (T,pc,Xn)` otherwise | `T` only: code entered at a computed distance |
+| `inline` | `jmp (T,pc,Xn)` not read from a table just before | `T` only: code entered at a computed distance |
 
 A path that reaches a call, a routine entry, another write of the register or
 24 instructions is unknown, and the site's tables are marked incomplete. The
@@ -429,6 +430,24 @@ what was kept of them was each manifest, each record digest and the code map.
   the table ran four at a time and the full ones one at a time, so their
   times are not a like-for-like comparison; the record digest costs about
   what writing the events did.
+
+### Jump tables in the second title
+
+2026-11-16, the second title's 900-frame no-input digest. Its computed jumps
+mostly read a word table just before `jmp (T,pc,Dn.w)`, a form the first
+title does not use; before it was read they were `inline` (only `T` known):
+
+| | Before | With the PC-relative offset forms |
+|---|---:|---:|
+| Computed transfers with tables | 24 of 48 | 31 of 48 |
+| Code bytes by table evidence | 7,398 | 11,886 |
+| Entries | 332 | 495 |
+| Raw code bytes | 4 | 0 |
+
+The rebuild is identical either way, and the first title's code map is
+unchanged by the new forms (the same instructions and 15 tables). Most of the
+rest jump through a register a caller or a structure set: `jsr (a1)` after
+`movea.l (8,a3,d0.w),a1`, and `jmp (a0)` returns in arithmetic routines.
 
 ### Jump tables in the first title
 
