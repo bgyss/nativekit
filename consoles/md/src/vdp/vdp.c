@@ -298,6 +298,16 @@ uint8_t md_vdp_vram_byte(uint16_t addr)
     return vram[addr];
 }
 
+const void *md_vdp_memory(int which, size_t *bytes)
+{
+    switch (which) {
+    case 0: *bytes = sizeof vram; return vram;
+    case 1: *bytes = sizeof cram; return cram;
+    case 2: *bytes = sizeof vsram; return vsram;
+    default: *bytes = sizeof registers; return registers;
+    }
+}
+
 uint16_t md_vdp_cram_value(unsigned index)
 {
     return cram[index & 0x3Fu];

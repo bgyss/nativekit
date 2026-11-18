@@ -47,7 +47,8 @@ endif()
 add_library(nk_input OBJECT ${NK_DIR}/src/front/input.c)
 
 # the application: main's loop, the window, the pace, the sound out
-add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c ${NK_DIR}/src/front/backdrop.c)
+add_library(nk_app OBJECT ${NK_DIR}/src/front/app.c ${NK_DIR}/src/front/backdrop.c
+  ${NK_DIR}/src/front/session.c)
 
 # the presentation backend (NK_RENDER). On Metal and GL its frameworks or
 # libraries are nk_render's link libraries, for the console's library to

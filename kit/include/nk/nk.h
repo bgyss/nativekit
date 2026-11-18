@@ -85,6 +85,9 @@ typedef struct nk_console {
     /* the players' controllers from the frame's input: headless, the
        script's buttons (b: players entries); else the kit's devices (input.h) */
     void     (*input)(int headless, const uint32_t *b);
+    /* optional, needed by --record: the players' controllers as they stand
+       (b: NK_PLAYERS entries, each player's buttons by nk_button.bit) */
+    void     (*held)(uint32_t *b);
     void     (*frame)(void);            /* optional: the game's frame hook */
 
     /* memories */

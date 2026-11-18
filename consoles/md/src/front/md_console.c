@@ -157,6 +157,13 @@ static void input(int headless, const uint32_t *buttons)
     }
 }
 
+/* The pads' buttons as they stand, for the kit's recorder. */
+static void held(uint32_t *buttons)
+{
+    buttons[0] = md_io_button_mask(0);
+    buttons[1] = md_io_button_mask(1);
+}
+
 static void counts_hooks(void (*rd)(uint32_t addr, uint8_t value),
                          void (*wr)(uint32_t addr, uint8_t value))
 {
@@ -181,9 +188,18 @@ static const void *region_z80_ram(size_t *bytes)
     return nmd_z80_ram();
 }
 
+static const void *region_vram(size_t *bytes) { return md_vdp_memory(0, bytes); }
+static const void *region_cram(size_t *bytes) { return md_vdp_memory(1, bytes); }
+static const void *region_vsram(size_t *bytes) { return md_vdp_memory(2, bytes); }
+static const void *region_vdp_registers(size_t *bytes) { return md_vdp_memory(3, bytes); }
+
 static const nk_region regions[] = {
     { ".wram", region_work_ram, 0 },
     { ".zram", region_z80_ram, 0 },
+    { ".vram", region_vram, 0 },
+    { ".cram", region_cram, 0 },
+    { ".vsram", region_vsram, 0 },
+    { ".vdpreg", region_vdp_registers, 0 },
 };
 
 const nk_console nmd_console = {
@@ -208,6 +224,7 @@ const nk_console nmd_console = {
     .buttons = buttons,
     .button_count = (int)(sizeof buttons / sizeof buttons[0]),
     .input = input,
+    .held = held,
     .regions = regions,
     .region_count = (int)(sizeof regions / sizeof regions[0]),
     .counts_hooks = counts_hooks,

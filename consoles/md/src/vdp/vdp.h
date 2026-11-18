@@ -2,6 +2,7 @@
 #ifndef NMD_VDP_H
 #define NMD_VDP_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "nmd/cart.h"
@@ -37,6 +38,9 @@ void md_vdp_dimensions(int *width, int *height);
 uint16_t md_vdp_hv_counter(void);
 uint8_t md_vdp_register(unsigned reg);
 uint8_t md_vdp_vram_byte(uint16_t addr);
+/* the VDP's memories as they stand, for dumps: 0 VRAM, 1 CRAM, 2 VSRAM
+   (words in host byte order), 3 the registers */
+const void *md_vdp_memory(int which, size_t *bytes);
 uint16_t md_vdp_cram_value(unsigned index);
 uint16_t md_vdp_vsram_value(unsigned index);
 uint8_t md_vdp_code(void);

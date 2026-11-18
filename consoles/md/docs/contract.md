@@ -48,7 +48,10 @@ that returns to an address with no routine are fatal. The full rules are in
 with the new `nmd_cpu.usp`/`ssp` on an S-bit change), `nmd_restart` (native
 mode: drop the 68000's C frames and enter a routine), the Z80 alternate
 registers `a2 f2 b2 c2 d2 e2 h2 l2`, and untimed observation of memory:
-`nmd_work_ram`, `nmd_z80_ram`, and the script's `dump` (`.wram`, `.zram`).
+`nmd_work_ram`, `nmd_z80_ram`, and the script's `dump` (`.wram`, `.zram`;
+with nativekit 1.2 also `.vram`, `.cram`, `.vsram` and `.vdpreg`, the VDP's
+memories and its 24 registers, CRAM and VSRAM words in host byte order). The
+console reports its pads to the kit's recorder (`nk_console.held`).
 
 With `NMD_EXECUTION_HOST` (zero), `nmd_run_frame` only advances the hardware
 to the vertical blank and dispatches interrupts on its caller's stack, and a

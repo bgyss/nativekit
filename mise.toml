@@ -182,6 +182,11 @@ description = "The kit's own checks and its name check (the null build)"
 depends = ["build:null"]
 run = "cmake --build build/null --target kit-check"
 
+[tasks."test:session"]
+description = "The session tool (record, verify, extract) on the kit's session console"
+depends = ["build:null"]
+run = "cmake --build build/null --target kit_session_console && python3 tools/session/session_check.py build/null/kit/tests/kit_session_console"
+
 [tasks."test:consumer"]
 description = "A game as games use it: its own project, the repo root added as a subdirectory"
 run = "cmake -S consoles/snes/tests/consumer -B build/consumer -DNATIVESHVC=$PWD && cmake --build build/consumer -j8 && build/consumer/consumer --headless --frames 5"
