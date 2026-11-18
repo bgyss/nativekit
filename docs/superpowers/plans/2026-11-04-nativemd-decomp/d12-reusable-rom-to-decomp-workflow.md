@@ -1,6 +1,6 @@
 # D12: Prove reuse on a second ROM and document the operating workflow
 
-**Status:** Proposed; not executed. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
+**Status:** Started, 2026-11-16 (ahead of D11, on the owner's choice of second ROM). Second title: SHA-256 `48b280520c4f…eefef7`, 1,048,576 bytes, the owner's verified dump; its workspace and any C stay outside nativekit as the first title's do. The shared tools ran on it unchanged: a 900-frame no-input light capture, the intake and the rebuild gate, which reassembles the image byte for byte with its four uploaded programs. It differs where D12 asks it to: a 5,099-byte Z80 driver with 31 entries (the first title's is 303 bytes), a routine run from 68000 work RAM, and 48 unresolved computed transfers (the first title's: 1). Open: everything after the intake, and D11. Inherits the [shared execution contract](README.md#shared-execution-contract) and [full goal](GOAL.md).
 
 ## Objective
 
