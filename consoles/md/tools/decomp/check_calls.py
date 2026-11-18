@@ -212,6 +212,7 @@ def segmenter(routines, frame_number=lambda: 0):
     handlers = {M68K: [], Z80: []}      # stack depth at each open interrupt or exception
     open_pauses = {M68K: [], Z80: []}   # the pause record of each open handler
     following = {M68K: 0, Z80: 0}       # the next PC after the last instruction
+    retired = {M68K: {}, Z80: {}}  # last instruction event at each exception depth
     last_sequence = [0]                 # the last event read
     # the core reports one exception or interrupt at a time: one taken inside
     # another's handler takes the return event, and the outer RTE comes with
@@ -247,7 +248,8 @@ def segmenter(routines, frame_number=lambda: 0):
                 depth = len(handlers[cpu])
                 # the handler returns to the instruction after the last one that ran
                 pause = {"kind": "interrupt" if kind == 6 else "exception",
-                         "sequence": event["sequence"], "pc": following[cpu],
+                         "sequence": event["sequence"], "retired": retired[cpu].get(depth),
+                         "pc": following[cpu],
                          "state": state[cpu], "clock": clock[cpu], "end_sequence": None}
                 for frame in stack[cpu]:
                     frame.reasons.add("interrupt" if kind == 6 else "exception")
@@ -262,6 +264,7 @@ def segmenter(routines, frame_number=lambda: 0):
             stack[cpu].clear()
             handlers[cpu].clear()
         elif kind == 1:
+            retired[cpu][len(handlers[cpu])] = event["sequence"]
             before, after = state[cpu], payload["state"]
             frames = stack[cpu]
             looping = (before is not None and frames and frames[-1].address == event["pc"] and
@@ -326,7 +329,8 @@ def segmenter(routines, frame_number=lambda: 0):
         Z80 at the end of a run slice): each of its open calls paused there."""
         if state[cpu] is None:
             return
-        pause = {"kind": kind, "sequence": None, "pc": following[cpu],
+        pause = {"kind": kind, "sequence": None, "retired": retired[cpu].get(len(handlers[cpu])),
+                 "pc": following[cpu],
                  "state": state[cpu], "clock": clock[cpu], "end_sequence": None,
                  "boundary": last_sequence[0], "stop": stop}
         depth = len(handlers[cpu])

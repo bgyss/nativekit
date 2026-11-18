@@ -353,6 +353,7 @@ def _reference(args, scenario, routines, rom_size):
                             "span": (pause["sequence"], pause["end_sequence"])
                             if pause["kind"] in ("interrupt", "exception") else None,
                             # the events up to the pause: a frame's last, or the interrupt
+                            "retired": pause["retired"],
                             "boundary": pause.get("boundary") or pause["sequence"]}
                            for pause in call.pauses],
                 "exit_sequence": call.exit_sequence,
@@ -427,7 +428,11 @@ def _reference(args, scenario, routines, rom_size):
             row["syncs"] = [clock for _, clock in inside]
             # the syncs the original made before each pause, in event order: a sync at
             # a frame's last clock can belong to the next frame
+            previous_retired = None
             for pause in row["pauses"]:
+                retired = pause.pop("retired")
+                pause["advanced"] = previous_retired is not None and retired != previous_retired
+                previous_retired = retired
                 pause["syncs_before"] = sum(1 for sequence, _ in inside
                                             if sequence <= pause["boundary"])
         leftover = arrivals[position:]
@@ -459,7 +464,7 @@ def _pause_point(cpu, pause):
                       (c.c_uint32 * 8)(*[registers["d%d" % i] for i in range(8)]),
                       (c.c_uint32 * 8)(*[registers["a%d" % i] for i in range(8)]),
                       registers["sr"] & 0x1F, 1 if pause["kind"] == "exception" else 0,
-                      pause["syncs_before"], (c.c_uint32 * 3)())
+                      pause["syncs_before"], (c.c_uint32 * 3)(int(pause["advanced"]), 0, 0))
 
 
 def _is_trap(image, pc):
