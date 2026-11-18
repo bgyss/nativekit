@@ -6,11 +6,14 @@
 typedef struct {
     uint64_t elapsed_tenths;
     uint64_t next_frame_irq_tenths;
+    uint64_t next_length_clock_tenths;
     uint8_t frame_irq_flag;
     uint8_t frame_irq_inhibit;
     uint8_t five_step_mode;
     uint8_t frame_irq_set_this_tick;
     uint8_t channel_enable;
+    uint8_t length_counter[4];
+    uint8_t length_halt[4];
     uint8_t registers[0x14];
 } nnes_apu;
 

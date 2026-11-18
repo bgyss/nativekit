@@ -83,6 +83,49 @@ static void test_frame_irq_inhibit(void)
     nnes_destroy(console);
 }
 
+static void test_length_counter_status_and_disable(void)
+{
+    nnes *console = create_console();
+    uint8_t value = 0;
+
+    OK(nnes_write(console, 0x4015, 0x07));
+    OK(nnes_write(console, 0x4003, 0x08));
+    OK(nnes_write(console, 0x4007, 0x10));
+    OK(nnes_write(console, 0x400b, 0x00));
+    OK(nnes_read(console, 0x4015, &value));
+    CHECK(value == 0x07);
+
+    OK(nnes_write(console, 0x4015, 0x05));
+    OK(nnes_read(console, 0x4015, &value));
+    CHECK(value == 0x05);
+
+    nnes_destroy(console);
+}
+
+static void test_length_counter_half_frame_clock_and_halt(void)
+{
+    nnes *console = create_console();
+    uint8_t value = 0;
+
+    OK(nnes_write(console, 0x4017, 0x40));
+    OK(nnes_write(console, 0x4015, 0x01));
+    OK(nnes_write(console, 0x4003, 0x00));
+    OK(nnes_charge_cpu_cycles(console, 10 * 14913));
+    OK(nnes_read(console, 0x4015, &value));
+    CHECK(value == 0x00);
+    nnes_destroy(console);
+
+    console = create_console();
+    OK(nnes_write(console, 0x4017, 0x40));
+    OK(nnes_write(console, 0x4015, 0x01));
+    OK(nnes_write(console, 0x4000, 0x20));
+    OK(nnes_write(console, 0x4003, 0x00));
+    OK(nnes_charge_cpu_cycles(console, 10 * 14913));
+    OK(nnes_read(console, 0x4015, &value));
+    CHECK(value == 0x01);
+    nnes_destroy(console);
+}
+
 static void test_sound_driver_register_writes(void)
 {
     apu_write_trace trace = {0};
@@ -151,6 +194,8 @@ int main(void)
 {
     test_frame_irq_read_clear_and_open_bus();
     test_frame_irq_inhibit();
+    test_length_counter_status_and_disable();
+    test_length_counter_half_frame_clock_and_halt();
     test_sound_driver_register_writes();
     test_write_only_register_reads_use_cpu_open_bus();
     test_absolute_indexed_apu_store_seeds_operand_open_bus();
