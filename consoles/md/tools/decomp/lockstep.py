@@ -36,10 +36,12 @@ import bisect
 import ctypes as c
 import hashlib
 import json
+import marshal
 import pathlib
 import pickle
 import sys
 import time
+import tempfile
 
 TOOLS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS))
@@ -760,6 +762,39 @@ def _hybrid(args, scenario, routines, rom_size, reference):
     }
 
 
+def _reference_schedule(args, scenario, routines, rom_size):
+    if args.reference_cache is None:
+        return _reference(args, scenario, routines, rom_size)
+    cache = pathlib.Path(args.reference_cache)
+    cache.mkdir(parents=True, exist_ok=True)
+    sources = sorted(TOOLS.glob("*.py"))
+    identity = [sorted(routines), args.frames, args.inspect_frame, sys.version,
+                [_sha256(path) for path in (args.core, args.rom, args.scenario, *sources)]]
+    key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+    path = cache / (key + ".schedule")
+    if path.exists():
+        with path.open("rb") as stream:
+            digest = stream.read(32)
+            if hashlib.file_digest(stream, "sha256").digest() == digest:
+                stream.seek(32)
+                return marshal.load(stream)
+    schedule = _reference(args, scenario, routines, rom_size)
+    with tempfile.NamedTemporaryFile(dir=cache, delete=False) as stream:
+        temporary = pathlib.Path(stream.name)
+    try:
+        with temporary.open("w+b") as stream:
+            stream.write(bytes(32))
+            marshal.dump(schedule, stream)
+            stream.seek(32)
+            digest = hashlib.file_digest(stream, "sha256").digest()
+            stream.seek(0)
+            stream.write(digest)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return schedule
+
+
 def _worker(args):
     scenario = runner._validate_scenario(
         json.loads(pathlib.Path(args.scenario).read_text()), args.frames)
@@ -770,7 +805,7 @@ def _worker(args):
     out = pathlib.Path(args.out)
     if args.worker == "reference":
         with (out / "reference.pickle").open("wb") as stream:
-            pickle.dump(_reference(args, scenario, routines, rom_size), stream)
+            pickle.dump(_reference_schedule(args, scenario, routines, rom_size), stream)
     else:
         with (out / "reference.pickle").open("rb") as stream:
             reference = pickle.load(stream)
@@ -782,7 +817,7 @@ def _sha256(path):
     return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
 
 
-def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout=600, inspect_frame=None):
+def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout=600, inspect_frame=None, reference_cache=None):
     """Both runs; return (and write) the lockstep report."""
     out = pathlib.Path(out)
     out.mkdir(parents=True, exist_ok=True)
@@ -810,6 +845,8 @@ def run(core, rom, scenario, frames, library, out, hybrid_scenario=None, timeout
         command = [sys.executable, str(pathlib.Path(__file__).resolve()), "--worker", worker,
                    "--core", str(core), "--rom", str(rom), "--scenario", str(worker_scenario),
                    "--frames", str(frames), "--library", str(library), "--out", str(out)]
+        if reference_cache is not None:
+            command.extend(["--reference-cache", str(reference_cache)])
         if inspect_frame is not None:
             command.extend(["--inspect-frame", str(inspect_frame)])
         child = runner.supervise_child(command, max(remaining, 0.001))
@@ -865,6 +902,7 @@ def main(argv=None):
     parser.add_argument("--out", required=True)
     parser.add_argument("--hybrid-scenario", help="another scenario for the hybrid run (a control)")
     parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--reference-cache", help="reuse original schedules in this local directory")
     parser.add_argument("--inspect-frame", type=int, help="compare RAM words at this frame while preserving the full schedule")
     parser.add_argument("--worker", choices=("reference", "hybrid"), help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -875,7 +913,7 @@ def main(argv=None):
             sys.exit("lockstep: " + str(exc))
         return
     report = run(args.core, args.rom, args.scenario, args.frames, args.library, args.out,
-                 args.hybrid_scenario, args.timeout, args.inspect_frame)
+                 args.hybrid_scenario, args.timeout, args.inspect_frame, args.reference_cache)
     print(summary(report))
     sys.exit(0 if report["verdict"] == "IDENTICAL" else 1)
 
