@@ -210,3 +210,7 @@ run = "cmake --build build/null --target snes-upstream-check"
 [tasks."test:decomp"]
 description = "Run synthetic MD recovery, NES foundation and actual-core NES capture checks"
 depends = ["test:md-decomp", "test:nes", "test:nes-capture"]
+
+[tasks."qualify:decomp"]
+description = "Run scenario-scoped private MD lockstep or Dragon Warrior Start bus equality"
+run = "python3 tools/qualify_decomp.py"
