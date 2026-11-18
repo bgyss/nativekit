@@ -443,6 +443,9 @@ nnes_result nnes_rd8_discard(nnes *console, uint16_t address);
  * while native-work profile weights and access-count statistics are skipped. */
 nnes_result nnes_rd8_dummy(nnes *console, uint16_t address);
 nnes_result nnes_wr8_dummy(nnes *console, uint16_t address, uint8_t value);
+/* Instruction operand fetch at an explicit address. It advances one base
+ * cycle and updates the CPU open bus, without native-work profile accounting. */
+nnes_result nnes_rd8_operand(nnes *console, uint16_t address, uint8_t *value);
 /* Dummy read at cpu.pc+1 for a one-byte implied or accumulator instruction;
  * cpu.pc points to that instruction's opcode. */
 nnes_result nnes_dummy_next_pc(nnes *console);
@@ -498,6 +501,13 @@ nnes_result nnes_interrupt_checkpoint(nnes *console, int *delivered);
  * original value as an unprofiled dummy write, then the modified data write,
  * and closes the pair. */
 nnes_result nnes_rd8_rmw(nnes *console, uint16_t address, uint8_t *value);
+/* Same ordered RMW read, with a per-access cost override for the read half.
+ * The matching nnes_wr8_rmw still emits the original-value dummy write and
+ * modified-value data write. The override applies only while CPU costs are
+ * enabled; the base cycle and RMW-pair metadata are preserved. */
+nnes_result nnes_rd8_rmw_with_profile_cost(
+    nnes *console, uint16_t address, uint8_t *value,
+    uint64_t profile_cost_tenths);
 nnes_result nnes_wr8_rmw(nnes *console, uint16_t address, uint8_t value);
 /* Indexed RMW forms always make the addressing dummy read before the data
  * read, regardless of page crossing. Finish with nnes_wr8_rmw at the resolved
@@ -608,8 +618,8 @@ typedef nnes_result (*nnes_ready_fn)(nnes *console, void *ctx, int *ready);
  * callback's bus sequence. A poll callback may call
  * nnes_interrupt_checkpoint between machine instructions to expose an earlier
  * safe boundary. waited_tenths is exact elapsed CPU time in tenths
- * of a cycle. This clocks the basic PPU and APU frame-status models, not APU
- * channel state. */
+ * of a cycle. This clocks the basic PPU, APU frame status, and approximate
+ * length counters, but not channel waveforms or audio output. */
 nnes_result nnes_wait_until(nnes *console, nnes_ready_fn ready, void *ctx,
                             uint64_t poll_tenths, uint64_t *waited_tenths);
 

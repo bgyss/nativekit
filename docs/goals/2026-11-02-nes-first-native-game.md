@@ -14,7 +14,7 @@ evidence. A plan or additional convenience helpers alone do not achieve it.
 
 ## Restart baseline and first actions
 
-**Current execution goal, updated 2026-11-14.** Resume the existing Dragon
+**Current execution goal, updated 2026-11-15.** Resume the existing Dragon
 Warrior (USA) (Rev A) recovery. Do not restart title selection or treat the
 reference-capture infrastructure as the finished native game.
 
@@ -55,13 +55,77 @@ existing evidence, including values and timestamps. A new 120-frame no-input
 profile recorded 2,620,456 typed callbacks and normalized successfully.
 These are reference capture continuity checks, not native-game parity.
 
-The private ledger currently reports incomplete PPU rendering, APU channels,
-DMC DMA, host/frame execution, battery persistence and later gameplay. Its next
-work starts at the Start route through `$BD17`, the repeated `$BCCF` controller
-poll, measured `$FF78`/`$FF7A` NMI return differences, and alternate `$FD00`.
-Re-read the current ledger and code before choosing the next slice; newer
-committed title work takes precedence over this snapshot. Preserve bank-aware
-routine identities and the existing SAROM adapter.
+The private ledger still reports incomplete PPU rendering, APU channels, DMC
+DMA, host/frame execution, battery persistence and gameplay. The native input
+provider now samples upcoming frames at NTSC scanline 241, cycle 0, matching
+MesenCE's default input scanline; a fresh headless capture measured those
+callbacks within six CPU cycles. `nnes` now sets sprite-0 hit from opaque
+background/sprite overlap while rendering remains unimplemented.
+
+A fresh 40-frame two-Start run still matches all 1,550 typed bus operations
+from the second `$BDB4` entry through fixed-bank `$C9F5`; the `$FCDB` SP and
+12-byte `$C9F5` stack window match Mesen. The 9,897-operation route through
+`$CA08` matches after one extra native `$FF78` poll pair before NMI; NMI entry
+is 2.4 cycles later. The `$C9F5`, `$FC98`, and `$FCAD` phases are within 0.5,
+1.9, and 0.4 cycles of Mesen, and the `$CA08` stack matches. The native route
+continues through `$F678/$F842/$FC4D`, `$C17A`, and `$C1B9`. The `$C17A` entry
+stack/registers match, and the first fill continuation matches 12,111 typed
+bus events through the `$C1C8` return after aligning one reference poll pair.
+The standalone `$C1B9` call matches 2,910 bus events and 8,824 cycles; its
+entry is 3.3 cycles from Mesen. F842's final wait and BRK signature `$01`
+dispatch through `$FD3A/$FCBD/$FCEC` to bank-0 `$AA7E`. The full C17A-to-AA7E
+route matches 29,904 bus events across three aligned NMI boundaries, with one
+reference poll pair at the first wait and two/four native pairs at the later
+waits. `$AA7E`'s nine bus events, 36-cycle duration, and stack/register state
+match; four route-local dispatch-table read overrides bring its entry to 4.5
+cycles later, inside the ±12-cycle bound.
+
+Fixed-bank `$C529-$C55A` is now recovered as byte-exact assembly and native C.
+The headless MesenCE route contains 166,341 bus events and sixteen NMI
+boundaries; native execution returns through `$FCDB` and reaches missing
+`$F6F4`. C529 entry and F6F4 exit stack/register snapshots match. The RTS
+dummy-read boundary differs by 0.1 cycles, the full C529-to-F6F4 span by four
+cycles, and the F6F4 boundary by 0.5 cycles. The comparator matches 17,821
+normalized bus events and reports the remaining 179 native wait-poll pairs,
+ten NMI return-PC differences, and five DMA alignment-count differences.
+
+The recovered F6F4 path resets the save-table state and calls the three-counter
+helper at `$F7B5`; its selected `$F859` branch enters `$F8A4`. The 2,712-event
+F6F4 route and its 6,962-cycle span match Mesen. `$F8A4` then follows BRK
+signature `$10` through `$C6F0` to physical-bank-1 address `$A194`. Its 122
+ordered bus events match; the 286-cycle Mesen span is 0.4 cycles longer than
+native, and the `$A194` stack/registers match with a 0.1-cycle boundary delta.
+The Mesen opcode `$20` and native mapper both identify physical PRG bank 1.
+Native C recovers the selected `$A194` call to `$AEE1`, then `$A197` through
+`$A19B`, `$A1B1`, `$A1D0`, `$A823`, `$A1B4`, and `$A1E4` to missing internal
+continuation `$A1B7`. The 32-event `$A194->$A197` and nine-event
+`$A197->$A1B1` routes match; their boundaries are 5.9 and 7.9 cycles early,
+with matching stack/register snapshots. The 34-event `$A1B1->$A1B4` route
+matches over 70 cycles exactly; `$A1B4->$A1B7` matches 55 events over 128
+cycles exactly. `$A1B7` stack/registers match at a 7.9-cycle early boundary.
+The selected `$A823` pointer lookup reads `$A830/$A831`, producing pointer
+`$AF6C`. `$A1B7` begins with `JSR $A230`; that routine and alternate
+`$A1E4/$AEE1` state branches remain open. F6F4's alternate sound-selection
+branch also remains open. The NES machine interface now has
+`nnes_rd8_rmw_with_profile_cost`, which overrides the RMW read-half cost while
+preserving the paired dummy/final writes; the bus-operation contract checks
+its timing, classification, disabled-cost, and open-pair behavior. Assembly
+fragments now total 2,261 byte-exact bytes, but the complete bank/image
+reconstruction is still open.
+
+The second Start read is 102.1 cycles later natively within its 128-cycle
+bound. `$81B8` is an internal branch in bank-1 `$81A0`, not a missing routine.
+The tested `$BD36` branch clears OAM while `$93 == $FF`; its active animation
+stream remains uncompared. Continue from the private ledger, preserving
+bank-aware routine identities and the SAROM adapter. Recover the bank-1
+`$A1B7->$A230` continuation, then expand menu handling, alternate `$A1E4/$AEE1`
+states, and the active animation branch. Alternate `$FD00`, rendering, audio,
+and gameplay remain open.
+
+The pinned MesenCE 120-frame no-input profile has 139.44-cycle gap RMSE,
++1.04% mean bias, and 2.80% p95 absolute relative error. A 40-frame Start
+profile and a combined 160-window fit remain exploratory and are not promoted;
+their activity mix does not support one title-wide access profile.
 
 Maintain independent platform and game commits. Recovered game source belongs
 only in the private title repository. A thread touching both repositories needs
