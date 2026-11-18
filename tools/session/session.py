@@ -254,7 +254,7 @@ def cmd_record(args):
     }
     (out / "session.json").write_text(json.dumps(meta, indent=2) + "\n")
     print("session: recording to %s (F1 counter, F5 mark, F6/F7 range, F9 pause, F10 step)" % out)
-    r = subprocess.run([str(copy)] + args.command[1:] + ["--record", str(out)])
+    r = subprocess.run([str(copy)] + args.command[1:] + ["--record", str(out), "--poll-log", str(out / "polls.bin")])
     head, frames = read_log(out / "frames.log")
     meta["console"] = head.get("console", ["?"])[0]
     meta["frames"] = len(frames)

@@ -70,6 +70,24 @@ def record(d, events, env=None):
     return rec
 
 
+with tempfile.TemporaryDirectory() as poll_dir:
+    polls = os.path.join(poll_dir, "polls.bin")
+    script = os.path.join(poll_dir, "input.nks")
+    with open(script, "w") as stream:
+        stream.write("hold A 3\nwait 3\n")
+    recorded = os.path.join(poll_dir, "record.log")
+    replayed = os.path.join(poll_dir, "replay.log")
+    run(["--headless", "--frames", "6", "--script", script,
+         "--poll-log", polls, "--frame-log", recorded])
+    run(["--headless", "--frames", "6", "--replay-polls", polls, "--frame-log", replayed])
+    if [x[2] for x in log_lines(recorded)] != [x[2] for x in log_lines(replayed)]:
+        fail("poll-indexed replay changed a picture")
+    with open(polls, "r+b") as stream:
+        stream.seek(4)
+        stream.write(bytes([1]))
+    run(["--headless", "--frames", "6", "--replay-polls", polls], expect=70)
+
+
 EVENTS = [
     (10, A, 1), (20, B, 1), (25, B, 0), (30, F5, 1), (30, F5, 0), (40, A, 0),
     (60, F6, 1), (70, F7, 1), (80, F1, 1),

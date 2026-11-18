@@ -15,6 +15,7 @@
 #include "nk/host.h"
 #include "nk/input.h"
 #include "nk/nk.h"
+#include "nk/session.h"
 
 void nk_fatal(const char *fmt, ...)
 {
@@ -46,7 +47,9 @@ static void run_frame(void)
     state ^= state << 13;
     state ^= state >> 17;
     state ^= state << 5;
-    state += players[0] * 7u + players[1] * 131u;
+    uint32_t first = nk_session_poll(0, players[0]);
+    uint32_t second = nk_session_poll(1, players[1]);
+    state += first * 7u + second * 131u;
     if (nondet)
         state += (uint32_t)(host_ticks_ns() >> 10);
     frames++;

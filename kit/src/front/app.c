@@ -680,6 +680,12 @@ int nk_main(const nk_console *con, const void *cart, int argc, char **argv)
             out_dir = argv[++i];
         else if (!strcmp(argv[i], "--record") && i + 1 < argc)
             record = argv[++i];
+        else if (!strcmp(argv[i], "--poll-log") || !strcmp(argv[i], "--replay-polls")) {
+            int replay = !strcmp(argv[i], "--replay-polls");
+            if (++i >= argc)
+                nk_fatal("poll recording or replay requires a path");
+            nk_session_polls_open(argv[i], replay);
+        }
         else if (!strcmp(argv[i], "--frame-log") && i + 1 < argc)
             frame_log = argv[++i];
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc)

@@ -91,3 +91,13 @@ It covers record, marks, verify (a true play, and a dropped input change found
 at its frame), extract (each PNG decoded and hashed back to the play's picture
 hash, the WAV's exact samples, the dumps), and the refusal of a changed binary
 or environment file.
+
+## Controller reads
+
+On a poll-aware native console, recording also writes `polls.bin`. Each
+record describes the buttons available when the game read a controller port.
+To replay those reads directly, use `--headless --frames N --replay-polls
+SESSION/polls.bin` on the game. For a scripted capture add `--poll-log FILE`
+to the original headless command. A missing poll or unexpected player stops
+replay. Replaying a prefix consumes just the records needed for that run.
+Older binaries can record frame input without producing this stream.

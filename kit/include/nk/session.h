@@ -52,6 +52,10 @@ extern "C" {
 /* before the machine powers on: record (windowed) into dir, and/or the
    frame log in log (either NULL) */
 void nk_session_open(const nk_console *c, const char *dir, const char *log, int headless);
+/* Each electrical pad read records or consumes a zero-based player and raw
+   controller mask. The binary layout is "NKP1" then (u8 player, u32le mask). */
+void nk_session_polls_open(const char *path, int replay);
+uint32_t nk_session_poll(unsigned player, uint32_t mask);
 /* 1 while the recorder's pause holds the machine (no frame is due) */
 int  nk_session_holding(void);
 /* around each frame the machine runs; samples: the sound file's stereo
